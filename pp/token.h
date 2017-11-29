@@ -1,9 +1,7 @@
 #ifndef WASMCC_PP_TOKEN_DEF
 #define WASMCC_PP_TOKEN_DEF
 
-#include <string>
-
-enum PPTokenType{
+typedef enum {
 	PPHead,
 	PPIdent,
 	PPNum,
@@ -13,13 +11,12 @@ enum PPTokenType{
 	PPOther,
 	PPNewLine,
 	PPCatNewLine
-};
+} PPTokenType;
 
-class PPToken{
-public:
+typedef struct {
 	PPTokenType type;
-	std::string str;
+	char *str;
 	unsigned int line;
 	unsigned int pos;
-};
+} PPToken;
 #endif // !WASMCC_PP_TOKEN_DEF
