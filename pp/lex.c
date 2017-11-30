@@ -14,20 +14,293 @@
 
 #include "lex.h"
 
-static PPToken *nextToken(){
+// Private other token
+static PPToken *otherToken(PPLexer *this){
+	PPToken *newToken = (PPToken *)malloc(sizeof(PPToken));
+	char *begin = this->cur;
+	this->cur = memchr(this->cur, '\n', this->codeSize - (this->cur - this->code));
+	if(!this->cur){
+		this->cur = this->code + this->codeSize;
+	}
+	newToken->type = PPOther;
+	newToken->line = this->curLine;
+	newToken->pos = this->curPos;
+	size_t strSize = this->cur - begin;
+	newToken->str = (char *)calloc(strSize + 1, sizeof(char));
+	memcpy(newToken->str, begin, strSize);
+	this->curPos += strSize;
+	return newToken; 
+}
+
+// Private header-name token
+static PPToken *headerNameToken(PPLexer *this){
+	// Get token string
+	char *begin = this->cur;
+	char nextChr = *(++this->cur);
+	for(; nextChr != '>' && nextChr != '\n' && (this->cur - this->code <= this->codeSize); nextChr = *(++this->cur));
+	if(nextChr != '>'){
+		fprintf(stderr, "[Wasmcpp Lexer]%u:%u Error: Expecting '>' in header file name.", this->curLine, this->curPos);
+		return NULL;
+	}
+	// Alloc token
+	PPToken *newToken = (PPToken *)malloc(sizeof(PPToken));
+	newToken->type = PPHead;
+	newToken->line = this->curLine;
+	newToken->pos = this->curPos;
+	size_t strSize = this->cur - begin;
+	newToken->str = (char *)calloc(strSize, sizeof(char));
+	memcpy(newToken->str, begin, strSize);
+	this->cur += 1;
+	return newToken; 
+}
+
+// Private punctuator token
+static PPToken *puncToken(PPLexer *this){
+	// Save cur
+	char *cur = this->cur;
+	unsigned int curSize = this->cur - this->code;
+	char *puncStr = NULL;
+	// Check punctuator
+	switch(*cur){
+		// One-state
+		case '[':
+		case ']':
+		case '(':
+		case ')':
+		case '{':
+		case '}':
+		case '~':
+		case '?':
+		case ';':
+		case ',':
+			puncStr = (char *)calloc(2, sizeof(char));
+			puncStr[0] = *cur++;
+		break;
+		// Two-states
+		case '*':
+		case '!':
+		case '/':
+		case '=':
+		case '^':
+			if((curSize + 1 <= this->codeSize) && (cur[1] == '=')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = cur[0];
+				puncStr[1] = '=';
+				cur += 2;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = *cur++;
+			}
+		break;
+		case '.':
+			if((curSize + 2 <= this->codeSize) && (cur[1] == '.' && cur[2] == '.')){
+				puncStr = (char *)calloc(4, sizeof(char));
+				puncStr[0] = '.';
+				puncStr[1] = '.';
+				puncStr[2] = '.';
+				cur += 3;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = '.';
+				cur++;
+			}
+		break;
+		case '#':
+			if((curSize + 1 <= this->codeSize) && (cur[1] == '#')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = '#';
+				puncStr[1] = '#';
+				cur += 2;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = '#';
+				cur++;
+			}
+		break;
+		case ':':
+			if((curSize + 1 <= this->codeSize) && cur[1] == '>'){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = ':';
+				puncStr[1] = '>';
+				cur += 2;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = ':';
+				cur++;
+			}
+		break;
+		// Three-states
+		case '+':
+		case '&':
+		case '|':
+			if((curSize + 1 <= this->codeSize) && (cur[0] == cur[1] || cur[1] == '=')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = cur[0];
+				puncStr[1] = cur[1];
+				cur += 2;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = *cur++;
+			}
+		break;
+		case '-':
+			if((curSize + 1 <= this->codeSize) && (cur[1] == '-' || cur[1] == '=' || cur[1] == '>')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = cur[0];
+				puncStr[1] = cur[1];
+				cur += 2;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = *cur++;
+			}
+		break;
+		case '<':
+			if((curSize + 1 <= this->codeSize) && (cur[1] == '=' || cur[1] == ':' || cur[1] == '%')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = '<';
+				puncStr[1] = cur[1];
+				cur += 2;
+			}else if((curSize + 1 <= this->codeSize) && (cur[1] == '<')){
+				if((curSize + 2 <= this->codeSize) && (cur[2] == '=')){
+					puncStr = (char *)calloc(4, sizeof(char));
+					puncStr[0] = '<';
+					puncStr[1] = '<';
+					puncStr[2] = '=';
+					cur += 3;
+				}else{
+					puncStr = (char *)calloc(3, sizeof(char));
+					puncStr[0] = '<';
+					puncStr[1] = '<';
+					cur += 2;
+				}
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = '<';
+				cur++;
+			}
+		break;
+		case '>':
+			if((curSize + 1 <= this->codeSize) && (cur[1] == '=')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = '>';
+				puncStr[1] = '=';
+				cur += 2;
+			}else if((curSize + 1 <= this->codeSize) && (cur[1] == '>')){
+				if((curSize + 2 <= this->codeSize) && (cur[2] == '=')){
+					puncStr = (char *)calloc(4, sizeof(char));
+					puncStr[0] = '>';
+					puncStr[1] = '>';
+					puncStr[2] = '=';
+					cur += 3;
+				}else{
+					puncStr = (char *)calloc(3, sizeof(char));
+					puncStr[0] = '>';
+					puncStr[1] = '>';
+					cur += 2;
+				}
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = '>';
+				cur++;
+			}
+		break;
+		case '%':
+			if((curSize + 1 <= this->codeSize) && (cur[1] == '=' || cur[1] == ':' || cur[1] == '>')){
+				puncStr = (char *)calloc(3, sizeof(char));
+				puncStr[0] = '%';
+				puncStr[1] = cur[1];
+				cur += 2;
+			}else if((curSize + 3 <= this->codeSize) && (cur[0] == cur[2]) && (cur[1] == ':') && (cur[3] == ':')){
+				puncStr = (char *)calloc(5, sizeof(char));
+				puncStr[0] = '%';
+				puncStr[1] = ':';
+				puncStr[2] = '%';
+				puncStr[3] = ':';
+				cur += 4;
+			}else{
+				puncStr = (char *)calloc(2, sizeof(char));
+				puncStr[0] = '%';
+				cur++;
+			}
+		break;
+		default:
+		break;
+	}
+	// Allocate token
+	if(puncStr){
+		PPToken *newToken = (PPToken *)malloc(sizeof(PPToken));
+		newToken->type = PPPunct;
+		newToken->line = this->curLine;
+		newToken->pos = this->curPos;
+		newToken->str = puncStr;
+		this->cur = cur;
+		return newToken;
+	}
 	return NULL;
 }
 
+// Public
+static PPToken *nextToken(PPLexer *this){
+	// Check if EOF
+	if((this->cur - this->code) >= this->codeSize){
+		return NULL;
+	}
+	// Skip Whitespace
+	while(isspace(*this->cur)){
+		if(*this->cur == '\n'){
+			this->curPos = 0;
+			this->curLine += 1;
+		}else{
+			++this->curPos;
+		}
+		++this->cur;
+	}
+
+	// Get token
+	switch(*this->cur){
+		default:
+		break;
+	}
+	PPToken *punc = puncToken(this);
+	if(punc){
+		return punc;
+	}else{
+		return otherToken(this);
+	}
+}
+
+// Public destructor
 void freePPLexer(PPLexer **lexer){
-	if(lexer != NULL){
+	if(lexer){
+		free((*lexer)->filename);
 		free((*lexer)->code);
 		free(*lexer);
 		*lexer = NULL;
 	}
 }
 
+// Public constructor
 PPLexer *initPPLexer(const char *fileName){
+	// Open file
+	FILE *fin = fopen(fileName, "rb");
+	if(!fin){
+		perror("[Wasmcpp lexer]");
+		return NULL;
+	}
+	// Allocate lexer
 	PPLexer *lexer = (PPLexer *)malloc(sizeof(PPLexer));
 	lexer->nextToken = nextToken;
+	lexer->curLine = 1;
+	lexer->curPos = 0;
+	lexer->filename = (char *)calloc(strlen(fileName) + 1, sizeof(char));
+	memcpy(lexer->filename, fileName, strlen(fileName));
+	// Read file
+	fseek(fin, 0, SEEK_END);
+	lexer->codeSize = ftell(fin);
+	fseek(fin, 0, SEEK_SET);
+	lexer->code = (char *)malloc(lexer->codeSize);
+	fread(lexer->code, 1, lexer->codeSize, fin);
+	fclose(fin);
+	lexer->cur = lexer->code;
 	return lexer;
 }

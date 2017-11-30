@@ -8,9 +8,7 @@ typedef enum {
 	PPChar,
 	PPStr,
 	PPPunct,
-	PPOther,
-	PPNewLine,
-	PPCatNewLine
+	PPOther
 } PPTokenType;
 
 typedef struct {
@@ -19,4 +17,7 @@ typedef struct {
 	unsigned int line;
 	unsigned int pos;
 } PPToken;
+
+void freePPToken(PPToken **token);
+
 #endif // !WASMCC_PP_TOKEN_DEF
