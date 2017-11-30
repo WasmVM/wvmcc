@@ -15,7 +15,7 @@
 #include "lex.h"
 
 // Private other token
-static PPToken *otherToken(PPLexer *this){
+static PPToken * otherToken(PPLexer *this){
 	PPToken *newToken = (PPToken *)malloc(sizeof(PPToken));
 	char *begin = this->cur;
 	this->cur = memchr(this->cur, '\n', this->codeSize - (this->cur - this->code));
@@ -29,28 +29,6 @@ static PPToken *otherToken(PPLexer *this){
 	newToken->str = (char *)calloc(strSize + 1, sizeof(char));
 	memcpy(newToken->str, begin, strSize);
 	this->curPos += strSize;
-	return newToken; 
-}
-
-// Private header-name token
-static PPToken *headerNameToken(PPLexer *this){
-	// Get token string
-	char *begin = this->cur;
-	char nextChr = *(++this->cur);
-	for(; nextChr != '>' && nextChr != '\n' && (this->cur - this->code <= this->codeSize); nextChr = *(++this->cur));
-	if(nextChr != '>'){
-		fprintf(stderr, "[Wasmcpp Lexer]%u:%u Error: Expecting '>' in header file name.", this->curLine, this->curPos);
-		return NULL;
-	}
-	// Alloc token
-	PPToken *newToken = (PPToken *)malloc(sizeof(PPToken));
-	newToken->type = PPHead;
-	newToken->line = this->curLine;
-	newToken->pos = this->curPos;
-	size_t strSize = this->cur - begin;
-	newToken->str = (char *)calloc(strSize, sizeof(char));
-	memcpy(newToken->str, begin, strSize);
-	this->cur += 1;
 	return newToken; 
 }
 
@@ -239,13 +217,8 @@ static PPToken *puncToken(PPLexer *this){
 	return NULL;
 }
 
-// Public
-static PPToken *nextToken(PPLexer *this){
-	// Check if EOF
-	if((this->cur - this->code) >= this->codeSize){
-		return NULL;
-	}
-	// Skip Whitespace
+// Private trim whitespace
+static void trimSpace(PPLexer *this){
 	while(isspace(*this->cur)){
 		if(*this->cur == '\n'){
 			this->curPos = 0;
@@ -255,12 +228,43 @@ static PPToken *nextToken(PPLexer *this){
 		}
 		++this->cur;
 	}
+}
 
-	// Get token
-	switch(*this->cur){
-		default:
-		break;
+// Public
+static PPToken *nextToken(PPLexer *this){
+	// Check if EOF
+	if((this->cur - this->code) >= this->codeSize){
+		return NULL;
 	}
+
+	// Trim space before comment
+	trimSpace(this);
+
+	// Skip line comment
+	while(this->cur[0] == '/' && this->cur[1] == '/'){
+		while(*(this->cur++) != '\n');
+		trimSpace(this);
+	}
+
+	// Skip block comment
+	while(this->cur[0] == '/' && this->cur[1] == '*'){
+		for(this->cur += 2; (this->cur[0] != '*') || (this->cur[1] != '/'); ++this->cur);
+		this->cur += 2;
+		trimSpace(this);
+	}
+
+	char firstCh = *this->cur;
+	
+	if(isalpha(firstCh) || firstCh == '_'){ // Identifier
+		
+	}else if(firstCh == '\''){ // Character-constant
+
+	}else if(firstCh == '\"'){ // String-literal
+
+	}else if(isdigit(firstCh)){ // pp-number (digit only)
+		
+	}
+	// Punctuator and other
 	PPToken *punc = puncToken(this);
 	if(punc){
 		return punc;

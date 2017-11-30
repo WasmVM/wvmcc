@@ -2,7 +2,6 @@
 #define WASMCC_PP_TOKEN_DEF
 
 typedef enum {
-	PPHead,
 	PPIdent,
 	PPNum,
 	PPChar,

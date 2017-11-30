@@ -26,8 +26,17 @@ int main(int argc, char *argv[]){
 	PPToken *tok = NULL;
 	while((tok = lexer->nextToken(lexer))){
 		switch (tok->type){
-			case PPHead:
-				printf("%u:%u <header-name> %s\n", tok->line, tok->pos, tok->str);
+			case PPIdent:
+				printf("%u:%u <identifier> %s\n", tok->line, tok->pos, tok->str);
+			break;
+			case PPNum:
+				printf("%u:%u <pp-number> %s\n", tok->line, tok->pos, tok->str);
+			break;
+			case PPChar:
+				printf("%u:%u <character-constant> %s\n", tok->line, tok->pos, tok->str);
+			break;
+			case PPStr:
+				printf("%u:%u <string-literal> %s\n", tok->line, tok->pos, tok->str);
 			break;
 			case PPOther:
 				printf("%u:%u <other> %s\n", tok->line, tok->pos, tok->str);
