@@ -21,22 +21,7 @@
 #include "stack.h"
 #include "fileInst.h"
 #include "ppDirective.h"
-
-int nextc(FileInst *fileInst){
-	char thisChar = fgetc(fileInst->fptr);
-	while(thisChar != EOF && thisChar == '\\'){
-		char next = fgetc(fileInst->fptr);
-		if(next == '\n'){
-			++fileInst->curline;
-			thisChar = fgetc(fileInst->fptr);
-		}else{
-			ungetc(next, fileInst->fptr);
-			thisChar = '\\';
-			break;
-		}
-	}
-	return thisChar;
-}
+#include "ErrorMsg.h"
 
 int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 	char thisChar;
@@ -54,18 +39,22 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						thisChar = nextc(fileInst);
 						switch(thisChar){
 							case 'd': // ifdef
+								return ppIfdef(fileInstPtr, fileStack, fout);
 							break;
 							case 'n': // ifndef
+								return ppIfndef(fileInstPtr, fileStack, fout);
 							break;
 							default: // if
+								return ppIf(fileInstPtr, fileStack, fout);
 							break;
 						}
 					break;
 					case 'n': // include
+						return ppIndlude(fileInstPtr, fileStack, fout);
 					break;
 					default: 
-						ungetc(thisChar, fileInst->fptr);
-						ungetc('i', fileInst->fptr);
+						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+						return -1;
 					break;
 				}
 			break;
@@ -75,43 +64,51 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						thisChar = nextc(fileInst);
 						switch(thisChar){
 							case 'i': // elif
+								return ppElif(fileInstPtr, fileStack, fout);
 							break;
 							case 's': // else
+								return ppElse(fileInstPtr, fileStack, fout);
 							break;
-							default: // other
-								ungetc(thisChar, fileInst->fptr);
-								ungetc('l', fileInst->fptr);
-								ungetc('e', fileInst->fptr);
+							default:
+								fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+								return -1;
 							break;
 						}
 					break;
 					case 'n': // endif
+						return ppEndif(fileInstPtr, fileStack, fout);
 					break;
 					case 'r': // error
+						return ppError(fileInstPtr, fileStack, fout);
 					break;
 					default: 
-						ungetc(thisChar, fileInst->fptr);
-						ungetc('e', fileInst->fptr);
+						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+						return -1;
 					break;
 				}
 			break;
 			case 'p': // pragma
+				return ppPragma(fileInstPtr, fileStack, fout);
 			break;
 			case 'd': // define
+				return ppDefine(fileInstPtr, fileStack, fout);
 			break;
 			case 'u': // undef
+				return ppUndef(fileInstPtr, fileStack, fout);
 			break;
 			case 'l': // line
+				return ppLine(fileInstPtr, fileStack, fout);
 			break;
 			default: 
-				ungetc(thisChar, fileInst->fptr);
+				fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+				return -1;
 			break;
 		}
 	}
 	return 0;
 }
 
-void scan(Stack *fileStack, FILE *fout){
+int scan(Stack *fileStack, FILE *fout){
 	FileInst *fileInst = NULL;
 	// Process file
 	while(stackPop(fileStack, (void **)&fileInst)){
@@ -144,6 +141,9 @@ void scan(Stack *fileStack, FILE *fout){
 			if((fileInst->lastChar == '\n') && (thisChar == '#')){
 				// Proprocessor line
 				if(parsePP(&fileInst, fileStack, fout)){
+					fileInstFree(&fileInst);
+					return -1;
+				}else{
 					fputc('\n', fout);
 					fileInst->lastChar = '\n';
 				}
@@ -160,6 +160,7 @@ void scan(Stack *fileStack, FILE *fout){
 		}
 		fileInstFree(&fileInst);
 	}
+	return 0;
 }
 
 int main(int argc, char *argv[]){
@@ -188,11 +189,15 @@ int main(int argc, char *argv[]){
 	Stack *fileStack = stackNew();
 	stackPush(fileStack, mainFile);
 // Process
-	scan(fileStack, fout);
+	int parseErr = scan(fileStack, fout);
 // Clean
 	// Close output
 	fclose(fout);
 	// Free stack
 	stackFree(&fileStack);
+	if(parseErr){
+		remove(argv[2]);
+		return -1;
+	}
 	return 0;
 }

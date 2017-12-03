@@ -35,3 +35,18 @@ void fileInstFree(FileInst **finst){
 	free(*finst);
 	*finst = NULL;
 }
+int nextc(FileInst *fileInst){
+	char thisChar = fgetc(fileInst->fptr);
+	while(thisChar != EOF && thisChar == '\\'){
+		char next = fgetc(fileInst->fptr);
+		if(next == '\n'){
+			++fileInst->curline;
+			thisChar = fgetc(fileInst->fptr);
+		}else{
+			ungetc(next, fileInst->fptr);
+			thisChar = '\\';
+			break;
+		}
+	}
+	return thisChar;
+}

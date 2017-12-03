@@ -15,5 +15,6 @@ typedef struct {
 
 FileInst *fileInstNew(char *fname);
 void fileInstFree(FileInst **finst);
+int nextc(FileInst *fileInst);
 
 #endif
