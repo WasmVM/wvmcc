@@ -20,27 +20,110 @@
 
 #include "stack.h"
 #include "fileInst.h"
+#include "ppDirective.h"
 
-void parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
+int nextc(FileInst *fileInst){
+	char thisChar = fgetc(fileInst->fptr);
+	while(thisChar != EOF && thisChar == '\\'){
+		char next = fgetc(fileInst->fptr);
+		if(next == '\n'){
+			++fileInst->curline;
+			thisChar = fgetc(fileInst->fptr);
+		}else{
+			ungetc(next, fileInst->fptr);
+			thisChar = '\\';
+			break;
+		}
+	}
+	return thisChar;
+}
+
+int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 	char thisChar;
 	FileInst *fileInst = *fileInstPtr;
 	// Trim leading space
-	while(isspace(thisChar = fgetc(fileInst->fptr)) && thisChar != '\n');
+	while(isspace(thisChar = nextc(fileInst)) && thisChar != '\n');
 	ungetc(thisChar, fileInst->fptr);
 	// Read char
-	while((thisChar = fgetc(fileInst->fptr)) != '\n'){
-		fputc(thisChar, stderr);
+	while((thisChar = nextc(fileInst)) != '\n'){
+		switch(thisChar){
+			case 'i': 
+				thisChar = nextc(fileInst);
+				switch(thisChar){
+					case 'f': 
+						thisChar = nextc(fileInst);
+						switch(thisChar){
+							case 'd': // ifdef
+							break;
+							case 'n': // ifndef
+							break;
+							default: // if
+							break;
+						}
+					break;
+					case 'n': // include
+					break;
+					default: 
+						ungetc(thisChar, fileInst->fptr);
+						ungetc('i', fileInst->fptr);
+					break;
+				}
+			break;
+			case 'e': 
+				switch(thisChar){
+					case 'l': 
+						thisChar = nextc(fileInst);
+						switch(thisChar){
+							case 'i': // elif
+							break;
+							case 's': // else
+							break;
+							default: // other
+								ungetc(thisChar, fileInst->fptr);
+								ungetc('l', fileInst->fptr);
+								ungetc('e', fileInst->fptr);
+							break;
+						}
+					break;
+					case 'n': // endif
+					break;
+					case 'r': // error
+					break;
+					default: 
+						ungetc(thisChar, fileInst->fptr);
+						ungetc('e', fileInst->fptr);
+					break;
+				}
+			break;
+			case 'p': // pragma
+			break;
+			case 'd': // define
+			break;
+			case 'u': // undef
+			break;
+			case 'l': // line
+			break;
+			default: 
+				ungetc(thisChar, fileInst->fptr);
+			break;
+		}
 	}
+	return 0;
 }
 
 void scan(Stack *fileStack, FILE *fout){
 	FileInst *fileInst = NULL;
+	// Process file
 	while(stackPop(fileStack, (void **)&fileInst)){
 		int thisChar;
-		while((thisChar = fgetc(fileInst->fptr)) != EOF){
+		while((thisChar = nextc(fileInst)) != EOF){
+			// New Line
+			if(thisChar == '\n'){
+				++fileInst->curline;
+			}
 			// Digraph
 			if(thisChar == '%'){
-				int nextChar = fgetc(fileInst->fptr);
+				int nextChar = nextc(fileInst);
 				if(nextChar == ':'){
 					thisChar = '#';
 				}else{
@@ -49,8 +132,8 @@ void scan(Stack *fileStack, FILE *fout){
 			}
 			// Trigraph
 			if(thisChar == '?'){
-				int nextChar = fgetc(fileInst->fptr);
-				int thirdChar = fgetc(fileInst->fptr);
+				int nextChar = nextc(fileInst);
+				int thirdChar = nextc(fileInst);
 				if(nextChar == '?' && thirdChar == '='){
 					thisChar = '#';
 				}else{
@@ -60,15 +143,17 @@ void scan(Stack *fileStack, FILE *fout){
 			}
 			if((fileInst->lastChar == '\n') && (thisChar == '#')){
 				// Proprocessor line
-				parsePP(&fileInst, fileStack, fout);
-				fputc('\n', fout);
-				fileInst->lastChar = '\n';
+				if(parsePP(&fileInst, fileStack, fout)){
+					fputc('\n', fout);
+					fileInst->lastChar = '\n';
+				}
 			}else{
 				// Normal
 				fputc(thisChar, fout);
 				fileInst->lastChar = thisChar;
 			}
 		}
+		// End processing this file
 		FileInst *topFile = NULL;
 		if(stackTop(fileStack, (void **)&topFile)){		
 			fprintf(fout, "\n# %u %s 2\n", topFile->curline, topFile->fname);

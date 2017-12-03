@@ -1,0 +1,53 @@
+digraph {
+	// Terminal State
+	"#" [color=red];
+	"#if" [color=red];
+	"#ifdef" [color=red];
+	"#ifndef" [color=red];
+	"#elif" [color=red];
+	"#else" [color=red];
+	"#endif" [color=red];
+	"#include" [color=red];
+	"#define" [color=red];
+	"#undef" [color=red];
+	"#line" [color=red];
+	"#error" [color=red];
+	"#pragma" [color=red];
+
+	// Transition
+	" " -> i [label=i];
+	" " -> p [label=p];
+	" " -> d [label=d];
+	" " -> u [label=u];
+	" " -> e [label=e];
+	" " -> l [label=l];
+	" " -> "#" [label=other];
+	i -> if [label=f];
+	if -> "#if" [label=other];
+	if -> ifd [label=d];
+	ifd -> ifde [label=e];
+	ifde -> "#ifdef" [label=f];
+	if -> ifn [label=n];
+	ifn -> ifnd [label=d];
+	ifnd -> ifnde [label=e];
+	ifnde -> "#ifndef" [label=f];
+	i -> in [label=n];
+	in -> inc [label=c];
+	inc -> incl [label=l];
+	incl -> inclu [label=u];
+	inclu -> includ [label=d];
+	includ -> "#include" [label=e];
+	e -> el [label=l];
+	el -> eli [label=i];
+	eli -> "#elif" [label=f];
+	el -> els [label=s];
+	els -> "#else" [label=e];
+	e -> en [label=n];
+	en -> end [label=d];
+	end -> endi [label=i];
+	endi -> "#endif" [label=f];
+	e -> er [label=r];
+	er -> err [label=r];
+	err -> erro [label=o];
+	erro -> "#error" [label=r];
+}
