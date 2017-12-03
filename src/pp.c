@@ -15,13 +15,22 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <errno.h>
 
 #include "stack.h"
 #include "fileInst.h"
 
-void process(Stack *fileStack, FILE *fout){
-
+void parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
+	char thisChar;
+	FileInst *fileInst = *fileInstPtr;
+	// Trim leading space
+	while(isspace(thisChar = fgetc(fileInst->fptr)) && thisChar != '\n');
+	ungetc(thisChar, fileInst->fptr);
+	// Read char
+	while((thisChar = fgetc(fileInst->fptr)) != '\n'){
+		fputc(thisChar, stderr);
+	}
 }
 
 void scan(Stack *fileStack, FILE *fout){
@@ -51,9 +60,7 @@ void scan(Stack *fileStack, FILE *fout){
 			}
 			if((fileInst->lastChar == '\n') && (thisChar == '#')){
 				// Proprocessor line
-				while((thisChar = fgetc(fileInst->fptr)) != '\n'){
-					/* TODO: */fputc(thisChar, stderr);
-				}
+				parsePP(&fileInst, fileStack, fout);
 				fputc('\n', fout);
 				fileInst->lastChar = '\n';
 			}else{
