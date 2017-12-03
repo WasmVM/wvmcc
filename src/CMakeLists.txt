@@ -1,5 +1,5 @@
 add_executable(wasmcpp
 	pp.c
-	lex.c
-	token.c
+	stack.c
+	fileInst.c
 )
