@@ -9,7 +9,9 @@
 
 #include "fileInst.h"
 #include "stack.h"
-#include "ErrorMsg.h"
+#include "errorMsg.h"
+
+extern char *defInclPath;
 
 int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout);
 int ppIf(FileInst **fileInstPtr, Stack *fileStack, FILE *fout);
@@ -23,5 +25,4 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout);
 int ppUndef(FileInst **fileInstPtr, Stack *fileStack, FILE *fout);
 int ppLine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout);
 int ppPragma(FileInst **fileInstPtr, Stack *fileStack, FILE *fout);
-
 #endif // !WASMCC_PPDIRECTIVE_DEF

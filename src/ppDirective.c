@@ -19,21 +19,81 @@
 int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 	FileInst *fileInst = *fileInstPtr;
 	// Check the whole word and next 
-	char *word = "include"; // "in" has been checked
+	char *word = "clude"; // "in" has been checked
 	char thisChar = nextc(fileInst);
-	for(int i = 2; i < 7; ++i, thisChar = nextc(fileInst)){
+	for(int i = 0; i < 5; ++i, thisChar = nextc(fileInst)){
 		if(thisChar != word[i]){
-			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 			return -1;
 		}
 	}
 	if(!isspace(thisChar)){
-		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}else if(thisChar == '\n'){
-		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, fileInst->curline);
+		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}
+	// Read header name
+	thisChar = nextc(fileInst);
+	long int curFilePos = ftell(fileInst->fptr);
+	int headerLength = 0; 
+	if(thisChar == '<'){ // h-char-sequence
+		for(thisChar = nextc(fileInst); thisChar != '>'; thisChar = nextc(fileInst), ++headerLength){
+			if(thisChar == '\n'){
+				fprintf(stderr, WASMCC_ERR_H_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
+				return -1;
+			}
+		}
+	}else if(thisChar == '\"'){ // q-char-sequence
+		for(thisChar = nextc(fileInst); thisChar != '\"'; thisChar = nextc(fileInst), ++headerLength){
+			if(thisChar == '\n'){
+				fprintf(stderr, WASMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
+				return -1;
+			}
+		}
+	}else{
+		// TODO: replace normal text by macro
+		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}
+	fseek(fileInst->fptr, curFilePos, SEEK_SET);
+	char *headerName = (char *)calloc(headerLength + 1, sizeof(char));
+	for(int i = 0; i < headerLength; ++i){
+		headerName[i] = nextc(fileInst);
+	}
+	thisChar = nextc(fileInst);
+	// Get header file path
+	char *headerPath = NULL;
+	if(thisChar == '>'){
+		headerPath = (char *)calloc(strlen(defInclPath) + headerLength + 1, sizeof(char));
+		strcpy(headerPath, defInclPath);
+		headerPath[strlen(defInclPath)] = DELIM_CHAR;
+		strcat(headerPath, headerName);
+	}else{
+		char *rchr = strrchr(fileInst->fname, DELIM_CHAR);
+		if(rchr){
+			int rchrLen = rchr - fileInst->fname;
+			headerPath = (char *)calloc(rchrLen + headerLength + 1, sizeof(char));
+			memcpy(headerPath, fileInst->fname, rchrLen);
+			headerPath[rchrLen] = DELIM_CHAR;
+			strcat(headerPath, headerName);
+		}else{
+			headerPath = (char *)calloc(headerLength, sizeof(char));
+			strcpy(headerPath, headerName);
+		}
+	}
+	// Include
+	FileInst *inclFile = fileInstNew(headerPath);
+	if(inclFile == NULL){
+		return -1;
+	}
+	stackPush(fileStack, fileInst);
+	*fileInstPtr = inclFile;
+	fprintf(fout, "# 1 %s 1", headerPath);
+	// Clean
+	free(headerName);
+	free(headerPath);
 	return 0;
 }
 int ppIf(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){

@@ -21,7 +21,9 @@
 #include "stack.h"
 #include "fileInst.h"
 #include "ppDirective.h"
-#include "ErrorMsg.h"
+#include "errorMsg.h"
+
+char *defInclPath = NULL;
 
 int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 	char thisChar;
@@ -53,12 +55,13 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						return ppIndlude(fileInstPtr, fileStack, fout);
 					break;
 					default: 
-						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 						return -1;
 					break;
 				}
 			break;
 			case 'e': 
+				thisChar = nextc(fileInst);
 				switch(thisChar){
 					case 'l': 
 						thisChar = nextc(fileInst);
@@ -70,7 +73,7 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 								return ppElse(fileInstPtr, fileStack, fout);
 							break;
 							default:
-								fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+								fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 								return -1;
 							break;
 						}
@@ -82,7 +85,7 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						return ppError(fileInstPtr, fileStack, fout);
 					break;
 					default: 
-						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 						return -1;
 					break;
 				}
@@ -100,7 +103,7 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 				return ppLine(fileInstPtr, fileStack, fout);
 			break;
 			default: 
-				fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, fileInst->curline);
+				fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 				return -1;
 			break;
 		}
@@ -149,6 +152,7 @@ int scan(Stack *fileStack, FILE *fout){
 				}
 			}else{
 				// Normal
+				// TODO: replace normal text by macro
 				fputc(thisChar, fout);
 				fileInst->lastChar = thisChar;
 			}
@@ -156,7 +160,7 @@ int scan(Stack *fileStack, FILE *fout){
 		// End processing this file
 		FileInst *topFile = NULL;
 		if(stackTop(fileStack, (void **)&topFile)){		
-			fprintf(fout, "\n# %u %s 2\n", topFile->curline, topFile->fname);
+			fprintf(fout, "\n# %u %s 2\n", topFile->curline, topFile->fname); // 2: return to file
 		}
 		fileInstFree(&fileInst);
 	}
@@ -174,8 +178,19 @@ int main(int argc, char *argv[]){
 		}
 		return -1;
 	}
+	// Get wasmcpp path
+	int cppPathLen = strrchr(argv[0], DELIM_CHAR) - argv[0];
+	defInclPath = (char *)calloc(cppPathLen + 9, sizeof(char));
+	memcpy(defInclPath, argv[0], cppPathLen);
+	defInclPath[cppPathLen] = DELIM_CHAR;
+	strcat(defInclPath, "include");
 	// Alloc main file instance
-	FileInst *mainFile = fileInstNew(argv[1]);
+	char *mainPath = (char *)calloc(cppPathLen + strlen(argv[1]) + 1, sizeof(char));
+	memcpy(mainPath, argv[0], cppPathLen);
+	mainPath[cppPathLen] = DELIM_CHAR;
+	strcat(mainPath, argv[1]);
+	FileInst *mainFile = fileInstNew(mainPath);
+	free(mainPath);
 	if(mainFile == NULL){
 		return -2;
 	}
@@ -191,6 +206,8 @@ int main(int argc, char *argv[]){
 // Process
 	int parseErr = scan(fileStack, fout);
 // Clean
+	// Cpp path
+	free(defInclPath);
 	// Close output
 	fclose(fout);
 	// Free stack

@@ -50,3 +50,7 @@ int nextc(FileInst *fileInst){
 	}
 	return thisChar;
 }
+
+char *getShortName(FileInst *inst){
+	return strrchr(inst->fname, DELIM_CHAR) + 1;
+}

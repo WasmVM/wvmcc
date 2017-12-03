@@ -6,6 +6,8 @@
 #include <string.h>
 #include <stdlib.h>
 
+#define DELIM_CHAR '/'
+
 typedef struct {
 	FILE *fptr;
 	char *fname;
@@ -16,5 +18,6 @@ typedef struct {
 FileInst *fileInstNew(char *fname);
 void fileInstFree(FileInst **finst);
 int nextc(FileInst *fileInst);
+char *getShortName(FileInst *inst);
 
 #endif
