@@ -25,7 +25,6 @@ FileInst *fileInstNew(char *fname){
 	}
 	newFileInst->fname = (char *)calloc(strlen(fname), sizeof(char));
 	strcpy(newFileInst->fname, fname);
-	newFileInst->lastChar = '\0';
 	newFileInst->curline = 1;
 	return newFileInst;
 }

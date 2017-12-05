@@ -11,7 +11,6 @@
 typedef struct {
 	FILE *fptr;
 	char *fname;
-	int lastChar;
 	unsigned int curline;
 } FileInst;
 

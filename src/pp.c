@@ -141,20 +141,22 @@ int scan(Stack *fileStack, FILE *fout){
 					ungetc(thirdChar, fileInst->fptr);
 				}
 			}
-			if((fileInst->lastChar == '\n') && (thisChar == '#')){
+			if(thisChar == '#'){
 				// Proprocessor line
 				if(parsePP(&fileInst, fileStack, fout)){
 					fileInstFree(&fileInst);
 					return -1;
 				}else{
 					fputc('\n', fout);
-					fileInst->lastChar = '\n';
 				}
 			}else{
 				// Normal
+				ungetc(thisChar, fileInst->fptr);
+				char lineStr[4096];
+				memset(lineStr, 0, 4096);
+				fgets(lineStr, 4096, fileInst->fptr);
 				// TODO: replace normal text by macro
-				fputc(thisChar, fout);
-				fileInst->lastChar = thisChar;
+				fwrite(lineStr, 1, strlen(lineStr), fout);
 			}
 		}
 		// End processing this file

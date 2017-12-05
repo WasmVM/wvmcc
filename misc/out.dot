@@ -1,0 +1,16 @@
+digraph{node [shape = record,height=.1];
+node0[label = "<f0> |4:d|<f1> | |<f2>"];
+node1[label = "<f0> |2:b|<f1> | |<f2>"];
+node2[label = "<f0> |1:a|<f1> | |<f2>"];
+"node1":f0 -> "node2";
+node3[label = "<f0> |3:c|<f1> | |<f2>"];
+"node1":f1 -> "node3";
+"node0":f0 -> "node1";
+node4[label = "<f0> |6:f|<f1> | |<f2>"];
+node5[label = "<f0> |5:e|<f1> | |<f2>"];
+"node4":f0 -> "node5";
+node6[label = "<f0> |7:g|<f1> | |<f2>"];
+"node4":f1 -> "node6";
+"node0":f1 -> "node4";
+
+}

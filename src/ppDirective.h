@@ -10,6 +10,7 @@
 #include "fileInst.h"
 #include "stack.h"
 #include "errorMsg.h"
+#include "map.h"
 
 extern char *defInclPath;
 
