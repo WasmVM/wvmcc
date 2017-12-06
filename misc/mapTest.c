@@ -45,6 +45,10 @@ int newId(){
 
 void printTree(MapNode *node, FILE *fout, int id){
 	// Print this node
+	if(node == NULL){
+		fprintf(fout, "node%d[label = \"\"];\n", id);
+		return;
+	}
 	if(node->data[1].key){
 		fprintf(fout, "node%d[label = \"<f0> |%d:%s|<f1> |%d:%s|<f2>\"];\n",
 			id,
@@ -73,23 +77,46 @@ void printTree(MapNode *node, FILE *fout, int id){
 int main(void){
 	Map *map = mapNew(compKey, freeKey, freeValue);
 	// Input
-	printf("Input data [format: %%d/%%20s, -1/e to end]:\n");
-	while(1){
-		int *key = (int *)malloc(sizeof(int));
-		char *str = (char *)calloc(20, sizeof(char));
-		scanf("%d/%s", key, str);
-		if(*key == -1 && !strcmp(str, "e")){
+	printf("[Format: +%%d%%20s to insert, -%%d to delete,^ to end]\n> ");
+	char op;
+	while((op = fgetc(stdin)) != '^'){
+		switch(op){
+			case '+': {
+				int *key = (int *)malloc(sizeof(int));
+				char *str = (char *)calloc(20, sizeof(char));
+				scanf("%d%s", key, str);
+				mapInsert(map, key, str);
+				// Print tree
+				FILE *fout = fopen("out.dot", "w");
+				fprintf(fout, "digraph{node [shape = record,height=.1];\n");
+				printTree(map->head, fout, newId());
+				fprintf(fout, "\n}");
+				fclose(fout);
+			}break;
+			case '-':{
+				int *key = (int *)malloc(sizeof(int));
+				scanf("%d", key);
+				if(mapRemove(map, key) == -1){
+					printf("The key is not found.\n");
+				}else{
+					// Print tree
+					FILE *fout = fopen("out.dot", "w");
+					fprintf(fout, "digraph{node [shape = record,height=.1];\n");
+					printTree(map->head, fout, newId());
+					fprintf(fout, "\n}");
+					fclose(fout);
+				}
+				free(key);
+			}break;
+			case '\n': 
+				printf("> ");
+			break;
+			default:
+				printf("Unknown operator, valid operator is +, - and ^\n");
 			break;
 		}
-		mapInsert(map, key, str);
 	}
-	// Print tree
-	FILE *fout = fopen("out.dot", "w");
-	fprintf(fout, "digraph{node [shape = record,height=.1];\n");
-	printTree(map->head, fout, newId());
-	fprintf(fout, "\n}");
 	// Clean
-	fclose(fout);
-	//mapFree(&map);
+	mapFree(&map);
 	return 0;
 }
