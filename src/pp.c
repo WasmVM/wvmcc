@@ -22,10 +22,11 @@
 #include "fileInst.h"
 #include "ppDirective.h"
 #include "errorMsg.h"
+#include "map.h"
 
 char *defInclPath = NULL;
 
-int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
+int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map *macroMap){
 	char thisChar;
 	FileInst *fileInst = *fileInstPtr;
 	// Trim leading space
@@ -41,18 +42,18 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						thisChar = nextc(fileInst);
 						switch(thisChar){
 							case 'd': // ifdef
-								return ppIfdef(fileInstPtr, fileStack, fout);
+								return ppIfdef(fileInstPtr, fileStack, fout, macroMap);
 							break;
 							case 'n': // ifndef
-								return ppIfndef(fileInstPtr, fileStack, fout);
+								return ppIfndef(fileInstPtr, fileStack, fout, macroMap);
 							break;
 							default: // if
-								return ppIf(fileInstPtr, fileStack, fout);
+								return ppIf(fileInstPtr, fileStack, fout, macroMap);
 							break;
 						}
 					break;
 					case 'n': // include
-						return ppIndlude(fileInstPtr, fileStack, fout);
+						return ppIndlude(fileInstPtr, fileStack, fout, macroMap);
 					break;
 					default: 
 						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
@@ -67,7 +68,7 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						thisChar = nextc(fileInst);
 						switch(thisChar){
 							case 'i': // elif
-								return ppElif(fileInstPtr, fileStack, fout);
+								return ppElif(fileInstPtr, fileStack, fout, macroMap);
 							break;
 							case 's': // else
 								return ppElse(fileInstPtr, fileStack, fout);
@@ -82,7 +83,7 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 						return ppEndif(fileInstPtr, fileStack, fout);
 					break;
 					case 'r': // error
-						return ppError(fileInstPtr, fileStack, fout);
+						return ppError(fileInstPtr, fileStack, fout, macroMap);
 					break;
 					default: 
 						fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
@@ -94,13 +95,13 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 				return ppPragma(fileInstPtr, fileStack, fout);
 			break;
 			case 'd': // define
-				return ppDefine(fileInstPtr, fileStack, fout);
+				return ppDefine(fileInstPtr, fileStack, fout, macroMap);
 			break;
 			case 'u': // undef
-				return ppUndef(fileInstPtr, fileStack, fout);
+				return ppUndef(fileInstPtr, fileStack, fout, macroMap);
 			break;
 			case 'l': // line
-				return ppLine(fileInstPtr, fileStack, fout);
+				return ppLine(fileInstPtr, fileStack, fout, macroMap);
 			break;
 			default: 
 				fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
@@ -111,7 +112,7 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 	return 0;
 }
 
-int scan(Stack *fileStack, FILE *fout){
+int scan(Stack *fileStack, FILE *fout, Map *macroMap){
 	FileInst *fileInst = NULL;
 	// Process file
 	while(stackPop(fileStack, (void **)&fileInst)){
@@ -143,7 +144,7 @@ int scan(Stack *fileStack, FILE *fout){
 			}
 			if(thisChar == '#'){
 				// Proprocessor line
-				if(parsePP(&fileInst, fileStack, fout)){
+				if(parsePP(&fileInst, fileStack, fout, macroMap)){
 					fileInstFree(&fileInst);
 					return -1;
 				}else{
@@ -155,8 +156,7 @@ int scan(Stack *fileStack, FILE *fout){
 				char lineStr[4096];
 				memset(lineStr, 0, 4096);
 				fgets(lineStr, 4096, fileInst->fptr);
-				// TODO: replace normal text by macro
-				fwrite(lineStr, 1, strlen(lineStr), fout);
+				fwrite(expandMacro(lineStr, macroMap), 1, strlen(lineStr), fout);
 			}
 		}
 		// End processing this file
@@ -205,8 +205,10 @@ int main(int argc, char *argv[]){
 	// File stack
 	Stack *fileStack = stackNew();
 	stackPush(fileStack, mainFile);
+	// Macro Map
+	Map *macroMap = mapNew(compMacro, freeMacroName, freeMacro);
 // Process
-	int parseErr = scan(fileStack, fout);
+	int parseErr = scan(fileStack, fout, macroMap);
 // Clean
 	// Cpp path
 	free(defInclPath);

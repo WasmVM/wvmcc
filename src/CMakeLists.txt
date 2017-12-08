@@ -3,4 +3,6 @@ add_executable(wasmcpp
 	stack.c
 	fileInst.c
 	ppDirective.c
+	map.c
+	"list.c"
 )
