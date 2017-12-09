@@ -30,16 +30,16 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map *macroMap)
 	char thisChar;
 	FileInst *fileInst = *fileInstPtr;
 	// Trim leading space
-	while(isspace(thisChar = nextc(fileInst)) && thisChar != '\n');
+	while(isspace(thisChar = nextc(fileInst, fout)) && thisChar != '\n');
 	ungetc(thisChar, fileInst->fptr);
 	// Read char
-	while((thisChar = nextc(fileInst)) != '\n'){
+	while((thisChar = nextc(fileInst, fout)) != '\n'){
 		switch(thisChar){
 			case 'i': 
-				thisChar = nextc(fileInst);
+				thisChar = nextc(fileInst, fout);
 				switch(thisChar){
 					case 'f': 
-						thisChar = nextc(fileInst);
+						thisChar = nextc(fileInst, fout);
 						switch(thisChar){
 							case 'd': // ifdef
 								return ppIfdef(fileInstPtr, fileStack, fout, macroMap);
@@ -62,10 +62,10 @@ int parsePP(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map *macroMap)
 				}
 			break;
 			case 'e': 
-				thisChar = nextc(fileInst);
+				thisChar = nextc(fileInst, fout);
 				switch(thisChar){
 					case 'l': 
-						thisChar = nextc(fileInst);
+						thisChar = nextc(fileInst, fout);
 						switch(thisChar){
 							case 'i': // elif
 								return ppElif(fileInstPtr, fileStack, fout, macroMap);
@@ -117,14 +117,14 @@ int scan(Stack *fileStack, FILE *fout, Map *macroMap){
 	// Process file
 	while(stackPop(fileStack, (void **)&fileInst)){
 		int thisChar;
-		while((thisChar = nextc(fileInst)) != EOF){
+		while((thisChar = nextc(fileInst, fout)) != EOF){
 			// New Line
 			if(thisChar == '\n'){
 				++fileInst->curline;
 			}
 			// Digraph
 			if(thisChar == '%'){
-				int nextChar = nextc(fileInst);
+				int nextChar = nextc(fileInst, fout);
 				if(nextChar == ':'){
 					thisChar = '#';
 				}else{
@@ -133,8 +133,8 @@ int scan(Stack *fileStack, FILE *fout, Map *macroMap){
 			}
 			// Trigraph
 			if(thisChar == '?'){
-				int nextChar = nextc(fileInst);
-				int thirdChar = nextc(fileInst);
+				int nextChar = nextc(fileInst, fout);
+				int thirdChar = nextc(fileInst, fout);
 				if(nextChar == '?' && thirdChar == '='){
 					thisChar = '#';
 				}else{
@@ -152,11 +152,24 @@ int scan(Stack *fileStack, FILE *fout, Map *macroMap){
 				}
 			}else{
 				// Normal
-				ungetc(thisChar, fileInst->fptr);
-				char lineStr[4096];
+				char *lineStr = calloc(4096, sizeof(char));
 				memset(lineStr, 0, 4096);
-				fgets(lineStr, 4096, fileInst->fptr);
-				fwrite(expandMacro(lineStr, macroMap), 1, strlen(lineStr), fout);
+				for(int i = 0; thisChar != '\n' && thisChar != EOF; ++i, thisChar = nextc(fileInst, fout)){
+					lineStr[i] = thisChar;
+				}
+				lineStr = realloc(lineStr, strlen(lineStr) + 1);
+				char *expanded = expandMacro(lineStr, macroMap, fileInst, fout);
+				if(expanded){
+					fwrite(expanded, 1, strlen(expanded), fout);
+				}else{
+					fileInstFree(&fileInst);
+					return -1;
+				}
+				if(thisChar == '\n'){
+					fputc(thisChar, fout);
+				}
+				free(expanded);
+				free(lineStr);
 			}
 		}
 		// End processing this file

@@ -18,6 +18,7 @@ extern char *defInclPath;
 typedef struct {
 	char *str;
 	int hasVA;
+	int enable;
 	List *params;
 } MacroInst;
 
@@ -25,7 +26,7 @@ int compMacro(void *aPtr, void* bPtr);
 void freeMacroName(void *ptr);
 void freeMacro(void *ptr);
 
-char *expandMacro(char *line, Map* macroMap);
+char *expandMacro(char *line, Map* macroMap, FileInst *fileInst, FILE *fout);
 
 int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap);
 int ppIf(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap);

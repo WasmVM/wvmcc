@@ -17,7 +17,8 @@
 #include "ppDirective.h"
 
 int compMacro(void *aPtr, void* bPtr){
-	return strcmp((char *)aPtr, (char *)bPtr);
+	int ret = strcmp((char *)aPtr, (char *)bPtr);
+	return (ret > 0) - (ret < 0);
 }
 
 void freeMacroName(void *ptr){
@@ -26,21 +27,173 @@ void freeMacroName(void *ptr){
 
 void freeMacro(void *ptr){
 	MacroInst *inst = (MacroInst *)ptr;
-	free(inst->str);
-	listFree(&inst->params);
-	free(inst);
+	if(inst){
+		free(inst->str);
+		listFree(&inst->params);
+		free(inst);
+	}
 }
 
-char *expandMacro(char *line, Map* macroMap){
-	char *ret = (char *)calloc(4096, sizeof(char));
-	// TODO: Skip string literal
-	// TODO: Skip character-constant
-	// TODO: Skip integer-constant
-	// TODO: Skip float-constant
-	return realloc(ret, strlen(ret) + 1);
+char *expandMacro(char *line, Map* macroMap, FileInst *fileInst, FILE *fout){
+	char *ret = NULL;
+	int lineRescan = 0;
+	do{
+		ret = (char *)calloc(4096, sizeof(char));
+		lineRescan = 0;
+		List *disabledMacro = listNew();
+		// Expand
+		for(int charIndex = 0, retIndex = 0, lineSize = strlen(line); charIndex < lineSize; ++charIndex, ++retIndex){
+			while(isspace(line[charIndex])){
+				ret[retIndex++] = line[charIndex++];
+			}
+			if(line[charIndex] == '\"' || line[charIndex] == '\''){ // Skip string literal
+				char quot = line[charIndex];
+				do{
+					ret[retIndex++] = line[charIndex++];
+				}while(charIndex < lineSize && (line[charIndex] != quot || line[charIndex - 1] == '\\') && line[charIndex] != '\n');
+			}else if(isdigit(line[charIndex])){ // Skip constant
+				// digit sequence
+				if((charIndex < lineSize - 1) && (line[charIndex] == '0') && (line[charIndex + 1] == 'x' || line[charIndex + 1] == 'X')){
+					ret[retIndex] = line[charIndex];
+					ret[retIndex + 1] = line[charIndex + 1];
+					charIndex += 2;
+					retIndex += 2;
+				}
+				while(charIndex < lineSize && isdigit(line[charIndex])){
+					ret[retIndex++] = line[charIndex++];
+				}
+				// fractional
+				if(charIndex < lineSize && (line[charIndex] == '.')){
+					ret[retIndex++] = line[charIndex++];
+					while(charIndex < lineSize && isdigit(line[charIndex])){
+						ret[retIndex++] = line[charIndex++];
+					}
+				}
+				// Exponent
+				if(charIndex < lineSize && (line[charIndex] == 'e' || line[charIndex] == 'E' || line[charIndex] == 'p'|| line[charIndex] == 'P')){
+					ret[retIndex++] = line[charIndex++];
+					// Sign
+					if(charIndex < lineSize && (line[charIndex] == '+' || line[charIndex] == '-')){
+						ret[retIndex++] = line[charIndex++];
+					}
+					// digit
+					if(!isdigit(line[charIndex])){
+						fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst), fileInst->curline);
+						return NULL;
+					}
+					while(charIndex < lineSize && isdigit(line[charIndex])){
+						ret[retIndex++] = line[charIndex++];
+					}
+				}
+				// Suffix
+				if(charIndex < lineSize && (line[charIndex] == 'f' || line[charIndex] == 'l' || line[charIndex] == 'F'|| line[charIndex] == 'L')){
+					ret[retIndex++] = line[charIndex++];
+				}
+			}else if(isalpha(line[charIndex]) || line[charIndex] == '_'){
+				// Get identifier
+				char *ident = (char *)calloc(65, sizeof(char));
+				memset(ident, '\0', 64 * sizeof(char));
+				for(int i = 0; i < 64 && (isalnum(line[charIndex]) || line[charIndex] == '_'); ++i, ++charIndex){
+					ident[i] = line[charIndex];
+				}
+				ident = realloc(ident, strlen(ident) + 1);
+				MacroInst *macro = NULL;
+				if(!mapGet(macroMap, ident, (void **)&macro) && macro->enable){
+					if(macro->params == NULL){						
+						strcpy(ret + retIndex, macro->str);
+						retIndex += strlen(macro->str);
+					}else{
+						// Generate macro map of parameter
+						Map *paramMap = mapNew(compMacro, freeMacroName, freeMacro);
+						// Scan parameters
+						if(line[charIndex] == '('){
+							for(int i = 0; i <= macro->params->size; ++i){
+								if(++charIndex > lineSize){
+									fprintf(stderr, WASMCC_ERR_INVALID_MACRO_ARGS, getShortName(fileInst), fileInst->curline);
+									return NULL;
+								}
+								char *str = (char *)calloc(4096, sizeof(char));
+								for(int j = 0, isStrChr = 0; charIndex < lineSize && (isStrChr || ((i == macro->params->size || line[charIndex] != ',') && line[charIndex] != ')')); ++j, ++charIndex){
+									str[j] = line[charIndex];
+									if(line[charIndex] == '\"' || line[charIndex] == '\''){
+										isStrChr = !isStrChr;
+									}
+									if(line[charIndex] == '\n'){
+										++fileInst->curline;
+										fprintf(fout, "\n");
+									}
+								}
+								str = (char *)realloc(str, strlen(str));
+								// Check parameter count
+								if(i == macro->params->size - 1){
+									if(!macro->hasVA && line[charIndex] != ')'){
+										fprintf(stderr, WASMCC_ERR_MACRO_PARAM_TOO_MORE, getShortName(fileInst), fileInst->curline, ident);
+										mapFree(&paramMap);
+										free(str);
+										free(ident);
+										return NULL;
+									}
+								}else if((i < macro->params->size - 1) && (line[charIndex] == ')')){
+									fprintf(stderr, WASMCC_ERR_MACRO_PARAM_TOO_FEW, getShortName(fileInst), fileInst->curline, ident);
+									mapFree(&paramMap);
+									free(str);
+									free(ident);
+									return NULL;
+								}
+								// Allocate macro
+								MacroInst *newParMacro = malloc(sizeof(MacroInst));
+								newParMacro->enable = 1;
+								newParMacro->hasVA = 0;
+								newParMacro->params = NULL;
+								newParMacro->str = str;
+								char *keyStr = NULL;
+								if(i < macro->params->size){
+									char *key = listAt(macro->params, i);
+									keyStr = calloc(strlen(key) + 1, sizeof(char));
+									strcpy(keyStr, key);
+								}else{
+									keyStr = calloc(12, sizeof(char));
+									strcpy(keyStr, "__VA_ARGS__");
+								}
+								mapInsert(paramMap, keyStr, newParMacro);
+							}
+						}else{
+							fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_PARAM, getShortName(fileInst), fileInst->curline, ident);
+							mapFree(&paramMap);
+							free(ident);
+							return NULL;
+						}
+						++charIndex;
+						// Expand parameter
+						char *expanded = expandMacro(macro->str, paramMap, fileInst, fout);
+						strcpy(ret + retIndex, expanded);
+						retIndex += strlen(expanded);
+						free(expanded);
+					}
+					lineRescan = 1;
+					macro->enable = 0;
+					listAdd(disabledMacro, macro);
+				}else{
+					strcpy(ret + retIndex, ident);
+					retIndex += strlen(ident);
+				}
+				free(ident);
+			}
+			ret[retIndex] = line[charIndex];
+		}
+		line = calloc(strlen(ret) + 1, sizeof(char));
+		strcpy(line, ret);
+		free(ret);
+		for(int i = 0; i < disabledMacro->size; ++i){
+			MacroInst *macro = listAt(disabledMacro, i);
+			macro->enable = 1;
+		}
+		listFree(&disabledMacro);
+	}while(lineRescan == 1);
+	return line;
 }
 
-static char *getIdent(char *thisCharPtr, FileInst *fileInst){
+static char *getIdent(char *thisCharPtr, FileInst *fileInst, FILE *fout){
 	char thisChar = *thisCharPtr;
 	char *ident = (char *)calloc(65, sizeof(char));
 	if(isalpha(thisChar) || thisChar == '_'){
@@ -49,10 +202,9 @@ static char *getIdent(char *thisCharPtr, FileInst *fileInst){
 		for(int i = 1; i <= 64; ++i){
 			if(i == 64){
 				*thisCharPtr = thisChar;
-				fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst), fileInst->curline);
 				return NULL;
 			}
-			thisChar = nextc(fileInst);
+			thisChar = nextc(fileInst, fout);
 			if(!isalnum(thisChar) && thisChar != '_'){
 				break;
 			}
@@ -60,7 +212,6 @@ static char *getIdent(char *thisCharPtr, FileInst *fileInst){
 		}
 	}else{
 		*thisCharPtr = thisChar;
-		fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst), fileInst->curline);
 		return NULL;
 	}
 	ident = (char *)realloc(ident, strlen(ident) + 1);
@@ -72,8 +223,8 @@ int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMa
 	FileInst *fileInst = *fileInstPtr;
 	// Check the whole word and next 
 	char *word = "clude"; // "in" has been checked
-	char thisChar = nextc(fileInst);
-	for(int i = 0; i < 5; ++i, thisChar = nextc(fileInst)){
+	char thisChar = nextc(fileInst, fout);
+	for(int i = 0; i < 5; ++i, thisChar = nextc(fileInst, fout)){
 		if(thisChar != word[i]){
 			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 			return -1;
@@ -88,18 +239,18 @@ int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMa
 	}
 	// TODO: macro
 	// Read header name
-	thisChar = nextc(fileInst);
+	thisChar = nextc(fileInst, fout);
 	long int curFilePos = ftell(fileInst->fptr);
 	int headerLength = 0; 
 	if(thisChar == '<'){ // h-char-sequence
-		for(thisChar = nextc(fileInst); thisChar != '>'; thisChar = nextc(fileInst), ++headerLength){
+		for(thisChar = nextc(fileInst, fout); thisChar != '>'; thisChar = nextc(fileInst, fout), ++headerLength){
 			if(thisChar == '\n'){
 				fprintf(stderr, WASMCC_ERR_H_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
 				return -1;
 			}
 		}
 	}else if(thisChar == '\"'){ // q-char-sequence
-		for(thisChar = nextc(fileInst); thisChar != '\"'; thisChar = nextc(fileInst), ++headerLength){
+		for(thisChar = nextc(fileInst, fout); thisChar != '\"'; thisChar = nextc(fileInst, fout), ++headerLength){
 			if(thisChar == '\n'){
 				fprintf(stderr, WASMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
 				return -1;
@@ -112,9 +263,9 @@ int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMa
 	fseek(fileInst->fptr, curFilePos, SEEK_SET);
 	char *headerName = (char *)calloc(headerLength + 1, sizeof(char));
 	for(int i = 0; i < headerLength; ++i){
-		headerName[i] = nextc(fileInst);
+		headerName[i] = nextc(fileInst, fout);
 	}
-	thisChar = nextc(fileInst);
+	thisChar = nextc(fileInst, fout);
 	// Get header file path
 	char *headerPath = NULL;
 	if(thisChar == '>'){
@@ -173,8 +324,8 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 	FileInst *fileInst = *fileInstPtr;
 	// Check the whole word and next 
 	char *word = "efine"; // "d" has been checked
-	char thisChar = nextc(fileInst);
-	for(int i = 0; i < 5; ++i, thisChar = nextc(fileInst)){
+	char thisChar = nextc(fileInst, fout);
+	for(int i = 0; i < 5; ++i, thisChar = nextc(fileInst, fout)){
 		if(thisChar != word[i]){
 			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 			return -1;
@@ -188,9 +339,10 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 		return -1;
 	}
 	// Read macro name
-	thisChar = nextc(fileInst);
-	char *macroName = getIdent(&thisChar, fileInst);
+	thisChar = nextc(fileInst, fout);
+	char *macroName = getIdent(&thisChar, fileInst, fout);
 	if(!macroName){
+		fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}
 	if((!isspace(thisChar) && thisChar != '(')){
@@ -200,15 +352,16 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 	// Alloc macro instance
 	MacroInst *newMacro = (MacroInst *)malloc(sizeof(MacroInst));
 	newMacro->hasVA = 0;
+	newMacro->enable = 1;
 	newMacro->params = NULL;
 	// Read parameter
 	if(thisChar == '('){
 		newMacro->params = listNew();
-		thisChar = nextc(fileInst);
+		thisChar = nextc(fileInst, fout);
 		while(thisChar != ')'){
 			// Trim leading space
 			while(isspace(thisChar) && thisChar != '\n'){
-				thisChar = nextc(fileInst);
+				thisChar = nextc(fileInst, fout);
 			}
 			if(thisChar == '\n'){
 				fprintf(stderr, WASMCC_ERR_INVALID_MACRO_PARAM, getShortName(fileInst), fileInst->curline);
@@ -219,14 +372,14 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 				break;
 			}else if(thisChar == '.'){
 				// Variation argument
-				if((nextc(fileInst)!= '.') || (nextc(fileInst) != '.')){
+				if((nextc(fileInst, fout)!= '.') || (nextc(fileInst, fout) != '.')){
 					fprintf(stderr, WASMCC_ERR_EXPECT_VA, getShortName(fileInst), fileInst->curline);
 					free(newMacro);
 					listFree(&newMacro->params);
 					return -1;
 				}
 				// Trim trailing space
-				while(isspace(thisChar = nextc(fileInst)) && thisChar != '\n');
+				while(isspace(thisChar = nextc(fileInst, fout)) && thisChar != '\n');
 				if(thisChar != ')'){
 					fprintf(stderr, WASMCC_ERR_VA_NOT_END, getShortName(fileInst), fileInst->curline);
 					free(newMacro);
@@ -236,7 +389,7 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 				newMacro->hasVA = 1;
 			}else{
 				// Get identifier
-				char *ident = getIdent(&thisChar, fileInst);
+				char *ident = getIdent(&thisChar, fileInst, fout);
 				if(!ident){
 					fprintf(stderr, WASMCC_ERR_INVALID_MACRO_PARAM, getShortName(fileInst), fileInst->curline);
 					free(newMacro);
@@ -246,7 +399,7 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 				listAdd(newMacro->params, ident);
 				// Trim trailing space
 				while(isspace(thisChar) && thisChar != '\n'){
-					thisChar = nextc(fileInst);
+					thisChar = nextc(fileInst, fout);
 				}
 				switch(thisChar){
 					case '\n':
@@ -255,7 +408,7 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 						listFree(&newMacro->params);
 					return -1;
 					case ',':
-						thisChar = nextc(fileInst);
+						thisChar = nextc(fileInst, fout);
 					case ')':
 					break;
 					default:
@@ -273,7 +426,7 @@ int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap
 		if(i >= 0){
 			macroStr[i] = thisChar;
 		}
-		thisChar = nextc(fileInst);
+		thisChar = nextc(fileInst, fout);
 	}
 	newMacro->str = realloc(macroStr, strlen(macroStr) + 1);
 	mapInsert(macroMap, macroName, newMacro);

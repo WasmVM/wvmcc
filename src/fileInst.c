@@ -34,17 +34,48 @@ void fileInstFree(FileInst **finst){
 	free(*finst);
 	*finst = NULL;
 }
-int nextc(FileInst *fileInst){
+int nextc(FileInst *fileInst, FILE *fout){
 	char thisChar = fgetc(fileInst->fptr);
-	while(thisChar != EOF && thisChar == '\\'){
+	while(thisChar != EOF && (thisChar == '\\' || thisChar == '/')){
 		char next = fgetc(fileInst->fptr);
-		if(next == '\n'){
-			++fileInst->curline;
-			thisChar = fgetc(fileInst->fptr);
+		if(thisChar == '\\'){
+			if(next == '\n'){
+				++fileInst->curline;
+				fprintf(fout, "\\\n");
+				thisChar = fgetc(fileInst->fptr);	
+			}else{
+				ungetc(next, fileInst->fptr);
+				thisChar = '\\';
+				break;
+			}
 		}else{
-			ungetc(next, fileInst->fptr);
-			thisChar = '\\';
-			break;
+			if(next == '/'){
+				while((thisChar = fgetc(fileInst->fptr)) != EOF && thisChar != '\n');
+				++fileInst->curline;
+			}else if(next == '*'){
+				thisChar = fgetc(fileInst->fptr);
+				if(thisChar == EOF){
+					return thisChar;
+				}
+				while((next = fgetc(fileInst->fptr)) != EOF){
+					if(thisChar == '*' && next == '/'){
+						thisChar = fgetc(fileInst->fptr);
+						break;
+					}
+					if(thisChar == '\n'){
+						++fileInst->curline;
+						fprintf(fout, "\n");
+					}
+					thisChar = next;
+				}
+				if(next == EOF){
+					return next;
+				}
+			}else{
+				ungetc(next, fileInst->fptr);
+				thisChar = '/';
+				break;
+			}
 		}
 	}
 	return thisChar;

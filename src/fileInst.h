@@ -16,7 +16,7 @@ typedef struct {
 
 FileInst *fileInstNew(char *fname);
 void fileInstFree(FileInst **finst);
-int nextc(FileInst *fileInst);
+int nextc(FileInst *fileInst, FILE *fout);
 char *getShortName(FileInst *inst);
 
 #endif
