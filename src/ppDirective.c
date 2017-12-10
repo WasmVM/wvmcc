@@ -355,7 +355,34 @@ int ppEndif(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
 	return 0;
 }
 int ppError(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
-	return 0;
+	FileInst *fileInst = *fileInstPtr;
+	// Check the whole word and next 
+	char *word = "ror"; // "er" has been checked
+	char thisChar = nextc(fileInst, fout);
+	for(int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)){
+		if(thisChar != word[i]){
+			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+			return -1;
+		}
+	}
+	if(!isspace(thisChar)){
+		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}
+	// Read error message
+	char *errorStr = (char *)calloc(4096, sizeof(char));
+	for(int i = 0; thisChar != EOF && thisChar != '\n'; ++i){
+		errorStr[i] = thisChar;
+		thisChar = nextc(fileInst, fout);
+	}
+	// Expand macro
+	char *oldLine = errorStr;
+	errorStr = expandMacro(errorStr, macroMap, fileInst, fout);
+	free(oldLine);
+	// Print error
+	fprintf(stderr, WASMCC_ERR_ERROR_DIRECTIVE, getShortName(fileInst), fileInst->curline, errorStr);
+	free(errorStr);
+	return -1;
 }
 int ppDefine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
 	FileInst *fileInst = *fileInstPtr;

@@ -82,5 +82,10 @@ int nextc(FileInst *fileInst, FILE *fout){
 }
 
 char *getShortName(FileInst *inst){
-	return strrchr(inst->fname, DELIM_CHAR) + 1;
+	char *ret = strrchr(inst->fname, DELIM_CHAR);
+	if(ret != NULL){
+		return (ret + 1);
+	}else{
+		return inst->fname;
+	}
 }
