@@ -527,7 +527,7 @@ int ppLine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
 		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}else if(thisChar == '\n'){
-		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst), fileInst->curline);
+		fprintf(stderr, WASMCC_ERR_EXPECT_DIGIT, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}
 	// Read line
@@ -562,8 +562,13 @@ int ppLine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
 		return -1;
 	}
 	// Trim leading space
-	while(charIndex < lineSize && isspace(line[charIndex])){
+	while(charIndex < lineSize && isspace(line[charIndex]) && line[charIndex] != '\n'){
 		++charIndex;
+	}
+	if(line[charIndex] == '\n'){
+		fprintf(fout, "# %d %s", fileInst->curline, fileInst->fname);
+		free(line);
+		return 0;
 	}
 	// Read char sequence
 	char *headerName = (char *)calloc(4096, sizeof(char));
@@ -580,6 +585,7 @@ int ppLine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
 	headerName = realloc(headerName, strlen(headerName) + 1);
 	free(fileInst->fname);
 	fileInst->fname = headerName;
+	fprintf(fout, "# %d %s", fileInst->curline, fileInst->fname);
 	++charIndex;
 	// Trim trailing space
 	while(charIndex < lineSize && isspace(line[charIndex]) && line[charIndex] != '\n'){
@@ -593,5 +599,23 @@ int ppLine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
 	return 0;
 }
 int ppPragma(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){
+	FileInst *fileInst = *fileInstPtr;
+	// Check the whole word and next 
+	char *word = "ragma"; // "p" has been checked
+	char thisChar = nextc(fileInst, fout);
+	for(int i = 0; i < 5; ++i, thisChar = nextc(fileInst, fout)){
+		if(thisChar != word[i]){
+			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+			return -1;
+		}
+	}
+	if(!isspace(thisChar)){
+		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}
+	// Skip (Currently no pragma needed, so just skip)
+	while(thisChar != EOF && thisChar != '\n'){
+		thisChar = nextc(fileInst, fout);
+	}
 	return 0;
 }
