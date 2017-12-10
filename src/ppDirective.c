@@ -29,6 +29,14 @@ void freeMacro(void *ptr){
 	MacroInst *inst = (MacroInst *)ptr;
 	if(inst){
 		free(inst->str);
+		if(inst->params){
+			ListNode *cur = inst->params->head;
+			while(cur != NULL){
+				ListNode *node = cur;
+				cur = cur->next;
+				free(node->data);
+			}
+		}
 		listFree(&inst->params);
 		free(inst);
 	}
@@ -36,6 +44,7 @@ void freeMacro(void *ptr){
 
 char *expandMacro(char *line, Map* macroMap, FileInst *fileInst, FILE *fout){
 	char *ret = NULL;
+	char *oriLine = line;
 	int lineRescan = 0;
 	do{
 		ret = (char *)calloc(4096, sizeof(char));
@@ -123,7 +132,7 @@ char *expandMacro(char *line, Map* macroMap, FileInst *fileInst, FILE *fout){
 										fprintf(fout, "\n");
 									}
 								}
-								str = (char *)realloc(str, strlen(str));
+								str = (char *)realloc(str, strlen(str) + 1);
 								// Check parameter count
 								if(i == macro->params->size - 1){
 									if(!macro->hasVA && line[charIndex] != ')'){
@@ -168,7 +177,9 @@ char *expandMacro(char *line, Map* macroMap, FileInst *fileInst, FILE *fout){
 						char *expanded = expandMacro(macro->str, paramMap, fileInst, fout);
 						strcpy(ret + retIndex, expanded);
 						retIndex += strlen(expanded);
+						// Clean
 						free(expanded);
+						mapFree(&paramMap);
 					}
 					lineRescan = 1;
 					macro->enable = 0;
@@ -180,6 +191,9 @@ char *expandMacro(char *line, Map* macroMap, FileInst *fileInst, FILE *fout){
 				free(ident);
 			}
 			ret[retIndex] = line[charIndex];
+		}
+		if(line != oriLine){
+			free(line);
 		}
 		line = calloc(strlen(ret) + 1, sizeof(char));
 		strcpy(line, ret);
@@ -237,39 +251,52 @@ int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMa
 		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}
-	// TODO: macro
+	// Read line
+	char *line = calloc(4096, sizeof(char));
+	for(int i = 0; (thisChar = nextc(fileInst, fout)) != '\n'; ++i){
+		line[i] = thisChar;
+	}
+	int lineSize = strlen(line);
+	line = realloc(line, lineSize + 1);
+	// Expand macro
+	char *oldLine = line;
+	line = expandMacro(line, macroMap, fileInst, fout);
+	free(oldLine);
+	// Trim leading space
+	int charIndex = 0;
+	while(charIndex < lineSize && isspace(line[charIndex])){
+		++charIndex;
+	}
 	// Read header name
-	thisChar = nextc(fileInst, fout);
-	long int curFilePos = ftell(fileInst->fptr);
-	int headerLength = 0; 
-	if(thisChar == '<'){ // h-char-sequence
-		for(thisChar = nextc(fileInst, fout); thisChar != '>'; thisChar = nextc(fileInst, fout), ++headerLength){
-			if(thisChar == '\n'){
+	char *headerName = (char *)calloc(4096, sizeof(char));
+	if(line[charIndex] == '<'){ // h-char-sequence
+		++charIndex;
+		for(int i = 0; line[charIndex] != '>'; ++charIndex, ++i){
+			if(line[charIndex] == '\n'){
 				fprintf(stderr, WASMCC_ERR_H_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
 				return -1;
 			}
+			headerName[i] = line[charIndex];
 		}
-	}else if(thisChar == '\"'){ // q-char-sequence
-		for(thisChar = nextc(fileInst, fout); thisChar != '\"'; thisChar = nextc(fileInst, fout), ++headerLength){
-			if(thisChar == '\n'){
+	}else if(line[charIndex] == '\"'){ // q-char-sequence
+		++charIndex;
+		for(int i = 0; line[charIndex] != '\"'; ++charIndex, ++i){
+			if(line[charIndex] == '\n'){
 				fprintf(stderr, WASMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
 				return -1;
 			}
+			headerName[i] = line[charIndex];
 		}
 	}else{
 		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst), fileInst->curline);
 		return -1;
 	}
-	fseek(fileInst->fptr, curFilePos, SEEK_SET);
-	char *headerName = (char *)calloc(headerLength + 1, sizeof(char));
-	for(int i = 0; i < headerLength; ++i){
-		headerName[i] = nextc(fileInst, fout);
-	}
-	thisChar = nextc(fileInst, fout);
+	thisChar = line[charIndex];
 	// Get header file path
 	char *headerPath = NULL;
+	int headerLength = strlen(headerName);
 	if(thisChar == '>'){
-		headerPath = (char *)calloc(strlen(defInclPath) + headerLength + 1, sizeof(char));
+		headerPath = (char *)calloc(strlen(defInclPath) + headerLength + 2, sizeof(char));
 		strcpy(headerPath, defInclPath);
 		headerPath[strlen(defInclPath)] = DELIM_CHAR;
 		strcat(headerPath, headerName);
@@ -277,14 +304,23 @@ int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMa
 		char *rchr = strrchr(fileInst->fname, DELIM_CHAR);
 		if(rchr){
 			int rchrLen = rchr - fileInst->fname;
-			headerPath = (char *)calloc(rchrLen + headerLength + 1, sizeof(char));
+			headerPath = (char *)calloc(rchrLen + headerLength + 2, sizeof(char));
 			memcpy(headerPath, fileInst->fname, rchrLen);
 			headerPath[rchrLen] = DELIM_CHAR;
 			strcat(headerPath, headerName);
 		}else{
-			headerPath = (char *)calloc(headerLength, sizeof(char));
+			headerPath = (char *)calloc(headerLength + 1, sizeof(char));
 			strcpy(headerPath, headerName);
 		}
+	}
+	// Trim trailing space
+	++charIndex;
+	while(charIndex < lineSize && isspace(line[charIndex]) && line[charIndex] != '\n'){
+		++charIndex;
+	}
+	if(charIndex < lineSize && line[charIndex] != '\n'){
+		fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER, getShortName(fileInst), fileInst->curline);
+		return -1;
 	}
 	// Include
 	FileInst *inclFile = fileInstNew(headerPath);
@@ -295,6 +331,7 @@ int ppIndlude(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMa
 	*fileInstPtr = inclFile;
 	fprintf(fout, "# 1 %s 1", headerPath);
 	// Clean
+	free(line);
 	free(headerName);
 	free(headerPath);
 	return 0;
@@ -436,6 +473,83 @@ int ppUndef(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap)
 	return 0;
 }
 int ppLine(FileInst **fileInstPtr, Stack *fileStack, FILE *fout, Map* macroMap){
+	FileInst *fileInst = *fileInstPtr;
+	// Check the whole word and next 
+	char *word = "ine"; // "l" has been checked
+	char thisChar = nextc(fileInst, fout);
+	for(int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)){
+		if(thisChar != word[i]){
+			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+			return -1;
+		}
+	}
+	if(!isspace(thisChar)){
+		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}else if(thisChar == '\n'){
+		fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}
+	// Read line
+	char *line = calloc(4096, sizeof(char));
+	for(int i = 0; (thisChar = nextc(fileInst, fout)) != '\n'; ++i){
+		line[i] = thisChar;
+	}
+	int lineSize = strlen(line);
+	line = realloc(line, lineSize + 1);
+	// Expand macro
+	char *oldLine = line;
+	line = expandMacro(line, macroMap, fileInst, fout);
+	free(oldLine);
+	// Trim leading space
+	int charIndex = 0;
+	while(charIndex < lineSize && isspace(line[charIndex])){
+		++charIndex;
+	}
+	// Read digit sequence
+	if((line[charIndex] == '0' && line[charIndex + 1] == 'x') || isdigit(line[charIndex])){
+		++charIndex;
+		while(charIndex < lineSize && isdigit(line[charIndex])){
+			++charIndex;
+		}
+		if(!isdigit(line[charIndex]) && !isspace(line[charIndex])){
+			fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+			return -1;
+		}
+		fileInst->curline = atoi(line);
+	}else{
+		fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}
+	// Trim leading space
+	while(charIndex < lineSize && isspace(line[charIndex])){
+		++charIndex;
+	}
+	// Read char sequence
+	char *headerName = (char *)calloc(4096, sizeof(char));
+	if(charIndex < lineSize && line[charIndex] == '\"'){ // q-char-sequence
+		++charIndex;
+		for(int i = 0; line[charIndex] != '\"'; ++charIndex, ++i){
+			if(line[charIndex] == '\n'){
+				fprintf(stderr, WASMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst), fileInst->curline);
+				return -1;
+			}
+			headerName[i] = line[charIndex];
+		}
+	}
+	headerName = realloc(headerName, strlen(headerName) + 1);
+	free(fileInst->fname);
+	fileInst->fname = headerName;
+	++charIndex;
+	// Trim trailing space
+	while(charIndex < lineSize && isspace(line[charIndex]) && line[charIndex] != '\n'){
+		++charIndex;
+	}
+	if(charIndex < lineSize && line[charIndex] != '\n'){
+		fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER, getShortName(fileInst), fileInst->curline);
+		return -1;
+	}
+	free(line);
 	return 0;
 }
 int ppPragma(FileInst **fileInstPtr, Stack *fileStack, FILE *fout){

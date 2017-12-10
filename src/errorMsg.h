@@ -16,4 +16,6 @@
 #define WASMCC_ERR_EXPECT_VA "[PP] %s:%u Error: expected '...' operator"
 #define WASMCC_ERR_VA_NOT_END "[PP] %s:%u Error: '...' operator should be at end of argument list"
 #define WASMCC_ERR_NO_DIGIT_AFTER_EXPO_SIGN "[PP] %s:%u Error: there must be digit sequence after exponent sign"
+#define WASMCC_ERR_EXPECT_DIGIT "[PP] %s:%u Error: expected digit sequence"
+#define WASMCC_ERR_CONTAIN_INVALID_CHARACTER "[PP] %s:%u Error: there's invalid character before line end"
 #endif

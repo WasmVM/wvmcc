@@ -530,5 +530,6 @@ static void freeNode(Map *this, MapNode *node){
 
 void mapFree(Map **thisMapPtr){
 	freeNode(*thisMapPtr, (*thisMapPtr)->head);
+	free(*thisMapPtr);
 	thisMapPtr = NULL;
 }

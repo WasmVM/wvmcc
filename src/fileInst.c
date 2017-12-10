@@ -23,7 +23,7 @@ FileInst *fileInstNew(char *fname){
 		perror(fname);
 		return NULL;
 	}
-	newFileInst->fname = (char *)calloc(strlen(fname), sizeof(char));
+	newFileInst->fname = (char *)calloc(strlen(fname) + 1, sizeof(char));
 	strcpy(newFileInst->fname, fname);
 	newFileInst->curline = 1;
 	return newFileInst;

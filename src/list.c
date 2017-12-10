@@ -59,9 +59,12 @@ void *listRemove(List *theList, int index){
 	if(index >= theList->size){
 		return NULL;
 	}
+	ListNode *curHead = NULL;
 	if(index == 0){
 		void *data = theList->head->data;
+		curHead = theList->head;
 		theList->head = theList->head->next;
+		free(curHead);
 		return data;
 	}
 	ListNode *prev = theList->head;
@@ -74,9 +77,19 @@ void *listRemove(List *theList, int index){
 		theList->tail = prev;
 	}
 	prev->next = cur->next;
+	free(cur);
 	return cur->data;
 }
 void listFree(List **theListPtr){
+	if(*theListPtr == NULL){
+		return;
+	}
+	ListNode *cur = (*theListPtr)->head;
+	while(cur != NULL){
+		ListNode *node = cur;
+		cur = cur->next;
+		free(node);
+	}
 	free(*theListPtr);
 	theListPtr = NULL;
 }

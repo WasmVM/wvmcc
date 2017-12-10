@@ -200,7 +200,7 @@ int main(int argc, char *argv[]){
 	defInclPath[cppPathLen] = DELIM_CHAR;
 	strcat(defInclPath, "include");
 	// Alloc main file instance
-	char *mainPath = (char *)calloc(cppPathLen + strlen(argv[1]) + 1, sizeof(char));
+	char *mainPath = (char *)calloc(cppPathLen + strlen(argv[1]) + 2, sizeof(char));
 	memcpy(mainPath, argv[0], cppPathLen);
 	mainPath[cppPathLen] = DELIM_CHAR;
 	strcat(mainPath, argv[1]);
@@ -223,6 +223,8 @@ int main(int argc, char *argv[]){
 // Process
 	int parseErr = scan(fileStack, fout, macroMap);
 // Clean
+	// Macro map
+	mapFree(&macroMap);
 	// Cpp path
 	free(defInclPath);
 	// Close output

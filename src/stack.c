@@ -34,6 +34,7 @@ int stackPop(Stack *thisStack, void **dataPtr){
 		StackNode *node = thisStack->head;
 		thisStack->head = node->next;
 		*dataPtr = node->data;
+		free(node);
 		--thisStack->size;
 		return 1;
 	}else{
