@@ -1,4 +1,4 @@
-add_executable(wasmcpp
+add_executable(wvmcpp
 	pp.c
 	stack.c
 	fileInst.c
