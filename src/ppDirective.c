@@ -1004,7 +1004,7 @@ int ppIndlude(FileInst** fileInstPtr,
   }
   stackPush(fileStack, fileInst);
   *fileInstPtr = inclFile;
-  fprintf(fout, "# 1 %s 1", headerPath);
+  fprintf(fout, "# 1 \"%s\" 1", headerPath);
   // Clean
   free(line);
   free(headerName);
@@ -1933,7 +1933,7 @@ int ppLine(FileInst** fileInstPtr,
     ++charIndex;
   }
   if (line[charIndex] == '\n') {
-    fprintf(fout, "# %d %s", fileInst->curline, fileInst->fname);
+    fprintf(fout, "# %d \"%s\"", fileInst->curline, fileInst->fname);
     free(line);
     return 0;
   }
@@ -1953,7 +1953,7 @@ int ppLine(FileInst** fileInstPtr,
   headerName = realloc(headerName, strlen(headerName) + 1);
   free(fileInst->fname);
   fileInst->fname = headerName;
-  fprintf(fout, "# %d %s", fileInst->curline, fileInst->fname);
+  fprintf(fout, "# %d \"%s\"", fileInst->curline, fileInst->fname);
   ++charIndex;
   // Trim trailing space
   while (charIndex < lineSize && isspace(line[charIndex]) &&

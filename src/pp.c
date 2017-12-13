@@ -193,7 +193,7 @@ int scan(Stack* fileStack, FILE* fout, Map* macroMap) {
     // End processing this file
     FileInst* topFile = NULL;
     if (!stackTop(fileStack, (void**)&topFile)) {
-      fprintf(fout, "\n# %u %s 2\n", topFile->curline,
+      fprintf(fout, "\n# %u \"%s\" 2\n", topFile->curline,
               topFile->fname);  // 2: return to file
     }
     fileInstFree(&fileInst);
