@@ -235,6 +235,7 @@ int main(int argc, char* argv[]) {
     perror(argv[2]);
     return -3;
   }
+  fprintf(fout, "# %d \"%s\"\n", mainFile->curline, mainFile->fname);
   // File stack
   Stack* fileStack = stackNew();
   stackPush(fileStack, mainFile);
