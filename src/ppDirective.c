@@ -1467,12 +1467,106 @@ int ppIfdef(FileInst** fileInstPtr,
             Stack* fileStack,
             FILE* fout,
             Map* macroMap, int *skipPtr) {
+  FileInst* fileInst = *fileInstPtr;
+  // Check the whole word and next
+  char* word = "ef";  // "ifd" has been checked
+  char thisChar = nextc(fileInst, fout);
+  for (int i = 0; i < 2; ++i, thisChar = nextc(fileInst, fout)) {
+    if (thisChar != word[i]) {
+      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+              fileInst->curline);
+      return -1;
+    }
+  }
+  if (!isspace(thisChar) && thisChar != EOF) {
+    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  } else if (thisChar == '\n' || thisChar == EOF) {
+    fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  // Read macro name
+  thisChar = nextc(fileInst, fout);
+  char* macroName = getIdent(&thisChar, fileInst, fout);
+  if (!macroName) {
+    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  if (!isspace(thisChar)) {
+    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  // Trim trailing space
+  while (thisChar != EOF && isspace(thisChar) && thisChar != '\n') {
+    thisChar = nextc(fileInst, fout);
+  }
+  if (thisChar != EOF && thisChar != '\n') {
+    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+            getShortName(fileInst), fileInst->curline);
+    return -1;
+  }
+  // Check whether defined or not
+  MacroInst* macro = NULL;
+  *skipPtr = mapGet(macroMap, macroName, (void**)&macro);
+  // Clean
+  free(macroName);
   return 0;
 }
 int ppIfndef(FileInst** fileInstPtr,
              Stack* fileStack,
              FILE* fout,
              Map* macroMap, int *skipPtr) {
+  FileInst* fileInst = *fileInstPtr;
+  // Check the whole word and next
+  char* word = "def";  // "ifn" has been checked
+  char thisChar = nextc(fileInst, fout);
+  for (int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)) {
+    if (thisChar != word[i]) {
+      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+              fileInst->curline);
+      return -1;
+    }
+  }
+  if (!isspace(thisChar) && thisChar != EOF) {
+    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  } else if (thisChar == '\n' || thisChar == EOF) {
+    fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  // Read macro name
+  thisChar = nextc(fileInst, fout);
+  char* macroName = getIdent(&thisChar, fileInst, fout);
+  if (!macroName) {
+    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  if (!isspace(thisChar)) {
+    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  // Trim trailing space
+  while (thisChar != EOF && isspace(thisChar) && thisChar != '\n') {
+    thisChar = nextc(fileInst, fout);
+  }
+  if (thisChar != EOF && thisChar != '\n') {
+    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+            getShortName(fileInst), fileInst->curline);
+    return -1;
+  }
+  // Check whether defined or not
+  MacroInst* macro = NULL;
+  *skipPtr = !mapGet(macroMap, macroName, (void**)&macro);
+  // Clean
+  free(macroName);
   return 0;
 }
 int ppElif(FileInst** fileInstPtr,
