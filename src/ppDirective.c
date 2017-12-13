@@ -485,32 +485,31 @@ typedef enum { PP_CONSTANT, PP_OPERATOR } PPTokenType;
 
 typedef enum {
   PP_OP_LPARAN = 1,
-// Logical
+  // Logical
   PP_OP_OR,
   PP_OP_AND,
   PP_OP_BITOR,
   PP_OP_BITXOR,
   PP_OP_BITAND,
-// Equality
+  // Equality
   PP_OP_NE,
   PP_OP_EQ,
-// Relational
+  // Relational
   PP_OP_GT,
   PP_OP_GE,
   PP_OP_LT,
   PP_OP_LE,
-// Shift
+  // Shift
   PP_OP_SHL,
   PP_OP_SHR,
-// Additive
+  // Additive
   PP_OP_ADD,
   PP_OP_SUB,
-// Multiplicative
+  // Multiplicative
   PP_OP_MUL,
   PP_OP_DIV,
   PP_OP_MOD,
-// Unary
-  PP_OP_MINUS,
+  // Unary
   PP_OP_NOT,
   PP_OP_BITNOT
 } PPOperator;
@@ -518,6 +517,7 @@ typedef enum {
 typedef struct {
   PPTokenType type;
   int data;
+  int byteSize;
 } PPToken;
 
 static int getCharValue(char* line) {
@@ -587,15 +587,13 @@ static int getCharValue(char* line) {
 
 static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
   List* tokList = listNew();
-  Stack* opStack = stackNew(); 
+  Stack* opStack = stackNew();
   int lineSize = strlen(line);
   for (int charIndex = 0, op = 0; charIndex < lineSize; ++charIndex) {
     // Integer constant
-    if ((charIndex < lineSize - 2 &&
-        line[charIndex] == '0' &&
-          (line[charIndex + 1] == 'x' || line[charIndex + 1] == 'X')) ||
-		  (charIndex < lineSize && 
-         isdigit(line[charIndex]))) {
+    if ((charIndex < lineSize - 2 && line[charIndex] == '0' &&
+         (line[charIndex + 1] == 'x' || line[charIndex + 1] == 'X')) ||
+        (charIndex < lineSize && isdigit(line[charIndex]))) {
       int value = 0;
       if (line[charIndex + 1] == 'x' || line[charIndex + 1] == 'X') {
         charIndex += 2;
@@ -622,6 +620,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
       PPToken* newTok = malloc(sizeof(PPToken));
       newTok->type = PP_CONSTANT;
       newTok->data = value;
+      newTok->byteSize = sizeof(int);
       listAdd(tokList, newTok);
       op = 0;
     } else if (line[charIndex] == '\'' ||
@@ -656,7 +655,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
         fprintf(stderr, WASMCC_ERR_INVALID_CHARACTER, getShortName(fileInst),
                 fileInst->curline);
         listFree(&tokList);
-		stackFree(&opStack);
+        stackFree(&opStack);
         return NULL;
       }
       if (charSize < sizeof(int)) {
@@ -668,6 +667,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
       PPToken* newTok = malloc(sizeof(PPToken));
       newTok->type = PP_CONSTANT;
       newTok->data = value;
+      newTok->byteSize = charSize;
       listAdd(tokList, newTok);
       op = 0;
     } else if (!strncmp(line + charIndex, "defined", 7)) {
@@ -697,60 +697,64 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
       free(ident);
       continue;
     } else if (!isspace(line[charIndex])) {  // Operator
-	PPToken *popToken = NULL;
+      PPToken* popToken = NULL;
       switch (line[charIndex]) {
         case '(':
           op = PP_OP_LPARAN;
           break;
         case ')':
-          while(!stackPop(opStack, (void **)&popToken) && popToken->data != PP_OP_LPARAN){
-				listAdd(tokList, popToken);
-			}
-			if(popToken == NULL){
-				fprintf(stderr, WASMCC_ERR_EXPECT_LPARAN, getShortName(fileInst),
+          while (!stackPop(opStack, (void**)&popToken) &&
+                 popToken->data != PP_OP_LPARAN) {
+            listAdd(tokList, popToken);
+          }
+          if (popToken == NULL) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_LPARAN, getShortName(fileInst),
                     fileInst->curline);
-				listFree(&tokList);
-				stackFree(&opStack);
-				return NULL;
-			}else{
-				free(popToken);
-			}
+            listFree(&tokList);
+            stackFree(&opStack);
+            return NULL;
+          } else {
+            free(popToken);
+          }
           break;
         case '+':
           if (op == 0) {
             op = PP_OP_ADD;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_ADD){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_ADD) {
+              listAdd(tokList, popToken);
+            }
           }
           break;
         case '-':
           if (op == 0) {
             op = PP_OP_SUB;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_ADD){
-				listAdd(tokList, popToken);
-			}
-          } else {
-            op = PP_OP_MINUS;
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_ADD) {
+              listAdd(tokList, popToken);
+            }
           }
           break;
         case '*':
           op = PP_OP_MUL;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_MUL){
-				listAdd(tokList, popToken);
-			}
+          while (!stackPop(opStack, (void**)&popToken) &&
+                 popToken->data >= PP_OP_MUL) {
+            listAdd(tokList, popToken);
+          }
           break;
         case '/':
           op = PP_OP_DIV;
-		  while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_MUL){
-				listAdd(tokList, popToken);
-			}
+          while (!stackPop(opStack, (void**)&popToken) &&
+                 popToken->data >= PP_OP_MUL) {
+            listAdd(tokList, popToken);
+          }
           break;
         case '%':
           op = PP_OP_MOD;
-		  while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_MUL){
-				listAdd(tokList, popToken);
-			}
+          while (!stackPop(opStack, (void**)&popToken) &&
+                 popToken->data >= PP_OP_MUL) {
+            listAdd(tokList, popToken);
+          }
           break;
         case '~':
           op = PP_OP_BITNOT;
@@ -759,9 +763,10 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
           if (charIndex < lineSize - 1 && line[charIndex + 1] == '=') {
             op = PP_OP_NE;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_NE){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_NE) {
+              listAdd(tokList, popToken);
+            }
           } else {
             op = PP_OP_NOT;
           }
@@ -770,54 +775,61 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
           if (charIndex < lineSize - 1 && line[charIndex + 1] == '=') {
             op = PP_OP_LE;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_GT){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_GT) {
+              listAdd(tokList, popToken);
+            }
           } else if (charIndex < lineSize - 1 && line[charIndex + 1] == '<') {
             op = PP_OP_SHL;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_SHL){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_SHL) {
+              listAdd(tokList, popToken);
+            }
           } else {
             op = PP_OP_LT;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_GT){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_GT) {
+              listAdd(tokList, popToken);
+            }
           }
           break;
         case '>':
           if (charIndex < lineSize - 1 && line[charIndex + 1] == '=') {
             op = PP_OP_GE;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_GT){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_GT) {
+              listAdd(tokList, popToken);
+            }
           } else if (charIndex < lineSize - 1 && line[charIndex + 1] == '>') {
             op = PP_OP_SHR;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_SHL){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_SHL) {
+              listAdd(tokList, popToken);
+            }
           } else {
             op = PP_OP_GT;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_GT){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_GT) {
+              listAdd(tokList, popToken);
+            }
           }
           break;
         case '=':
           if (charIndex < lineSize - 1 && line[charIndex + 1] == '=') {
             op = PP_OP_EQ;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_NE){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_NE) {
+              listAdd(tokList, popToken);
+            }
           } else {
             fprintf(stderr, WASMCC_ERR_EXPECT_EQ, getShortName(fileInst),
                     fileInst->curline);
             listFree(&tokList);
-			stackFree(&opStack);
+            stackFree(&opStack);
             return NULL;
           }
           break;
@@ -825,41 +837,46 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
           if (charIndex < lineSize - 1 && line[charIndex + 1] == '&') {
             op = PP_OP_AND;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_AND){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_AND) {
+              listAdd(tokList, popToken);
+            }
           } else {
             op = PP_OP_BITAND;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_BITAND){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_BITAND) {
+              listAdd(tokList, popToken);
+            }
           }
           break;
         case '^':
           op = PP_OP_BITXOR;
-		  while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_BITXOR){
-				listAdd(tokList, popToken);
-			}
+          while (!stackPop(opStack, (void**)&popToken) &&
+                 popToken->data >= PP_OP_BITXOR) {
+            listAdd(tokList, popToken);
+          }
           break;
         case '|':
           if (charIndex < lineSize - 1 && line[charIndex + 1] == '|') {
             op = PP_OP_OR;
             ++lineSize;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_OR){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_OR) {
+              listAdd(tokList, popToken);
+            }
           } else {
             op = PP_OP_BITOR;
-			while(!stackPop(opStack, (void **)&popToken) && popToken->data >= PP_OP_BITOR){
-				listAdd(tokList, popToken);
-			}
+            while (!stackPop(opStack, (void**)&popToken) &&
+                   popToken->data >= PP_OP_BITOR) {
+              listAdd(tokList, popToken);
+            }
           }
           break;
         default:
           fprintf(stderr, WASMCC_ERR_PP_UNKNOWN_CHARACTER,
                   getShortName(fileInst), fileInst->curline, line[charIndex]);
           listFree(&tokList);
-		  stackFree(&opStack);
+          stackFree(&opStack);
           return NULL;
       }
       // Allocate token
@@ -870,16 +887,9 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
     }
   }
   // Push the remaining operator
-  PPToken *remain = NULL;
-  while(!stackPop(opStack, (void **)&remain)){
-	listAdd(tokList, remain);
-  }
-  // Print stack
-  ListNode* cur = tokList->head;
-  while (cur) {
-    PPToken* obj = (PPToken*)cur->data;
-    printf("Type:%d Value:%d\n", obj->type, obj->data);
-    cur = cur->next;
+  PPToken* remain = NULL;
+  while (!stackPop(opStack, (void**)&remain)) {
+    listAdd(tokList, remain);
   }
   // Clean
   stackFree(&opStack);
@@ -901,7 +911,7 @@ int ppIndlude(FileInst** fileInstPtr,
       return -1;
     }
   }
-  if (!isspace(thisChar)) {
+  if (!isspace(thisChar) && thisChar != EOF) {
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
@@ -1001,7 +1011,7 @@ int ppIndlude(FileInst** fileInstPtr,
   free(headerPath);
   return 0;
 }
-int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap) {
+int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, int *skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Read line
   char thisChar = nextc(fileInst, fout);
@@ -1017,34 +1027,508 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap) {
   // Lex
   List* tokList = lexIf(line, macroMap, fileInst);
   if (tokList == NULL) {
+    free(line);
     return -1;
   }
   // Run
-
+  Stack* runStack = stackNew();
+  while (tokList->size > 0) {
+    PPToken* token = listRemove(tokList, 0);
+    if (token->type == PP_CONSTANT) {
+      stackPush(runStack, token);
+    } else {
+      PPToken *constA = NULL, *constB = NULL;
+      switch (token->data) {
+        case PP_OP_OR:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data || constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_AND:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data && constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_BITOR:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data |= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_BITXOR:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data ^= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_BITAND:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data &= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_NE:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data != constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_EQ:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data == constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_GT:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data > constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_GE:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data >= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_LT:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data < constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_LE:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = constA->data <= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_SHL:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data <<= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_SHR:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data >>= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_ADD:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data += constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_SUB:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data -= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_MUL:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data *= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_DIV:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data /= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_MOD:
+          if (stackPop(runStack, (void**)&constB)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          if (stackPop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data %= constB->data;
+          stackPush(runStack, constA);
+          free(constB);
+          break;
+        case PP_OP_NOT:
+          if (stackTop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = !constA->data;
+          break;
+        case PP_OP_BITNOT:
+          if (stackTop(runStack, (void**)&constA)) {
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+                    fileInst->curline);
+            free(line);
+            listFree(&tokList);
+            stackFree(&runStack);
+            return -1;
+          }
+          constA->data = ~constA->data;
+          constA->data &= (1 << (constA->byteSize * 8)) - 1;
+          break;
+        default:
+          break;
+      }
+      free(token);
+    }
+  }
+  // Get result
+  PPToken* result = NULL;
+  if (stackPop(runStack, (void**)&result)) {
+    fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+            fileInst->curline);
+    free(line);
+    listFree(&tokList);
+    stackFree(&runStack);
+    return -1;
+  }
+  *skipPtr = !result->data;
+  // Clean
+  free(line);
+  listFree(&tokList);
+  stackFree(&runStack);
   return 0;
 }
 int ppIfdef(FileInst** fileInstPtr,
             Stack* fileStack,
             FILE* fout,
-            Map* macroMap) {
+            Map* macroMap, int *skipPtr) {
   return 0;
 }
 int ppIfndef(FileInst** fileInstPtr,
              Stack* fileStack,
              FILE* fout,
-             Map* macroMap) {
+             Map* macroMap, int *skipPtr) {
   return 0;
 }
 int ppElif(FileInst** fileInstPtr,
            Stack* fileStack,
            FILE* fout,
-           Map* macroMap) {
+           Map* macroMap, int *skipPtr) {
+  FileInst* fileInst = *fileInstPtr;
+  // Check the whole word and next
+  char thisChar = nextc(fileInst, fout);
+  if (thisChar != 'f') { // "eli" has been checked
+    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  if(*skipPtr){
+    return ppIf(fileInstPtr, fileStack, fout, macroMap, skipPtr);
+  }else{
+    *skipPtr = 1;
+  }
   return 0;
 }
-int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout) {
+int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr) {
+  FileInst* fileInst = *fileInstPtr;
+  // Check the whole word and next
+  char thisChar = nextc(fileInst, fout);
+  if (thisChar != 'e') { // "els" has been checked
+    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  if (!isspace(thisChar = nextc(fileInst, fout)) && thisChar != EOF) {
+    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  *skipPtr = !*skipPtr;
   return 0;
 }
-int ppEndif(FileInst** fileInstPtr, Stack* fileStack, FILE* fout) {
+int ppEndif(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr) {
+  FileInst* fileInst = *fileInstPtr;
+  // Check the whole word and next
+  char* word = "dif";  // "en" has been checked
+  char thisChar = nextc(fileInst, fout);
+  for (int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)) {
+    if (thisChar != word[i]) {
+      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+              fileInst->curline);
+      return -1;
+    }
+  }
+  if (!isspace(thisChar) && thisChar != EOF) {
+    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fileInst->curline);
+    return -1;
+  }
+  *skipPtr = 0;
   return 0;
 }
 int ppError(FileInst** fileInstPtr,
@@ -1062,7 +1546,7 @@ int ppError(FileInst** fileInstPtr,
       return -1;
     }
   }
-  if (!isspace(thisChar)) {
+  if (!isspace(thisChar) && thisChar != EOF) {
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
@@ -1098,7 +1582,7 @@ int ppDefine(FileInst** fileInstPtr,
       return -1;
     }
   }
-  if (!isspace(thisChar)) {
+  if (!isspace(thisChar) && thisChar != EOF) {
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
@@ -1225,7 +1709,7 @@ int ppUndef(FileInst** fileInstPtr,
       return -1;
     }
   }
-  if (!isspace(thisChar)) {
+  if (!isspace(thisChar) && thisChar != EOF) {
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
@@ -1277,7 +1761,7 @@ int ppLine(FileInst** fileInstPtr,
       return -1;
     }
   }
-  if (!isspace(thisChar)) {
+  if (!isspace(thisChar) && thisChar != EOF) {
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
@@ -1392,7 +1876,7 @@ int ppPragma(FileInst** fileInstPtr, Stack* fileStack, FILE* fout) {
       return -1;
     }
   }
-  if (!isspace(thisChar)) {
+  if (!isspace(thisChar) && thisChar != EOF) {
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;

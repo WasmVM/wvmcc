@@ -56,14 +56,16 @@ int listIndexOf(List* theList, void* val) {
   return -1;
 }
 void* listRemove(List* theList, int index) {
-  if (index >= theList->size) {
+  if (index < 0 || index >= theList->size || theList->size == 0) {
     return NULL;
   }
+  --theList->size;
   ListNode* curHead = NULL;
   if (index == 0) {
-    void* data = theList->head->data;
+    void* data = (theList->head) ? theList->head->data : NULL;
     curHead = theList->head;
-    theList->head = theList->head->next;
+    theList->head = (theList->head) ? theList->head->next : NULL;
+	theList->tail = (theList->head) ? theList->head->next : NULL;
     free(curHead);
     return data;
   }
@@ -77,8 +79,9 @@ void* listRemove(List* theList, int index) {
     theList->tail = prev;
   }
   prev->next = cur->next;
+  void *data = cur->data;
   free(cur);
-  return cur->data;
+  return data;
 }
 void listFree(List** theListPtr) {
   if (*theListPtr == NULL) {

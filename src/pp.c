@@ -29,7 +29,8 @@ char* defInclPath = NULL;
 int parsePP(FileInst** fileInstPtr,
             Stack* fileStack,
             FILE* fout,
-            Map* macroMap) {
+            Map* macroMap,
+            int* skipPtr) {
   char thisChar;
   FileInst* fileInst = *fileInstPtr;
   // Trim leading space
@@ -37,7 +38,7 @@ int parsePP(FileInst** fileInstPtr,
     ;
   ungetc(thisChar, fileInst->fptr);
   // Read char
-  while ((thisChar = nextc(fileInst, fout)) != '\n') {
+  while ((thisChar = nextc(fileInst, fout)) != '\n' && (!*skipPtr || thisChar == 'e')) {
     switch (thisChar) {
       case 'i':
         thisChar = nextc(fileInst, fout);
@@ -46,18 +47,19 @@ int parsePP(FileInst** fileInstPtr,
             thisChar = nextc(fileInst, fout);
             switch (thisChar) {
               case 'd':  // ifdef
-                return ppIfdef(fileInstPtr, fileStack, fout, macroMap);
+                return ppIfdef(fileInstPtr, fileStack, fout, macroMap, skipPtr);
                 break;
               case 'n':  // ifndef
-                return ppIfndef(fileInstPtr, fileStack, fout, macroMap);
+                  return ppIfndef(fileInstPtr, fileStack, fout, macroMap,
+                                  skipPtr);
                 break;
               default:  // if
-                return ppIf(fileInstPtr, fileStack, fout, macroMap);
+                  return ppIf(fileInstPtr, fileStack, fout, macroMap, skipPtr);
                 break;
             }
             break;
           case 'n':  // include
-            return ppIndlude(fileInstPtr, fileStack, fout, macroMap);
+              return ppIndlude(fileInstPtr, fileStack, fout, macroMap);
             break;
           default:
             fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
@@ -73,10 +75,10 @@ int parsePP(FileInst** fileInstPtr,
             thisChar = nextc(fileInst, fout);
             switch (thisChar) {
               case 'i':  // elif
-                return ppElif(fileInstPtr, fileStack, fout, macroMap);
+                return ppElif(fileInstPtr, fileStack, fout, macroMap, skipPtr);
                 break;
               case 's':  // else
-                return ppElse(fileInstPtr, fileStack, fout);
+                return ppElse(fileInstPtr, fileStack, fout, skipPtr);
                 break;
               default:
                 fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE,
@@ -86,10 +88,14 @@ int parsePP(FileInst** fileInstPtr,
             }
             break;
           case 'n':  // endif
-            return ppEndif(fileInstPtr, fileStack, fout);
+            return ppEndif(fileInstPtr, fileStack, fout, skipPtr);
             break;
           case 'r':  // error
-            return ppError(fileInstPtr, fileStack, fout, macroMap);
+            if(!*skipPtr){
+              return ppError(fileInstPtr, fileStack, fout, macroMap);
+            }else{
+              while ((thisChar = nextc(fileInst, fout)) != '\n');
+            }
             break;
           default:
             fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
@@ -99,16 +105,16 @@ int parsePP(FileInst** fileInstPtr,
         }
         break;
       case 'p':  // pragma
-        return ppPragma(fileInstPtr, fileStack, fout);
+          return ppPragma(fileInstPtr, fileStack, fout);
         break;
       case 'd':  // define
-        return ppDefine(fileInstPtr, fileStack, fout, macroMap);
+          return ppDefine(fileInstPtr, fileStack, fout, macroMap);
         break;
       case 'u':  // undef
-        return ppUndef(fileInstPtr, fileStack, fout, macroMap);
+          return ppUndef(fileInstPtr, fileStack, fout, macroMap);
         break;
       case 'l':  // line
-        return ppLine(fileInstPtr, fileStack, fout, macroMap);
+          return ppLine(fileInstPtr, fileStack, fout, macroMap);
         break;
       default:
         fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
@@ -122,6 +128,7 @@ int parsePP(FileInst** fileInstPtr,
 
 int scan(Stack* fileStack, FILE* fout, Map* macroMap) {
   FileInst* fileInst = NULL;
+  int skip = 0;
   // Process file
   while (!stackPop(fileStack, (void**)&fileInst)) {
     int thisChar;
@@ -152,13 +159,13 @@ int scan(Stack* fileStack, FILE* fout, Map* macroMap) {
       }
       if (thisChar == '#') {
         // Proprocessor line
-        if (parsePP(&fileInst, fileStack, fout, macroMap)) {
+        if (parsePP(&fileInst, fileStack, fout, macroMap, &skip)) {
           fileInstFree(&fileInst);
           return -1;
         } else {
           fputc('\n', fout);
         }
-      } else {
+      } else if (!skip) {
         // Normal
         char* lineStr = calloc(4096, sizeof(char));
         memset(lineStr, 0, 4096);

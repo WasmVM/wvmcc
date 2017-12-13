@@ -41,4 +41,6 @@
 #define WASMCC_ERR_ERROR_DIRECTIVE "[PP] %s:%u Error: %s"
 #define WASMCC_ERR_CONTAIN_INVALID_CHARACTER \
   "[PP] %s:%u Error: there's invalid character before line end"
+#define WASMCC_ERR_EXPECT_MORE_IN_IF \
+  "[PP] %s:%u Error: expected more constant in #if or #elif directive"
 #endif
