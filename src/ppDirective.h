@@ -34,18 +34,28 @@ int ppIndlude(FileInst** fileInstPtr,
               Stack* fileStack,
               FILE* fout,
               Map* macroMap);
-int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, int *skipPtr);
+int ppIf(FileInst** fileInstPtr,
+         Stack* fileStack,
+         FILE* fout,
+         Map* macroMap,
+         int* skipPtr);
 int ppIfdef(FileInst** fileInstPtr,
             Stack* fileStack,
             FILE* fout,
-            Map* macroMap, int *skipPtr);
+            Map* macroMap,
+            int* skipPtr);
 int ppIfndef(FileInst** fileInstPtr,
              Stack* fileStack,
              FILE* fout,
-             Map* macroMap, int *skipPtr);
-int ppElif(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, int *skipPtr);
-int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr);
-int ppEndif(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr);
+             Map* macroMap,
+             int* skipPtr);
+int ppElif(FileInst** fileInstPtr,
+           Stack* fileStack,
+           FILE* fout,
+           Map* macroMap,
+           int* skipPtr);
+int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int* skipPtr);
+int ppEndif(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int* skipPtr);
 int ppError(FileInst** fileInstPtr,
             Stack* fileStack,
             FILE* fout,

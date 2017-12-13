@@ -1011,7 +1011,11 @@ int ppIndlude(FileInst** fileInstPtr,
   free(headerPath);
   return 0;
 }
-int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, int *skipPtr) {
+int ppIf(FileInst** fileInstPtr,
+         Stack* fileStack,
+         FILE* fout,
+         Map* macroMap,
+         int* skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Read line
   char thisChar = nextc(fileInst, fout);
@@ -1041,16 +1045,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
       switch (token->data) {
         case PP_OP_OR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1062,16 +1066,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_AND:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1083,16 +1087,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_BITOR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1104,16 +1108,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_BITXOR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1125,16 +1129,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_BITAND:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1146,16 +1150,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_NE:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1167,16 +1171,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_EQ:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1188,16 +1192,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_GT:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1209,16 +1213,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_GE:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1230,16 +1234,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_LT:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1251,16 +1255,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_LE:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1272,16 +1276,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_SHL:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1293,16 +1297,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_SHR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1314,16 +1318,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_ADD:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1335,16 +1339,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_SUB:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1356,16 +1360,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_MUL:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1377,16 +1381,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_DIV:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1398,16 +1402,16 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_MOD:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1419,8 +1423,8 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_NOT:
           if (stackTop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1430,8 +1434,8 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
           break;
         case PP_OP_BITNOT:
           if (stackTop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
-                    fileInst->curline);
+            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+                    getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
             stackFree(&runStack);
@@ -1466,7 +1470,8 @@ int ppIf(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap, in
 int ppIfdef(FileInst** fileInstPtr,
             Stack* fileStack,
             FILE* fout,
-            Map* macroMap, int *skipPtr) {
+            Map* macroMap,
+            int* skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Check the whole word and next
   char* word = "ef";  // "ifd" has been checked
@@ -1519,7 +1524,8 @@ int ppIfdef(FileInst** fileInstPtr,
 int ppIfndef(FileInst** fileInstPtr,
              Stack* fileStack,
              FILE* fout,
-             Map* macroMap, int *skipPtr) {
+             Map* macroMap,
+             int* skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Check the whole word and next
   char* word = "def";  // "ifn" has been checked
@@ -1572,27 +1578,28 @@ int ppIfndef(FileInst** fileInstPtr,
 int ppElif(FileInst** fileInstPtr,
            Stack* fileStack,
            FILE* fout,
-           Map* macroMap, int *skipPtr) {
+           Map* macroMap,
+           int* skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Check the whole word and next
   char thisChar = nextc(fileInst, fout);
-  if (thisChar != 'f') { // "eli" has been checked
+  if (thisChar != 'f') {  // "eli" has been checked
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
-  if(*skipPtr){
+  if (*skipPtr) {
     return ppIf(fileInstPtr, fileStack, fout, macroMap, skipPtr);
-  }else{
+  } else {
     *skipPtr = 1;
   }
   return 0;
 }
-int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr) {
+int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int* skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Check the whole word and next
   char thisChar = nextc(fileInst, fout);
-  if (thisChar != 'e') { // "els" has been checked
+  if (thisChar != 'e') {  // "els" has been checked
     fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
@@ -1605,7 +1612,10 @@ int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr) {
   *skipPtr = !*skipPtr;
   return 0;
 }
-int ppEndif(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int *skipPtr) {
+int ppEndif(FileInst** fileInstPtr,
+            Stack* fileStack,
+            FILE* fout,
+            int* skipPtr) {
   FileInst* fileInst = *fileInstPtr;
   // Check the whole word and next
   char* word = "dif";  // "en" has been checked

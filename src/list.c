@@ -65,7 +65,7 @@ void* listRemove(List* theList, int index) {
     void* data = (theList->head) ? theList->head->data : NULL;
     curHead = theList->head;
     theList->head = (theList->head) ? theList->head->next : NULL;
-	theList->tail = (theList->head) ? theList->head->next : NULL;
+    theList->tail = (theList->head) ? theList->head->next : NULL;
     free(curHead);
     return data;
   }
@@ -79,7 +79,7 @@ void* listRemove(List* theList, int index) {
     theList->tail = prev;
   }
   prev->next = cur->next;
-  void *data = cur->data;
+  void* data = cur->data;
   free(cur);
   return data;
 }

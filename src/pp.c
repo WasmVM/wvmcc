@@ -38,7 +38,8 @@ int parsePP(FileInst** fileInstPtr,
     ;
   ungetc(thisChar, fileInst->fptr);
   // Read char
-  while ((thisChar = nextc(fileInst, fout)) != '\n' && (!*skipPtr || thisChar == 'e')) {
+  while ((thisChar = nextc(fileInst, fout)) != '\n' &&
+         (!*skipPtr || thisChar == 'e')) {
     switch (thisChar) {
       case 'i':
         thisChar = nextc(fileInst, fout);
@@ -50,16 +51,16 @@ int parsePP(FileInst** fileInstPtr,
                 return ppIfdef(fileInstPtr, fileStack, fout, macroMap, skipPtr);
                 break;
               case 'n':  // ifndef
-                  return ppIfndef(fileInstPtr, fileStack, fout, macroMap,
-                                  skipPtr);
+                return ppIfndef(fileInstPtr, fileStack, fout, macroMap,
+                                skipPtr);
                 break;
               default:  // if
-                  return ppIf(fileInstPtr, fileStack, fout, macroMap, skipPtr);
+                return ppIf(fileInstPtr, fileStack, fout, macroMap, skipPtr);
                 break;
             }
             break;
           case 'n':  // include
-              return ppIndlude(fileInstPtr, fileStack, fout, macroMap);
+            return ppIndlude(fileInstPtr, fileStack, fout, macroMap);
             break;
           default:
             fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
@@ -91,10 +92,11 @@ int parsePP(FileInst** fileInstPtr,
             return ppEndif(fileInstPtr, fileStack, fout, skipPtr);
             break;
           case 'r':  // error
-            if(!*skipPtr){
+            if (!*skipPtr) {
               return ppError(fileInstPtr, fileStack, fout, macroMap);
-            }else{
-              while ((thisChar = nextc(fileInst, fout)) != '\n');
+            } else {
+              while ((thisChar = nextc(fileInst, fout)) != '\n')
+                ;
             }
             break;
           default:
@@ -105,16 +107,16 @@ int parsePP(FileInst** fileInstPtr,
         }
         break;
       case 'p':  // pragma
-          return ppPragma(fileInstPtr, fileStack, fout);
+        return ppPragma(fileInstPtr, fileStack, fout);
         break;
       case 'd':  // define
-          return ppDefine(fileInstPtr, fileStack, fout, macroMap);
+        return ppDefine(fileInstPtr, fileStack, fout, macroMap);
         break;
       case 'u':  // undef
-          return ppUndef(fileInstPtr, fileStack, fout, macroMap);
+        return ppUndef(fileInstPtr, fileStack, fout, macroMap);
         break;
       case 'l':  // line
-          return ppLine(fileInstPtr, fileStack, fout, macroMap);
+        return ppLine(fileInstPtr, fileStack, fout, macroMap);
         break;
       default:
         fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
