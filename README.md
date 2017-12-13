@@ -23,7 +23,7 @@ A C compiler for [WasmVM](https://github.com/LuisHsu/WasmVM)
 
 **The default include directory is the `include` directory in the same path of `wvmcpp`, instead of `/usr/include`.**
 
-2. 在文件方面，本專案以 **台灣正體中文** 為主要使用語言，英文為次要使用語言，其他語言 （例如: 簡體中文）僅能做為參考或翻譯使用。
+3. 在文件方面，本專案以 **台灣正體中文** 為主要使用語言，英文為次要使用語言，其他語言 （例如: 簡體中文）僅能做為參考或翻譯使用。
 
   This project uses **"Taiwan Traditional Chinese"** as primary, English as secondary language in documents.
   
