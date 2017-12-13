@@ -36,17 +36,11 @@ A C compiler for [WasmVM](https://github.com/LuisHsu/WasmVM)
   
 ## 執行 Run
 
-1. 準備好以`.wasm`為副檔名的 WebAssembly 位元檔
+1. 準備好 C 語言原始檔
 
-  Prepare your WebAssembly binary file postfixed with `.wasm`
-  
+  Prepare your C source file
 2. 執行 Run
 
 > ./wvmcpp 輸入檔名 輸出檔名
 
 > ./wvmcpp INPUTFILE OUTPUTFILE
-
-* 把 .c 轉換為 .wasm
-```
-$ ./wvmcpp <target>.c <output>.wasm
-```
