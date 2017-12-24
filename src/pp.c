@@ -63,7 +63,7 @@ int parsePP(FileInst** fileInstPtr,
             return ppIndlude(fileInstPtr, fileStack, fout, macroMap);
             break;
           default:
-            fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
                     fileInst->curline);
             return -1;
             break;
@@ -82,7 +82,7 @@ int parsePP(FileInst** fileInstPtr,
                 return ppElse(fileInstPtr, fileStack, fout, skipPtr);
                 break;
               default:
-                fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE,
+                fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE,
                         getShortName(fileInst), fileInst->curline);
                 return -1;
                 break;
@@ -100,7 +100,7 @@ int parsePP(FileInst** fileInstPtr,
             }
             break;
           default:
-            fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+            fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
                     fileInst->curline);
             return -1;
             break;
@@ -119,7 +119,7 @@ int parsePP(FileInst** fileInstPtr,
         return ppLine(fileInstPtr, fileStack, fout, macroMap);
         break;
       default:
-        fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+        fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
                 fileInst->curline);
         return -1;
         break;
@@ -202,7 +202,6 @@ int scan(Stack* fileStack, FILE* fout, Map* macroMap) {
 }
 
 int main(int argc, char* argv[]) {
-  // Prepare
   // Check argc
   if (argc < 3) {
     if (argc < 2) {

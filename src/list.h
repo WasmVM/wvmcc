@@ -1,5 +1,5 @@
-#ifndef WASMCC_LIST_DEF
-#define WASMCC_LIST_DEF
+#ifndef WVMCC_LIST_DEF
+#define WVMCC_LIST_DEF
 
 #include <stdlib.h>
 

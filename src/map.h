@@ -1,5 +1,5 @@
-#ifndef WASMCC_MAP_DEF
-#define WASMCC_MAP_DEF
+#ifndef WVMCC_MAP_DEF
+#define WVMCC_MAP_DEF
 
 #include <stdint.h>
 #include <stdlib.h>

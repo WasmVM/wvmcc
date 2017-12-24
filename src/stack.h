@@ -1,5 +1,5 @@
-#ifndef WASMCC_STACK_DEF
-#define WASMCC_STACK_DEF
+#ifndef WVMCC_STACK_DEF
+#define WVMCC_STACK_DEF
 
 #include <stdlib.h>
 
@@ -20,4 +20,4 @@ int stackPop(Stack* thisStack, void** dataPtr);
 int stackTop(Stack* thisStack, void** dataPtr);
 void stackFree(Stack** thisStackPtr);
 
-#endif  // !WASMCC_STACK_DEF
+#endif  // !WVMCC_STACK_DEF

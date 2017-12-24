@@ -1,5 +1,5 @@
-#ifndef WASMCPP_FILEINST_DEF
-#define WASMCPP_FILEINST_DEF
+#ifndef WVMCPP_FILEINST_DEF
+#define WVMCPP_FILEINST_DEF
 
 #include <errno.h>
 #include <stdio.h>

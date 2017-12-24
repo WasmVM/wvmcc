@@ -1,5 +1,5 @@
-#ifndef WASMCC_PPDIRECTIVE_DEF
-#define WASMCC_PPDIRECTIVE_DEF
+#ifndef WVMCC_PPDIRECTIVE_DEF
+#define WVMCC_PPDIRECTIVE_DEF
 
 #include <ctype.h>
 #include <errno.h>
@@ -70,4 +70,4 @@ int ppUndef(FileInst** fileInstPtr,
             Map* macroMap);
 int ppLine(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, Map* macroMap);
 int ppPragma(FileInst** fileInstPtr, Stack* fileStack, FILE* fout);
-#endif  // !WASMCC_PPDIRECTIVE_DEF
+#endif  // !WVMCC_PPDIRECTIVE_DEF

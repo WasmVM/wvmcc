@@ -102,7 +102,7 @@ char* expandMacro(char* line, Map* macroMap, FileInst* fileInst, FILE* fout) {
           }
           // digit
           if (!isdigit(line[charIndex])) {
-            fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER,
+            fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER,
                     getShortName(fileInst), fileInst->curline);
             return NULL;
           }
@@ -138,7 +138,7 @@ char* expandMacro(char* line, Map* macroMap, FileInst* fileInst, FILE* fout) {
             if (line[charIndex] == '(') {
               for (int i = 0; i <= macro->params->size; ++i) {
                 if (++charIndex > lineSize) {
-                  fprintf(stderr, WASMCC_ERR_INVALID_MACRO_ARGS,
+                  fprintf(stderr, WVMCC_ERR_INVALID_MACRO_ARGS,
                           getShortName(fileInst), fileInst->curline);
                   return NULL;
                 }
@@ -162,7 +162,7 @@ char* expandMacro(char* line, Map* macroMap, FileInst* fileInst, FILE* fout) {
                 // Check parameter count
                 if (i == macro->params->size - 1) {
                   if (!macro->hasVA && line[charIndex] != ')') {
-                    fprintf(stderr, WASMCC_ERR_MACRO_PARAM_TOO_MORE,
+                    fprintf(stderr, WVMCC_ERR_MACRO_PARAM_TOO_MORE,
                             getShortName(fileInst), fileInst->curline, ident);
                     mapFree(&paramMap);
                     free(str);
@@ -171,7 +171,7 @@ char* expandMacro(char* line, Map* macroMap, FileInst* fileInst, FILE* fout) {
                   }
                 } else if ((i < macro->params->size - 1) &&
                            (line[charIndex] == ')')) {
-                  fprintf(stderr, WASMCC_ERR_MACRO_PARAM_TOO_FEW,
+                  fprintf(stderr, WVMCC_ERR_MACRO_PARAM_TOO_FEW,
                           getShortName(fileInst), fileInst->curline, ident);
                   mapFree(&paramMap);
                   free(str);
@@ -196,7 +196,7 @@ char* expandMacro(char* line, Map* macroMap, FileInst* fileInst, FILE* fout) {
                 mapInsert(paramMap, keyStr, newParMacro);
               }
             } else {
-              fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_PARAM,
+              fprintf(stderr, WVMCC_ERR_EXPECT_MACRO_PARAM,
                       getShortName(fileInst), fileInst->curline, ident);
               mapFree(&paramMap);
               free(ident);
@@ -300,7 +300,7 @@ static char* expandMacroIf(char* line,
           }
           // digit
           if (!isdigit(line[charIndex])) {
-            fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER,
+            fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER,
                     getShortName(fileInst), fileInst->curline);
             return NULL;
           }
@@ -355,7 +355,7 @@ static char* expandMacroIf(char* line,
                   Map* paramMap = mapNew(compMacro, freeMacroName, freeMacro);
                   for (int i = 0; i <= macro->params->size; ++i) {
                     if (++charIndex > lineSize) {
-                      fprintf(stderr, WASMCC_ERR_INVALID_MACRO_ARGS,
+                      fprintf(stderr, WVMCC_ERR_INVALID_MACRO_ARGS,
                               getShortName(fileInst), fileInst->curline);
                       return NULL;
                     }
@@ -379,7 +379,7 @@ static char* expandMacroIf(char* line,
                     // Check parameter count
                     if (i == macro->params->size - 1) {
                       if (!macro->hasVA && line[charIndex] != ')') {
-                        fprintf(stderr, WASMCC_ERR_MACRO_PARAM_TOO_MORE,
+                        fprintf(stderr, WVMCC_ERR_MACRO_PARAM_TOO_MORE,
                                 getShortName(fileInst), fileInst->curline,
                                 ident);
                         mapFree(&paramMap);
@@ -389,7 +389,7 @@ static char* expandMacroIf(char* line,
                       }
                     } else if ((i < macro->params->size - 1) &&
                                (line[charIndex] == ')')) {
-                      fprintf(stderr, WASMCC_ERR_MACRO_PARAM_TOO_FEW,
+                      fprintf(stderr, WVMCC_ERR_MACRO_PARAM_TOO_FEW,
                               getShortName(fileInst), fileInst->curline, ident);
                       mapFree(&paramMap);
                       free(str);
@@ -652,7 +652,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
       }
       int value = getCharValue(charLine);
       if (value == -1) {
-        fprintf(stderr, WASMCC_ERR_INVALID_CHARACTER, getShortName(fileInst),
+        fprintf(stderr, WVMCC_ERR_INVALID_CHARACTER, getShortName(fileInst),
                 fileInst->curline);
         listFree(&tokList);
         stackFree(&opStack);
@@ -708,7 +708,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
             listAdd(tokList, popToken);
           }
           if (popToken == NULL) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_LPARAN, getShortName(fileInst),
+            fprintf(stderr, WVMCC_ERR_EXPECT_LPARAN, getShortName(fileInst),
                     fileInst->curline);
             listFree(&tokList);
             stackFree(&opStack);
@@ -826,7 +826,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
               listAdd(tokList, popToken);
             }
           } else {
-            fprintf(stderr, WASMCC_ERR_EXPECT_EQ, getShortName(fileInst),
+            fprintf(stderr, WVMCC_ERR_EXPECT_EQ, getShortName(fileInst),
                     fileInst->curline);
             listFree(&tokList);
             stackFree(&opStack);
@@ -873,7 +873,7 @@ static List* lexIf(char* line, Map* macroMap, FileInst* fileInst) {
           }
           break;
         default:
-          fprintf(stderr, WASMCC_ERR_PP_UNKNOWN_CHARACTER,
+          fprintf(stderr, WVMCC_ERR_PP_UNKNOWN_CHARACTER,
                   getShortName(fileInst), fileInst->curline, line[charIndex]);
           listFree(&tokList);
           stackFree(&opStack);
@@ -906,17 +906,17 @@ int ppIndlude(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 5; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   } else if (thisChar == '\n') {
-    fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -942,7 +942,7 @@ int ppIndlude(FileInst** fileInstPtr,
     ++charIndex;
     for (int i = 0; line[charIndex] != '>'; ++charIndex, ++i) {
       if (line[charIndex] == '\n') {
-        fprintf(stderr, WASMCC_ERR_H_CHAR_HEADER_NOEND, getShortName(fileInst),
+        fprintf(stderr, WVMCC_ERR_H_CHAR_HEADER_NOEND, getShortName(fileInst),
                 fileInst->curline);
         return -1;
       }
@@ -952,14 +952,14 @@ int ppIndlude(FileInst** fileInstPtr,
     ++charIndex;
     for (int i = 0; line[charIndex] != '\"'; ++charIndex, ++i) {
       if (line[charIndex] == '\n') {
-        fprintf(stderr, WASMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst),
+        fprintf(stderr, WVMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst),
                 fileInst->curline);
         return -1;
       }
       headerName[i] = line[charIndex];
     }
   } else {
-    fprintf(stderr, WASMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_HEADER_NAME, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -993,7 +993,7 @@ int ppIndlude(FileInst** fileInstPtr,
     ++charIndex;
   }
   if (charIndex < lineSize && line[charIndex] != '\n') {
-    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+    fprintf(stderr, WVMCC_ERR_CONTAIN_INVALID_CHARACTER,
             getShortName(fileInst), fileInst->curline);
     return -1;
   }
@@ -1045,7 +1045,7 @@ int ppIf(FileInst** fileInstPtr,
       switch (token->data) {
         case PP_OP_OR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1053,7 +1053,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1066,7 +1066,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_AND:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1074,7 +1074,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1087,7 +1087,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_BITOR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1095,7 +1095,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1108,7 +1108,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_BITXOR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1116,7 +1116,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1129,7 +1129,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_BITAND:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1137,7 +1137,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1150,7 +1150,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_NE:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1158,7 +1158,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1171,7 +1171,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_EQ:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1179,7 +1179,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1192,7 +1192,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_GT:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1200,7 +1200,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1213,7 +1213,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_GE:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1221,7 +1221,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1234,7 +1234,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_LT:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1242,7 +1242,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1255,7 +1255,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_LE:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1263,7 +1263,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1276,7 +1276,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_SHL:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1284,7 +1284,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1297,7 +1297,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_SHR:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1305,7 +1305,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1318,7 +1318,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_ADD:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1326,7 +1326,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1339,7 +1339,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_SUB:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1347,7 +1347,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1360,7 +1360,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_MUL:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1368,7 +1368,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1381,7 +1381,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_DIV:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1389,7 +1389,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1402,7 +1402,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_MOD:
           if (stackPop(runStack, (void**)&constB)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1410,7 +1410,7 @@ int ppIf(FileInst** fileInstPtr,
             return -1;
           }
           if (stackPop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1423,7 +1423,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_NOT:
           if (stackTop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1434,7 +1434,7 @@ int ppIf(FileInst** fileInstPtr,
           break;
         case PP_OP_BITNOT:
           if (stackTop(runStack, (void**)&constA)) {
-            fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF,
+            fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF,
                     getShortName(fileInst), fileInst->curline);
             free(line);
             listFree(&tokList);
@@ -1453,7 +1453,7 @@ int ppIf(FileInst** fileInstPtr,
   // Get result
   PPToken* result = NULL;
   if (stackPop(runStack, (void**)&result)) {
-    fprintf(stderr, WASMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_MORE_IN_IF, getShortName(fileInst),
             fileInst->curline);
     free(line);
     listFree(&tokList);
@@ -1478,17 +1478,17 @@ int ppIfdef(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 2; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   } else if (thisChar == '\n' || thisChar == EOF) {
-    fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1496,12 +1496,12 @@ int ppIfdef(FileInst** fileInstPtr,
   thisChar = nextc(fileInst, fout);
   char* macroName = getIdent(&thisChar, fileInst, fout);
   if (!macroName) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
   if (!isspace(thisChar)) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1510,7 +1510,7 @@ int ppIfdef(FileInst** fileInstPtr,
     thisChar = nextc(fileInst, fout);
   }
   if (thisChar != EOF && thisChar != '\n') {
-    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+    fprintf(stderr, WVMCC_ERR_CONTAIN_INVALID_CHARACTER,
             getShortName(fileInst), fileInst->curline);
     return -1;
   }
@@ -1532,17 +1532,17 @@ int ppIfndef(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   } else if (thisChar == '\n' || thisChar == EOF) {
-    fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1550,12 +1550,12 @@ int ppIfndef(FileInst** fileInstPtr,
   thisChar = nextc(fileInst, fout);
   char* macroName = getIdent(&thisChar, fileInst, fout);
   if (!macroName) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
   if (!isspace(thisChar)) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1564,7 +1564,7 @@ int ppIfndef(FileInst** fileInstPtr,
     thisChar = nextc(fileInst, fout);
   }
   if (thisChar != EOF && thisChar != '\n') {
-    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+    fprintf(stderr, WVMCC_ERR_CONTAIN_INVALID_CHARACTER,
             getShortName(fileInst), fileInst->curline);
     return -1;
   }
@@ -1584,7 +1584,7 @@ int ppElif(FileInst** fileInstPtr,
   // Check the whole word and next
   char thisChar = nextc(fileInst, fout);
   if (thisChar != 'f') {  // "eli" has been checked
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1600,12 +1600,12 @@ int ppElse(FileInst** fileInstPtr, Stack* fileStack, FILE* fout, int* skipPtr) {
   // Check the whole word and next
   char thisChar = nextc(fileInst, fout);
   if (thisChar != 'e') {  // "els" has been checked
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
   if (!isspace(thisChar = nextc(fileInst, fout)) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1622,13 +1622,13 @@ int ppEndif(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1645,13 +1645,13 @@ int ppError(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1666,7 +1666,7 @@ int ppError(FileInst** fileInstPtr,
   errorStr = expandMacro(errorStr, macroMap, fileInst, fout);
   free(oldLine);
   // Print error
-  fprintf(stderr, WASMCC_ERR_ERROR_DIRECTIVE, getShortName(fileInst),
+  fprintf(stderr, WVMCC_ERR_ERROR_DIRECTIVE, getShortName(fileInst),
           fileInst->curline, errorStr);
   free(errorStr);
   return -1;
@@ -1681,17 +1681,17 @@ int ppDefine(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 5; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   } else if (thisChar == '\n') {
-    fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1699,12 +1699,12 @@ int ppDefine(FileInst** fileInstPtr,
   thisChar = nextc(fileInst, fout);
   char* macroName = getIdent(&thisChar, fileInst, fout);
   if (!macroName) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
   if ((!isspace(thisChar) && thisChar != '(')) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1723,7 +1723,7 @@ int ppDefine(FileInst** fileInstPtr,
         thisChar = nextc(fileInst, fout);
       }
       if (thisChar == '\n') {
-        fprintf(stderr, WASMCC_ERR_INVALID_MACRO_PARAM, getShortName(fileInst),
+        fprintf(stderr, WVMCC_ERR_INVALID_MACRO_PARAM, getShortName(fileInst),
                 fileInst->curline);
         free(newMacro);
         listFree(&newMacro->params);
@@ -1733,7 +1733,7 @@ int ppDefine(FileInst** fileInstPtr,
       } else if (thisChar == '.') {
         // Variation argument
         if ((nextc(fileInst, fout) != '.') || (nextc(fileInst, fout) != '.')) {
-          fprintf(stderr, WASMCC_ERR_EXPECT_VA, getShortName(fileInst),
+          fprintf(stderr, WVMCC_ERR_EXPECT_VA, getShortName(fileInst),
                   fileInst->curline);
           free(newMacro);
           listFree(&newMacro->params);
@@ -1743,7 +1743,7 @@ int ppDefine(FileInst** fileInstPtr,
         while (isspace(thisChar = nextc(fileInst, fout)) && thisChar != '\n')
           ;
         if (thisChar != ')') {
-          fprintf(stderr, WASMCC_ERR_VA_NOT_END, getShortName(fileInst),
+          fprintf(stderr, WVMCC_ERR_VA_NOT_END, getShortName(fileInst),
                   fileInst->curline);
           free(newMacro);
           listFree(&newMacro->params);
@@ -1754,7 +1754,7 @@ int ppDefine(FileInst** fileInstPtr,
         // Get identifier
         char* ident = getIdent(&thisChar, fileInst, fout);
         if (!ident) {
-          fprintf(stderr, WASMCC_ERR_INVALID_MACRO_PARAM,
+          fprintf(stderr, WVMCC_ERR_INVALID_MACRO_PARAM,
                   getShortName(fileInst), fileInst->curline);
           free(newMacro);
           listFree(&newMacro->params);
@@ -1767,7 +1767,7 @@ int ppDefine(FileInst** fileInstPtr,
         }
         switch (thisChar) {
           case '\n':
-            fprintf(stderr, WASMCC_ERR_INVALID_MACRO_PARAM,
+            fprintf(stderr, WVMCC_ERR_INVALID_MACRO_PARAM,
                     getShortName(fileInst), fileInst->curline);
             free(newMacro);
             listFree(&newMacro->params);
@@ -1777,7 +1777,7 @@ int ppDefine(FileInst** fileInstPtr,
           case ')':
             break;
           default:
-            fprintf(stderr, WASMCC_ERR_INVALID_MACRO_PARAM,
+            fprintf(stderr, WVMCC_ERR_INVALID_MACRO_PARAM,
                     getShortName(fileInst), fileInst->curline);
             free(newMacro);
             listFree(&newMacro->params);
@@ -1808,17 +1808,17 @@ int ppUndef(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 4; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   } else if (thisChar == '\n') {
-    fprintf(stderr, WASMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_MACRO_NAME, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1826,12 +1826,12 @@ int ppUndef(FileInst** fileInstPtr,
   thisChar = nextc(fileInst, fout);
   char* macroName = getIdent(&thisChar, fileInst, fout);
   if (!macroName) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
   if (!isspace(thisChar)) {
-    fprintf(stderr, WASMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_INVALID_IDENTIFIER, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1840,7 +1840,7 @@ int ppUndef(FileInst** fileInstPtr,
     thisChar = nextc(fileInst, fout);
   }
   if (thisChar != EOF && thisChar != '\n') {
-    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+    fprintf(stderr, WVMCC_ERR_CONTAIN_INVALID_CHARACTER,
             getShortName(fileInst), fileInst->curline);
     return -1;
   }
@@ -1860,17 +1860,17 @@ int ppLine(FileInst** fileInstPtr,
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 3; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   } else if (thisChar == '\n') {
-    fprintf(stderr, WASMCC_ERR_EXPECT_DIGIT, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_DIGIT, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1917,13 +1917,13 @@ int ppLine(FileInst** fileInstPtr,
       }
     }
     if (charIndex < lineSize && !isspace(line[charIndex])) {
-      fprintf(stderr, WASMCC_ERR_EXPECT_DIGIT, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_EXPECT_DIGIT, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
     fileInst->curline = value;
   } else {
-    fprintf(stderr, WASMCC_ERR_EXPECT_DIGIT, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_EXPECT_DIGIT, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
@@ -1943,7 +1943,7 @@ int ppLine(FileInst** fileInstPtr,
     ++charIndex;
     for (int i = 0; line[charIndex] != '\"'; ++charIndex, ++i) {
       if (line[charIndex] == '\n') {
-        fprintf(stderr, WASMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst),
+        fprintf(stderr, WVMCC_ERR_Q_CHAR_HEADER_NOEND, getShortName(fileInst),
                 fileInst->curline);
         return -1;
       }
@@ -1961,7 +1961,7 @@ int ppLine(FileInst** fileInstPtr,
     ++charIndex;
   }
   if (charIndex < lineSize && line[charIndex] != '\n') {
-    fprintf(stderr, WASMCC_ERR_CONTAIN_INVALID_CHARACTER,
+    fprintf(stderr, WVMCC_ERR_CONTAIN_INVALID_CHARACTER,
             getShortName(fileInst), fileInst->curline);
     return -1;
   }
@@ -1975,13 +1975,13 @@ int ppPragma(FileInst** fileInstPtr, Stack* fileStack, FILE* fout) {
   char thisChar = nextc(fileInst, fout);
   for (int i = 0; i < 5; ++i, thisChar = nextc(fileInst, fout)) {
     if (thisChar != word[i]) {
-      fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+      fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
               fileInst->curline);
       return -1;
     }
   }
   if (!isspace(thisChar) && thisChar != EOF) {
-    fprintf(stderr, WASMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
+    fprintf(stderr, WVMCC_ERR_NON_PP_DIRECTIVE, getShortName(fileInst),
             fileInst->curline);
     return -1;
   }
