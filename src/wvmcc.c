@@ -1,10 +1,8 @@
 #include <errno.h>
 #include <stdio.h>
 
-int compile(FILE *fin, FILE *fout){
-
-	return 0;
-}
+#include "fileInst.h"
+#include "parse/node.h"
 
 int main(int argc, char* argv[]) {
   // Check argc
@@ -17,11 +15,7 @@ int main(int argc, char* argv[]) {
     return -1;
   }
   // Open input file
-  FILE* fin = fopen(argv[1], "r");
-  if (errno) {
-    perror(argv[1]);
-    return -2;
-  }
+  FileInst *fInst = fileInstNew(argv[1]);
   // Open output file
   FILE* fout = fopen(argv[2], "wb");
   if (errno) {
@@ -29,12 +23,27 @@ int main(int argc, char* argv[]) {
     return -3;
   }
   // Start compiling
-  int err = compile(fin, fout);
-  // Close output
+  int err = 0;
+  Node *token = NULL;
+  while((token = getToken(fInst)) != NULL){
+    switch(token->type){
+      case Tok_String: 
+        printf("<String>");
+        for(int i = 0; i < token->byteLen; ++i){
+          printf(" %02x", (char)token->data.str[i]);
+        }
+        printf("\n");
+      break;
+      default: 
+      break;
+    }
+  }
+  // Clean
   fclose(fout);
   if (err) {
     remove(argv[2]);
     return -1;
   }
+  fileInstFree(&fInst);
   return 0;
 }

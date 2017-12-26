@@ -41,7 +41,9 @@ int nextc(FileInst* fileInst, FILE* fout) {
     if (thisChar == '\\') {
       if (next == '\n') {
         ++fileInst->curline;
-        fprintf(fout, "\\\n");
+        if(fout != NULL){
+          fprintf(fout, "\\\n");
+        }
         thisChar = fgetc(fileInst->fptr);
       } else {
         ungetc(next, fileInst->fptr);
@@ -65,7 +67,9 @@ int nextc(FileInst* fileInst, FILE* fout) {
           }
           if (thisChar == '\n') {
             ++fileInst->curline;
-            fprintf(fout, "\n");
+            if(fout != NULL){
+              fprintf(fout, "\n");
+            }
           }
           thisChar = next;
         }

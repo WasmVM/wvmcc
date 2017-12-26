@@ -43,4 +43,10 @@
   "[PP] %s:%u Error: there's invalid character before line end"
 #define WVMCC_ERR_EXPECT_MORE_IN_IF \
   "[PP] %s:%u Error: expected more constant in #if or #elif directive"
+#define WVMCC_ERR_EXPECT_STRING_LITERAL \
+  "[CC] %s:%u Error: expected '\"' in string literal"
+#define WVMCC_ERR_UNKNOWN_TOKEN \
+  "[CC] %s:%u Error: unknown token"
+#define WVMCC_ERR_PP_INVALID_ESCAPE_CHARACTER \
+  "[CC] %s:%u Error: invalid escape character"
 #endif
