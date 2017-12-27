@@ -253,6 +253,7 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
 			isHex = 1;
 		}else{
 			ungetc(thisChar, fileInst->fptr);
+      thisChar = '0';
 		}
 	}
 	if(isHex == 1){
@@ -265,15 +266,21 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
       thisChar = nextc(fileInst, NULL);
     }
 		// decimal point
-		if(thisChar != '.'){
-			fprintf(stderr, WVMCC_ERR_EXPECT_DECIMAL_POINT, getShortName(fileInst), fileInst->curline);
-			return NULL;
-		}
-		// fraction part
-		thisChar = nextc(fileInst, NULL);
-		for (double i = 0.1; thisChar != EOF && isdigit(thisChar); i *= 0.1) {
-      value += (thisChar - '0') * i;
+		if(thisChar == '.'){
+			// fraction part
       thisChar = nextc(fileInst, NULL);
+      for (double i = 0.1; thisChar != EOF && isdigit(thisChar); i *= 0.1) {
+        value += (thisChar - '0') * i;
+        thisChar = nextc(fileInst, NULL);
+      }
+      // exponent part [optional]
+      if(thisChar == 'e' || thisChar == 'E'){
+        thisChar = nextc(fileInst, NULL);
+        char sign = '+';
+        
+      }
+		}else if(thisChar == 'e' || thisChar == 'E'){
+      // exponent part [essential]
     }
 	}
 	return NULL;
@@ -285,12 +292,20 @@ Node* getToken(FileInst* fileInst) {
   while (isspace(thisChar)) {
     thisChar = nextc(fileInst, NULL);
   }
+  long int fpos = ftell(fileInst->fptr);
 	// String literal
   Node* ret = stringLiteral(fileInst, thisChar);
+  // Floating constant
+  if (ret == NULL) {
+    fseek(fileInst->fptr, fpos, SEEK_SET);
+		ret = floatingConstant(fileInst, thisChar);
+  }
 	// Integer constant
   if (ret == NULL) {
+    fseek(fileInst->fptr, fpos, SEEK_SET);
 		ret = integerConstant(fileInst, thisChar);
   }
+  // End of file
 	if(ret == NULL && thisChar == EOF){
 		ret = malloc(sizeof(Node));
 		ret->type = Tok_EOF;
