@@ -16,18 +16,20 @@ typedef enum {
 	Tok_Enum,
 	Tok_Char,
 	Tok_String,
-	Tok_Punct
+	Tok_Punct,
+	Tok_EOF
 } NodeType;
 
 typedef struct Node_ {
 	NodeType type;
 	union {
-		long int intVal;
+		unsigned long long int intVal;
 		double floatVal;
 		char *str;
 	} data;
 	int unitSize;
 	int byteLen;
+	int isSigned;
 } Node;
 
 Node *getToken(FileInst *fileInst);

@@ -49,4 +49,6 @@
   "[CC] %s:%u Error: unknown token"
 #define WVMCC_ERR_PP_INVALID_ESCAPE_CHARACTER \
   "[CC] %s:%u Error: invalid escape character"
+#define WVMCC_ERR_EXPECT_DECIMAL_POINT \
+  "[CC] %s:%u Error: expected '.' in floating constant"
 #endif

@@ -34,6 +34,9 @@ int main(int argc, char* argv[]) {
         }
         printf("\n");
       break;
+      case Tok_Int: 
+        printf("<Integer> %llu\n", token->data.intVal);
+      break;
       default: 
       break;
     }
