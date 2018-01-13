@@ -134,9 +134,10 @@ static Node* stringLiteral(FileInst* fileInst, char thisChar) {
           thisChar = nextc(fileInst, NULL);
         }
         // Fill character according to unitSize
+        int chrSize = (unitSize >= sizeof(int)) ? sizeof(int) : unitSize;
         realChar &= (unitSize >= sizeof(int)) ? -1 : (1 << (unitSize * 8)) - 1;
-        memcpy(str + strIndex, (char*)&realChar, unitSize);
-        strIndex += unitSize;
+        memcpy(str + strIndex, (char*)&realChar, chrSize);
+        strIndex += chrSize;
       }
       if (thisChar == '\n' || thisChar == EOF) {
         fprintf(stderr, WVMCC_ERR_EXPECT_STRING_LITERAL, getShortName(fileInst),
@@ -154,6 +155,155 @@ static Node* stringLiteral(FileInst* fileInst, char thisChar) {
     newToken->unitSize = unitSize;
     newToken->byteLen = strIndex;
     newToken->data.str = realloc(str, strIndex);
+    return newToken;
+  }
+  return NULL;
+}
+
+static Node* characterConstant(FileInst* fileInst, char thisChar) {
+  if (thisChar == '\'' || thisChar == 'L' || thisChar == 'u' ||
+      thisChar == 'U') {
+    // Decide unit size
+    int unitSize = 1;
+    char specifier = '\0';
+    switch (thisChar) {
+      case 'L':
+        unitSize = (unitSize < sizeof(wchar_t)) ? sizeof(wchar_t) : unitSize;
+        specifier = 'L';
+        thisChar = nextc(fileInst, NULL);
+        break;
+      case 'U':
+        unitSize = (unitSize < 4) ? 4 : unitSize;
+        specifier = 'U';
+        thisChar = nextc(fileInst, NULL);
+        break;
+      case 'u':
+        unitSize = (unitSize < 2) ? 2 : unitSize;
+        specifier = 'u';
+        thisChar = nextc(fileInst, NULL);
+        break;
+      default:
+        break;
+    }
+    // Ungetc if isn't string
+    if (thisChar != '\'') {
+      ungetc(thisChar, fileInst->fptr);
+      if (specifier != '\0') {
+        ungetc(specifier, fileInst->fptr);
+      }
+      return NULL;
+    }
+    // Fill string
+    thisChar = nextc(fileInst, NULL);
+    char *chr = calloc(unitSize, 1);
+    for (int byteIndex = 0, chrSize = (unitSize >= sizeof(int)) ? sizeof(int) : unitSize; byteIndex < unitSize && thisChar != EOF && thisChar != '\'' &&
+            thisChar != '\n'; byteIndex += chrSize) {
+      int realChar = 0;
+      // Escape sequence
+      if (thisChar == '\\') {
+        thisChar = nextc(fileInst, NULL);
+        // Octal
+        if (isdigit(thisChar) && thisChar != '8' && thisChar != '9') {
+          for (int i = 0;
+                thisChar != EOF && isdigit(thisChar) && thisChar != '8' &&
+                thisChar != '9' && (i < unitSize * 3);
+                ++i) {
+            realChar = realChar * 8 + (thisChar - '0');
+            thisChar = nextc(fileInst, NULL);
+          }
+          // Hexadecimal & Universal
+        } else if (thisChar == 'x' || thisChar == 'u' || thisChar == 'U') {
+          int charSize = unitSize;
+          switch (thisChar) {
+            case 'u':
+              charSize = 2;
+              break;
+            case 'U':
+              charSize = 4;
+              break;
+            default:
+              break;
+          }
+          for (int i = 0;
+                (thisChar = nextc(fileInst, NULL)) != EOF &&
+                (isdigit(thisChar) || (thisChar >= 'a' && thisChar <= 'f') ||
+                (thisChar >= 'A' && thisChar <= 'F')) &&
+                (i < charSize * 2);
+                ++i) {
+            if (thisChar >= 'a' && thisChar <= 'f') {
+              realChar = realChar * 16 + (thisChar - 'a' + 10);
+            } else if (thisChar >= 'A' && thisChar <= 'F') {
+              realChar = realChar * 16 + (thisChar - 'A' + 10);
+            } else {
+              realChar = realChar * 16 + (thisChar - '0');
+            }
+          }
+          // Simple
+        } else {
+          switch (thisChar) {
+            case '\'':
+            case '\"':
+            case '\?':
+            case '\\':
+              realChar = thisChar;
+              break;
+            case 'a':
+              realChar = '\a';
+              break;
+            case 'b':
+              realChar = '\b';
+              break;
+            case 'f':
+              realChar = '\f';
+              break;
+            case 'n':
+              realChar = '\n';
+              break;
+            case 'r':
+              realChar = '\r';
+              break;
+            case 't':
+              realChar = '\t';
+              break;
+            case 'v':
+              realChar = '\v';
+              break;
+            default:
+              fprintf(stderr, WVMCC_ERR_EXPECT_STRING_LITERAL,
+                      getShortName(fileInst), fileInst->curline);
+              free(chr);
+              return NULL;
+          }
+          thisChar = nextc(fileInst, NULL);
+        }
+      } else {
+        realChar = thisChar;
+        thisChar = nextc(fileInst, NULL);
+      }
+      // Fill character according to unitSize
+      realChar &= (unitSize >= sizeof(int)) ? -1 : (1 << (unitSize * 8)) - 1;
+      memcpy(chr + byteIndex, (char*)&realChar, chrSize);
+    }
+    // Ignore exceed value
+    while(thisChar != '\''){
+      // Error if not close
+      if (thisChar == '\n' || thisChar == EOF) {
+        fprintf(stderr, WVMCC_ERR_EXPECT_CHARACTER_CONSTANT, getShortName(fileInst),
+                fileInst->curline);
+        free(chr);
+        return NULL;
+      }
+      thisChar = nextc(fileInst, NULL);
+    }
+    // Trim trailng space
+    while (isspace(thisChar = nextc(fileInst, NULL))) {
+    }
+    // Alloc node
+    Node* newToken = malloc(sizeof(Node));
+    newToken->type = Tok_Char;
+    newToken->unitSize = unitSize;
+    newToken->byteLen = unitSize;
+    newToken->data.str = chr;
     return newToken;
   }
   return NULL;
@@ -251,6 +401,7 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
 		thisChar = nextc(fileInst, NULL);
 		if(thisChar == 'x' || thisChar == 'X'){
 			isHex = 1;
+      thisChar = nextc(fileInst, NULL);
 		}else{
 			ungetc(thisChar, fileInst->fptr);
       thisChar = '0';
@@ -258,6 +409,73 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
 	}
 	if(isHex == 1){
 		// hexadecimal
+    // integral part
+		while (thisChar != EOF && (isdigit(thisChar) || (thisChar >= 'a' && thisChar <= 'f') ||
+              (thisChar >= 'A' && thisChar <= 'F'))) {
+      if (thisChar >= 'a' && thisChar <= 'f') {
+        value = value * 16 + (thisChar - 'a' + 10);
+      } else if (thisChar >= 'A' && thisChar <= 'F') {
+        value = value * 16 + (thisChar - 'A' + 10);
+      } else {
+        value = value * 16 + (thisChar - '0');
+      }
+      thisChar = nextc(fileInst, NULL);
+    }
+    // decimal point
+		if(thisChar == '.'){
+			// fraction part
+      thisChar = nextc(fileInst, NULL);
+      for (double i = 0.0625; thisChar != EOF && (isdigit(thisChar) || (thisChar >= 'a' && thisChar <= 'f') ||
+              (thisChar >= 'A' && thisChar <= 'F')); i *= 0.0625) {
+        if (thisChar >= 'a' && thisChar <= 'f') {
+          value += (thisChar - 'a' + 10) * i;
+        } else if (thisChar >= 'A' && thisChar <= 'F') {
+          value += (thisChar - 'A' + 10) * i;
+        } else {
+          value += (thisChar - '0') * i;
+        }
+        thisChar = nextc(fileInst, NULL);
+      }
+      // exponent part [optional]
+      if(thisChar == 'p' || thisChar == 'P'){
+        thisChar = nextc(fileInst, NULL);
+        char sign = '+';
+        if(thisChar == '+' || thisChar == '-'){
+          sign = thisChar;
+          thisChar = nextc(fileInst, NULL);
+        }
+        int expo = 0;
+        while (thisChar != EOF && isdigit(thisChar)) {
+          expo = expo * 10 + (thisChar - '0');
+          thisChar = nextc(fileInst, NULL);
+        }
+        ungetc(thisChar, fileInst->fptr);
+        if(sign == '-'){
+          expo *= -1.0;
+        }
+        value *= pow(2, expo);
+      }
+		}else if(thisChar == 'p' || thisChar == 'P'){
+      // exponent part [essential]
+      thisChar = nextc(fileInst, NULL);
+        char sign = '+';
+        if(thisChar == '+' || thisChar == '-'){
+          sign = thisChar;
+          thisChar = nextc(fileInst, NULL);
+        }
+        int expo = 0;
+        while (thisChar != EOF && isdigit(thisChar)) {
+          expo = expo * 10 + (thisChar - '0');
+          thisChar = nextc(fileInst, NULL);
+        }
+        ungetc(thisChar, fileInst->fptr);
+        if(sign == '-'){
+          expo *= -1.0;
+        }
+        value *= pow(2, expo);
+    }else{
+      return NULL;
+    }
 	}else{
 		// decimal
 		// integral part
@@ -277,13 +495,58 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
       if(thisChar == 'e' || thisChar == 'E'){
         thisChar = nextc(fileInst, NULL);
         char sign = '+';
-        
+        if(thisChar == '+' || thisChar == '-'){
+          sign = thisChar;
+          thisChar = nextc(fileInst, NULL);
+        }
+        int expo = 0;
+        while (thisChar != EOF && isdigit(thisChar)) {
+          expo = expo * 10 + (thisChar - '0');
+          thisChar = nextc(fileInst, NULL);
+        }
+        ungetc(thisChar, fileInst->fptr);
+        if(sign == '-'){
+          expo *= -1.0;
+        }
+        value *= pow(10, expo);
       }
 		}else if(thisChar == 'e' || thisChar == 'E'){
       // exponent part [essential]
+      thisChar = nextc(fileInst, NULL);
+        char sign = '+';
+        if(thisChar == '+' || thisChar == '-'){
+          sign = thisChar;
+          thisChar = nextc(fileInst, NULL);
+        }
+        int expo = 0;
+        while (thisChar != EOF && isdigit(thisChar)) {
+          expo = expo * 10 + (thisChar - '0');
+          thisChar = nextc(fileInst, NULL);
+        }
+        ungetc(thisChar, fileInst->fptr);
+        if(sign == '-'){
+          expo *= -1.0;
+        }
+        value *= pow(10, expo);
+    }else{
+      return NULL;
     }
 	}
-	return NULL;
+  // Alloc node
+	Node* newToken = malloc(sizeof(Node));
+	newToken->type = Tok_Float;
+	newToken->data.floatVal = value;
+  newToken->unitSize = sizeof(double);
+	newToken->byteLen = sizeof(double);
+  // Suffix
+  if(thisChar == 'f' || thisChar == 'F'){
+    newToken->unitSize = sizeof(float);
+	  newToken->byteLen = sizeof(float);
+	}else if (thisChar == 'l' || thisChar == 'L'){
+    // WASM only have f64, long double is ignored
+    thisChar = nextc(fileInst, NULL);
+	}
+  return newToken;
 }
 
 Node* getToken(FileInst* fileInst) {
@@ -295,6 +558,11 @@ Node* getToken(FileInst* fileInst) {
   long int fpos = ftell(fileInst->fptr);
 	// String literal
   Node* ret = stringLiteral(fileInst, thisChar);
+  // Character constant
+  if (ret == NULL) {
+    fseek(fileInst->fptr, fpos, SEEK_SET);
+		ret = characterConstant(fileInst, thisChar);
+  }
   // Floating constant
   if (ret == NULL) {
     fseek(fileInst->fptr, fpos, SEEK_SET);

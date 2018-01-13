@@ -3,6 +3,7 @@
 
 #include <ctype.h>
 #include <uchar.h>
+#include <math.h>
 
 #include "../fileInst.h"
 #include "../errorMsg.h"
@@ -13,7 +14,6 @@ typedef enum {
 	Tok_Ident,
 	Tok_Int,
 	Tok_Float,
-	Tok_Enum,
 	Tok_Char,
 	Tok_String,
 	Tok_Punct,

@@ -12,3 +12,4 @@ add_executable(wvmcc
 	parse/lex.c
 	fileInst.c
 )
+target_link_libraries(wvmcc m)

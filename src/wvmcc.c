@@ -37,6 +37,13 @@ int main(int argc, char* argv[]) {
       case Tok_Int: 
         printf("<Integer> %llu\n", token->data.intVal);
       break;
+      case Tok_Char: 
+        printf("<Character>");
+        for(int i = 0; i < token->byteLen; ++i){
+          printf(" %02x", (char)token->data.str[i]);
+        }
+        printf("\n");
+      break;
       default: 
       break;
     }
