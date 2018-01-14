@@ -1941,7 +1941,7 @@ int ppLine(FileInst** fileInstPtr,
          line[charIndex] != '\n') {
     ++charIndex;
   }
-  if (line[charIndex] == '\n') {
+  if (charIndex >= lineSize || line[charIndex] == '\n') {
     fprintf(fout, "# %d \"%s\"", fileInst->curline, fileInst->fname);
     free(line);
     return 0;

@@ -1,18 +1,10 @@
 digraph{node [shape = record,height=.1];
-node162[label = "<f0> |11:a|<f1> | |<f2>"];
-node163[label = "<f0> |5:a|<f1> |8:a|<f2>"];
-node164[label = "<f0> |1:a|<f1> |2:a|<f2>"];
-"node163":f0 -> "node164";
-node165[label = "<f0> |6:a|<f1> |7:a|<f2>"];
-"node163":f1 -> "node165";
-node166[label = "<f0> |9:a|<f1> |10:a|<f2>"];
-"node163":f2 -> "node166";
-"node162":f0 -> "node163";
-node167[label = "<f0> |13:a|<f1> | |<f2>"];
-node168[label = "<f0> |12:a|<f1> | |<f2>"];
-"node167":f0 -> "node168";
-node169[label = "<f0> |14:a|<f1> | |<f2>"];
-"node167":f1 -> "node169";
-"node162":f1 -> "node167";
+node8[label = "<f0> |2:a|<f1> |4:a|<f2>"];
+node9[label = "<f0> |1:a|<f1> | |<f2>"];
+"node8":f0 -> "node9";
+node10[label = "<f0> |3:a|<f1> | |<f2>"];
+"node8":f1 -> "node10";
+node11[label = "<f0> |5:a|<f1> | |<f2>"];
+"node8":f2 -> "node11";
 
 }
