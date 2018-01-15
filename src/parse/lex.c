@@ -162,58 +162,216 @@ static Node* stringLiteral(FileInst* fileInst, char thisChar) {
 
 static Node* punctuator(FileInst* fileInst, char thisChar) {
   Punct newPunct;
-  switch(thisChar){
+  char nextChar;
+  switch (thisChar) {
     // single state
-    case '[': 
+    case '[':
       newPunct = Punct_brackL;
-    break;
-    case ']': 
+      break;
+    case ']':
       newPunct = Punct_brackR;
-    break;
-    case '(': 
+      break;
+    case '(':
       newPunct = Punct_paranL;
-    break;
-    case ')': 
+      break;
+    case ')':
       newPunct = Punct_paranR;
-    break;
-    case '{': 
+      break;
+    case '{':
       newPunct = Punct_braceL;
-    break;
-    case '}': 
+      break;
+    case '}':
       newPunct = Punct_braceR;
-    break;
-    case '?': 
+      break;
+    case '?':
       newPunct = Punct_ques;
-    break;
-    case ';': 
+      break;
+    case ';':
       newPunct = Punct_semi;
-    break;
-    case '~': 
+      break;
+    case '~':
       newPunct = Punct_tilde;
-    break;
-    case ',': 
+      break;
+    case ',':
       newPunct = Punct_comma;
-    break;
+      break;
     // 2 states
-    case '*': 
-    break;
+    case '*':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '=') {
+        newPunct = Punct_ass_mult;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_aster;
+      }
+      break;
     case '!':
-    break;
-    case '/': 
-    break;
-    case '=': 
-    break;
-    case '^': 
-    break;
-    case ':': 
-    break;
-    case '.': 
-    break;
-    case '#': 
-    break;
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '=') {
+        newPunct = Punct_neq;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_exclm;
+      }
+      break;
+    case '/':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '=') {
+        newPunct = Punct_ass_div;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_slash;
+      }
+      break;
+    case '=':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '=') {
+        newPunct = Punct_eq;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_assign;
+      }
+      break;
+    case '^':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '=') {
+        newPunct = Punct_ass_xor;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_caret;
+      }
+      break;
+    case ':':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '>') {
+        newPunct = Punct_brackR;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_colon;
+      }
+      break;
+    case '.':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '.') {
+        nextChar = nextc(fileInst, NULL);
+        if (nextChar == '.') {
+          newPunct = Punct_ellips;
+        } else {
+          ungetc('.', fileInst->fptr);
+          ungetc(nextChar, fileInst->fptr);
+          newPunct = Punct_dot;
+        }
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_dot;
+      }
+      break;
+    // 3 states
+    case '&':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '&') {
+        newPunct = Punct_and;
+      } else if (nextChar == '=') {
+        newPunct = Punct_ass_and;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_amp;
+      }
+      break;
+    case '|':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '|') {
+        newPunct = Punct_or;
+      } else if (nextChar == '=') {
+        newPunct = Punct_ass_or;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_vbar;
+      }
+      break;
+    case '+':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '+') {
+        newPunct = Punct_inc;
+      } else if (nextChar == '=') {
+        newPunct = Punct_ass_plus;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_plus;
+      }
+      break;
+    case '%':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '>') {
+        newPunct = Punct_braceR;
+      } else if (nextChar == '=') {
+        newPunct = Punct_ass_mod;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_percent;
+      }
+      break;
+    // 4 states
+    case '-':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '-') {
+        newPunct = Punct_dec;
+      } else if (nextChar == '>') {
+        newPunct = Punct_arrow;
+      } else if (nextChar == '=') {
+        newPunct = Punct_ass_minus;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_minus;
+      }
+      break;
+    case '>':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '>') {
+        nextChar = nextc(fileInst, NULL);
+        if (nextChar == '=') {
+          newPunct = Punct_ass_shr;
+        } else {
+          ungetc(nextChar, fileInst->fptr);
+          newPunct = Punct_shiftR;
+        }
+      } else if (nextChar == '=') {
+        newPunct = Punct_ge;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_gt;
+      }
+      break;
+    // 6 states
+    case '<':
+      nextChar = nextc(fileInst, NULL);
+      if (nextChar == '<') {
+        nextChar = nextc(fileInst, NULL);
+        if (nextChar == '=') {
+          newPunct = Punct_ass_shl;
+        } else {
+          ungetc(nextChar, fileInst->fptr);
+          newPunct = Punct_shiftL;
+        }
+      } else if (nextChar == ':') {
+        newPunct = Punct_brackL;
+      } else if (nextChar == '%') {
+        newPunct = Punct_braceL;
+      } else if (nextChar == '=') {
+        newPunct = Punct_le;
+      } else {
+        ungetc(nextChar, fileInst->fptr);
+        newPunct = Punct_lt;
+      }
+      break;
     default:
-    return NULL;
+      return NULL;
   }
+  // Alloc node
+  Node* newToken = malloc(sizeof(Node));
+  newToken->type = Tok_Punct;
+  newToken->data.punct = newPunct;
+  return newToken;
 }
 
 static Node* characterConstant(FileInst* fileInst, char thisChar) {
@@ -612,6 +770,173 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
   return newToken;
 }
 
+static void keyword(Node *node, char *identifier) {
+  if(!strcmp(identifier, "auto")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_auto;
+  }else if(!strcmp(identifier, "break")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_break;
+  }else if(!strcmp(identifier, "case")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_case;
+  }else if(!strcmp(identifier, "char")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_char;
+  }else if(!strcmp(identifier, "const")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_const;
+  }else if(!strcmp(identifier, "continue")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_continue;
+  }else if(!strcmp(identifier, "default")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_default;
+  }else if(!strcmp(identifier, "do")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_do;
+  }else if(!strcmp(identifier, "double")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_double;
+  }else if(!strcmp(identifier, "else")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_else;
+  }else if(!strcmp(identifier, "enum")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_enum;
+  }else if(!strcmp(identifier, "extern")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_extern;
+  }else if(!strcmp(identifier, "float")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_float;
+  }else if(!strcmp(identifier, "for")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_for;
+  }else if(!strcmp(identifier, "goto")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_goto;
+  }else if(!strcmp(identifier, "if")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_if;
+  }else if(!strcmp(identifier, "inline")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_inline;
+  }else if(!strcmp(identifier, "int")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_int;
+  }else if(!strcmp(identifier, "long")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_long;
+  }else if(!strcmp(identifier, "register")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_register;
+  }else if(!strcmp(identifier, "restrict")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_restrict;
+  }else if(!strcmp(identifier, "return")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_return;
+  }else if(!strcmp(identifier, "short")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_short;
+  }else if(!strcmp(identifier, "signed")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_signed;
+  }else if(!strcmp(identifier, "sizeof")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_sizeof;
+  }else if(!strcmp(identifier, "static")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_static;
+  }else if(!strcmp(identifier, "struct")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_struct;
+  }else if(!strcmp(identifier, "switch")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_switch;
+  }else if(!strcmp(identifier, "typedef")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_typedef;
+  }else if(!strcmp(identifier, "union")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_union;
+  }else if(!strcmp(identifier, "unsigned")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_unsigned;
+  }else if(!strcmp(identifier, "void")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_void;
+  }else if(!strcmp(identifier, "volatile")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_volatile;
+  }else if(!strcmp(identifier, "while")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_while;
+  }else if(!strcmp(identifier, "_Alignas")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Alignas;
+  }else if(!strcmp(identifier, "_Alignof")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Alignof;
+  }else if(!strcmp(identifier, "_Atomic")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Atomic;
+  }else if(!strcmp(identifier, "_Bool")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Bool;
+  }else if(!strcmp(identifier, "_Complex")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Complex;
+  }else if(!strcmp(identifier, "_Generic")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Generic;
+  }else if(!strcmp(identifier, "_Imaginary")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Imaginary;
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Noreturn;
+  }else if(!strcmp(identifier, "_Static_assert")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Static_assert;
+  }else if(!strcmp(identifier, "_Thread_local")){
+    node->type = Tok_Keyword;
+    node->data.keyword = Keyw_Thread_local;
+  }
+}
+
+static Node* identifier(FileInst* fileInst, char thisChar) {
+  char* ident = (char*)calloc(65, sizeof(char));
+  if (isalpha(thisChar) || thisChar == '_') {
+    ident[0] = thisChar;
+    for (int i = 1; i <= 64; ++i) {
+      if (i == 64) {
+        return NULL;
+      }
+      thisChar = nextc(fileInst, NULL);
+      if (!isalnum(thisChar) && thisChar != '_') {
+        ungetc(thisChar, fileInst->fptr);
+        break;
+      }
+      ident[i] = thisChar;
+    }
+  } else {
+    free(ident);
+    return NULL;
+  }
+  ident = (char*)realloc(ident, strlen(ident) + 1);
+  // Alloc node
+  Node* newToken = malloc(sizeof(Node));
+  newToken->type = Tok_Ident;
+  keyword(newToken, ident);
+  if(newToken->type != Tok_Keyword){
+    newToken->data.str = ident;
+    newToken->unitSize = sizeof(char);
+    newToken->byteLen = sizeof(char) * strlen(ident);
+  }
+  return newToken;
+}
+
 Node* getToken(FileInst* fileInst) {
   char thisChar = nextc(fileInst, NULL);
   // Trim leading space
@@ -635,6 +960,11 @@ Node* getToken(FileInst* fileInst) {
   if (ret == NULL) {
     fseek(fileInst->fptr, fpos, SEEK_SET);
     ret = integerConstant(fileInst, thisChar);
+  }
+  // Punctuator
+  if (ret == NULL) {
+    fseek(fileInst->fptr, fpos, SEEK_SET);
+    ret = punctuator(fileInst, thisChar);
   }
   // End of file
   if (ret == NULL && thisChar == EOF) {

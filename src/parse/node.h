@@ -60,18 +60,63 @@ typedef enum {
 	Punct_ass_plus,
 	Punct_ass_minus,
 	Punct_ass_mult,
-	Punct_ass_dev,
+	Punct_ass_div,
 	Punct_ass_mod,
 	Punct_ass_shl,
 	Punct_ass_shr,
 	Punct_ass_and,
-	Punct_ass_neg,
+	Punct_ass_xor,
 	Punct_ass_or,
 	Punct_comma,
-	Punct_hash,
-	Punct_hashhash,
 	Punct_assiplus
 } Punct;
+
+typedef enum {
+	Keyw_auto,
+	Keyw_break,
+	Keyw_case,
+	Keyw_char,
+	Keyw_const,
+	Keyw_continue,
+	Keyw_default,
+	Keyw_do,
+	Keyw_double,
+	Keyw_else,
+	Keyw_enum,
+	Keyw_extern,
+	Keyw_float,
+	Keyw_for,
+	Keyw_goto,
+	Keyw_if,
+	Keyw_inline,
+	Keyw_int,
+	Keyw_long,
+	Keyw_register,
+	Keyw_restrict,
+	Keyw_return,
+	Keyw_short,
+	Keyw_signed,
+	Keyw_sizeof,
+	Keyw_static,
+	Keyw_struct,
+	Keyw_switch,
+	Keyw_typedef,
+	Keyw_union,
+	Keyw_unsigned,
+	Keyw_void,
+	Keyw_volatile,
+	Keyw_while,
+	Keyw_Alignas,
+	Keyw_Alignof,
+	Keyw_Atomic,
+	Keyw_Bool,
+	Keyw_Complex,
+	Keyw_Generic,
+	Keyw_Imaginary,
+	Keyw_Noreturn,
+	Keyw_Static_assert,
+	Keyw_Thread_local
+} Keyword;
 
 typedef struct Node_ {
 	NodeType type;
@@ -80,6 +125,7 @@ typedef struct Node_ {
 		double floatVal;
 		char *str;
 		Punct punct;
+		Keyword keyword;
 		void *obj;
 	} data;
 	int unitSize;
