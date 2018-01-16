@@ -606,6 +606,8 @@ static Node* integerConstant(FileInst* fileInst, char thisChar) {
     } else {
       ungetc(thisChar, fileInst->fptr);
     }
+  } else {
+    ungetc(thisChar, fileInst->fptr);
   }
   return newToken;
 }
@@ -950,6 +952,11 @@ Node* getToken(FileInst* fileInst) {
   if (ret == NULL) {
     fseek(fileInst->fptr, fpos, SEEK_SET);
     ret = characterConstant(fileInst, thisChar);
+  }
+  // Identifier
+  if (ret == NULL) {
+    fseek(fileInst->fptr, fpos, SEEK_SET);
+    ret = identifier(fileInst, thisChar);
   }
   // Floating constant
   if (ret == NULL) {

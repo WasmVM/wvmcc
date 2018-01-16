@@ -24,8 +24,8 @@ int main(int argc, char* argv[]) {
   }
   // Start compiling
   int err = 0;
-  Node *token = NULL;
-  while((token = getToken(fInst)) != NULL){
+  Node *token = getToken(fInst);
+  while(token != NULL && token->type != Tok_EOF){
     switch(token->type){
       case Tok_String: 
         printf("<String>");
@@ -47,6 +47,7 @@ int main(int argc, char* argv[]) {
       default: 
       break;
     }
+    token = getToken(fInst);
   }
   // Clean
   fclose(fout);
