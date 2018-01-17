@@ -4,13 +4,14 @@
 #include <ctype.h>
 #include <uchar.h>
 #include <math.h>
+#include <stdint.h>
 
 #include "../fileInst.h"
 #include "../errorMsg.h"
 
 typedef enum {
 // Tokens
-	Tok_Keyword,
+	Tok_Keyword = 1,
 	Tok_Ident,
 	Tok_Int,
 	Tok_Float,
@@ -22,7 +23,7 @@ typedef enum {
 
 typedef enum {
 // Punctuators
-	Punct_brackL,
+	Punct_brackL = 1,
 	Punct_brackR,
 	Punct_paranL,
 	Punct_paranR,
@@ -72,7 +73,7 @@ typedef enum {
 } Punct;
 
 typedef enum {
-	Keyw_auto,
+	Keyw_auto = 1,
 	Keyw_break,
 	Keyw_case,
 	Keyw_char,
@@ -134,5 +135,8 @@ typedef struct Node_ {
 } Node;
 
 Node *getToken(FileInst *fileInst);
+// Return 1 if expected, 0 if not expected
+// Value only valid with punctuator and keyword type
+intptr_t expectToken(FileInst* fileInst, NodeType type, int value); 
 
 #endif

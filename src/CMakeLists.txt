@@ -9,7 +9,11 @@ add_executable(wvmcpp
 
 add_executable(wvmcc
 	wvmcc.c
-	parse/lex.c
 	fileInst.c
+	parse/lex.c
+	parse/util.c
+	parse/externDefs.c
+	parse/declarations.c
+	parse/expressions.c
 )
 target_link_libraries(wvmcc m)

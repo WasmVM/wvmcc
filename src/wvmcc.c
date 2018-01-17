@@ -2,7 +2,7 @@
 #include <stdio.h>
 
 #include "fileInst.h"
-#include "parse/node.h"
+#include "parse/rules.h"
 
 int main(int argc, char* argv[]) {
   // Check argc
@@ -23,32 +23,8 @@ int main(int argc, char* argv[]) {
     return -3;
   }
   // Start compiling
-  int err = 0;
-  Node *token = getToken(fInst);
-  while(token != NULL && token->type != Tok_EOF){
-    switch(token->type){
-      case Tok_String: 
-        printf("<String>");
-        for(int i = 0; i < token->byteLen; ++i){
-          printf(" %02x", (char)token->data.str[i]);
-        }
-        printf("\n");
-      break;
-      case Tok_Int: 
-        printf("<Integer> %llu\n", token->data.intVal);
-      break;
-      case Tok_Char: 
-        printf("<Character>");
-        for(int i = 0; i < token->byteLen; ++i){
-          printf(" %02x", (char)token->data.str[i]);
-        }
-        printf("\n");
-      break;
-      default: 
-      break;
-    }
-    token = getToken(fInst);
-  }
+  int err = startParse(fInst, fout);
+  
   // Clean
   fclose(fout);
   if (err) {
