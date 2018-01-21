@@ -3,7 +3,7 @@
 int primary_expression(FileInst *fInst) {
   long int fpos = ftell(fInst->fptr);
   Node *token = (Node *)expectToken(fInst, Tok_Ident, 0);
-  int res = token != NULL;
+  int res = (token != NULL);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     token = (Node *)expectToken(fInst, Tok_Int, 0);
@@ -527,7 +527,7 @@ int expression(FileInst *fInst){
 int constant_expression(FileInst *fInst){
   long int fpos = ftell(fInst->fptr);
   int res = conditional_expression(fInst);
-  
+
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;

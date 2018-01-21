@@ -15,5 +15,6 @@ add_executable(wvmcc
 	parse/externDefs.c
 	parse/declarations.c
 	parse/expressions.c
+	parse/statements.c
 )
 target_link_libraries(wvmcc m)
