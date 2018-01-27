@@ -1,6 +1,6 @@
-#include "node.h"
+#include "token.h"
 
-static Node* stringLiteral(FileInst* fileInst, char thisChar) {
+static Token* stringLiteral(FileInst* fileInst, char thisChar) {
   if (thisChar == '\"' || thisChar == 'L' || thisChar == 'u' ||
       thisChar == 'U') {
     char* str = calloc(4096, sizeof(char));
@@ -150,7 +150,7 @@ static Node* stringLiteral(FileInst* fileInst, char thisChar) {
       }
     }
     // Alloc node
-    Node* newToken = malloc(sizeof(Node));
+    Token* newToken = malloc(sizeof(Token));
     newToken->type = Tok_String;
     newToken->unitSize = unitSize;
     newToken->byteLen = strIndex;
@@ -160,7 +160,7 @@ static Node* stringLiteral(FileInst* fileInst, char thisChar) {
   return NULL;
 }
 
-static Node* punctuator(FileInst* fileInst, char thisChar) {
+static Token* punctuator(FileInst* fileInst, char thisChar) {
   Punct newPunct;
   char nextChar;
   switch (thisChar) {
@@ -368,13 +368,13 @@ static Node* punctuator(FileInst* fileInst, char thisChar) {
       return NULL;
   }
   // Alloc node
-  Node* newToken = malloc(sizeof(Node));
+  Token* newToken = malloc(sizeof(Token));
   newToken->type = Tok_Punct;
   newToken->data.punct = newPunct;
   return newToken;
 }
 
-static Node* characterConstant(FileInst* fileInst, char thisChar) {
+static Token* characterConstant(FileInst* fileInst, char thisChar) {
   if (thisChar == '\'' || thisChar == 'L' || thisChar == 'u' ||
       thisChar == 'U') {
     // Decide unit size
@@ -516,7 +516,7 @@ static Node* characterConstant(FileInst* fileInst, char thisChar) {
     while (isspace(thisChar = nextc(fileInst, NULL))) {
     }
     // Alloc node
-    Node* newToken = malloc(sizeof(Node));
+    Token* newToken = malloc(sizeof(Token));
     newToken->type = Tok_Char;
     newToken->unitSize = unitSize;
     newToken->byteLen = unitSize;
@@ -526,7 +526,7 @@ static Node* characterConstant(FileInst* fileInst, char thisChar) {
   return NULL;
 }
 
-static Node* integerConstant(FileInst* fileInst, char thisChar) {
+static Token* integerConstant(FileInst* fileInst, char thisChar) {
   // Get value
   unsigned long long int value = 0;
   if (thisChar == '0') {
@@ -562,7 +562,7 @@ static Node* integerConstant(FileInst* fileInst, char thisChar) {
     return NULL;
   }
   // Alloc node
-  Node* newToken = malloc(sizeof(Node));
+  Token* newToken = malloc(sizeof(Token));
   newToken->type = Tok_Int;
   newToken->unitSize = sizeof(int);
   newToken->byteLen = sizeof(int);
@@ -612,7 +612,7 @@ static Node* integerConstant(FileInst* fileInst, char thisChar) {
   return newToken;
 }
 
-static Node* floatingConstant(FileInst* fileInst, char thisChar) {
+static Token* floatingConstant(FileInst* fileInst, char thisChar) {
   // Get value
   double value = 0.0;
   int isHex = 0;
@@ -756,7 +756,7 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
     }
   }
   // Alloc node
-  Node* newToken = malloc(sizeof(Node));
+  Token* newToken = malloc(sizeof(Token));
   newToken->type = Tok_Float;
   newToken->data.floatVal = value;
   newToken->unitSize = sizeof(double);
@@ -772,7 +772,7 @@ static Node* floatingConstant(FileInst* fileInst, char thisChar) {
   return newToken;
 }
 
-static void keyword(Node *node, char *identifier) {
+static void keyword(Token *node, char *identifier) {
   if(!strcmp(identifier, "auto")){
     node->type = Tok_Keyword;
     node->data.keyword = Keyw_auto;
@@ -907,7 +907,7 @@ static void keyword(Node *node, char *identifier) {
   }
 }
 
-static Node* identifier(FileInst* fileInst, char thisChar) {
+static Token* identifier(FileInst* fileInst, char thisChar) {
   char* ident = (char*)calloc(65, sizeof(char));
   if (isalpha(thisChar) || thisChar == '_') {
     ident[0] = thisChar;
@@ -928,7 +928,7 @@ static Node* identifier(FileInst* fileInst, char thisChar) {
   }
   ident = (char*)realloc(ident, strlen(ident) + 1);
   // Alloc node
-  Node* newToken = malloc(sizeof(Node));
+  Token* newToken = malloc(sizeof(Token));
   newToken->type = Tok_Ident;
   keyword(newToken, ident);
   if(newToken->type != Tok_Keyword){
@@ -939,7 +939,7 @@ static Node* identifier(FileInst* fileInst, char thisChar) {
   return newToken;
 }
 
-Node* getToken(FileInst* fileInst) {
+Token* getToken(FileInst* fileInst) {
   char thisChar = nextc(fileInst, NULL);
   // Trim leading space
   while (isspace(thisChar)) {
@@ -947,7 +947,7 @@ Node* getToken(FileInst* fileInst) {
   }
   long int fpos = ftell(fileInst->fptr);
   // String literal
-  Node* ret = stringLiteral(fileInst, thisChar);
+  Token* ret = stringLiteral(fileInst, thisChar);
   // Character constant
   if (ret == NULL) {
     fseek(fileInst->fptr, fpos, SEEK_SET);
@@ -975,7 +975,7 @@ Node* getToken(FileInst* fileInst) {
   }
   // End of file
   if (ret == NULL && thisChar == EOF) {
-    ret = malloc(sizeof(Node));
+    ret = malloc(sizeof(Token));
     ret->type = Tok_EOF;
   }
   return ret;

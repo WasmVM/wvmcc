@@ -1,8 +1,8 @@
-#include "node.h"
+#include "token.h"
 
-intptr_t expectToken(FileInst* fileInst, NodeType type, int value) {
+intptr_t expectToken(FileInst* fileInst, TokenType type, int value) {
   long int fpos = ftell(fileInst->fptr);
-  Node *token = getToken(fileInst);
+  Token *token = getToken(fileInst);
   if (token != NULL && token->type == type) {
     if (value && (type == Tok_Punct || type == Tok_Keyword)){
       int val = (type == Tok_Punct) ? token->data.punct : token->data.keyword;

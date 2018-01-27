@@ -33,7 +33,7 @@ int statement(FileInst *fInst) {
 }
 int labeled_statement(FileInst *fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node *identifier = (Node *)expectToken(fInst, Tok_Ident, 0);
+  Token *identifier = (Token *)expectToken(fInst, Tok_Ident, 0);
   int res = identifier && expectToken(fInst, Tok_Punct, Punct_colon) &&
             statement(fInst);
   if (!res) {
@@ -167,8 +167,8 @@ int iteration_statement(FileInst *fInst) {
 }
 int jump_statement(FileInst *fInst){
       long int fpos = ftell(fInst->fptr);
-      Node *identifier = NULL;
-  int res = expectToken(fInst, Tok_Keyword, Keyw_goto) && (identifier = (Node *)expectToken(fInst, Tok_Ident, 0)) &&
+      Token *identifier = NULL;
+  int res = expectToken(fInst, Tok_Keyword, Keyw_goto) && (identifier = (Token *)expectToken(fInst, Tok_Ident, 0)) &&
             expectToken(fInst, Tok_Punct, Punct_semi);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);

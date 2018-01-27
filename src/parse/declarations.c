@@ -180,7 +180,7 @@ int struct_or_union_specifier(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
   int res = struct_or_union(fInst);
   if (res) {
-    Node* identifier = (Node*)expectToken(fInst, Tok_Ident, 0);
+    Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
     if (identifier != NULL) {
       res = (expectToken(fInst, Tok_Punct, Punct_braceL) &&
              struct_declaration_list(fInst) &&
@@ -303,7 +303,7 @@ int enum_specifier(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_enum);
   if (res) {
-    Node* identifier = (Node*)expectToken(fInst, Tok_Ident, 0);
+    Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
     if (identifier == NULL) {
       res = expectToken(fInst, Tok_Punct, Punct_braceL) &&
             enumerator_list(fInst) &&
@@ -343,7 +343,7 @@ int enumerator_list(FileInst* fInst) {
 
 int enumerator(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node* enumeration_constant = (Node*)expectToken(fInst, Tok_Ident, 0);
+  Token* enumeration_constant = (Token*)expectToken(fInst, Tok_Ident, 0);
   int res =
       enumeration_constant && ((expectToken(fInst, Tok_Punct, Punct_assign) &&
                                 constant_expression(fInst)) ||
@@ -483,7 +483,7 @@ static int direct_declarator_tail(FileInst* fInst) {
 }
 int direct_declarator(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node* identifier = (Node*)expectToken(fInst, Tok_Ident, 0);
+  Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
   int res = (identifier || (expectToken(fInst, Tok_Punct, Punct_paranL) &&
                             declarator(fInst) &&
                             expectToken(fInst, Tok_Punct, Punct_paranR))) &&
@@ -567,7 +567,7 @@ int parameter_declaration(FileInst* fInst) {
 
 int identifier_list(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node* identifier = (Node*)expectToken(fInst, Tok_Ident, 0);
+  Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
   int res =
       identifier &&
       ((expectToken(fInst, Tok_Punct, Punct_comma) && identifier_list(fInst)) ||
@@ -666,8 +666,8 @@ int direct_abstract_declarator(FileInst* fInst) {
 
 int typedef_name(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node* identifier = (Node*)expectToken(fInst, Tok_Ident, 0);
-
+  Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
+  // FIXME: Sementic analysis
   if (identifier == NULL) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -745,9 +745,9 @@ int designtor(FileInst* fInst) {
             expectToken(fInst, Tok_Punct, Punct_brackR);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    Node* identifier = NULL;
+    Token* identifier = NULL;
     res = expectToken(fInst, Tok_Punct, Punct_dot) &&
-          (identifier = (Node*)expectToken(fInst, Tok_Ident, 0));
+          (identifier = (Token*)expectToken(fInst, Tok_Ident, 0));
   }
 
   if (!res) {
@@ -759,12 +759,12 @@ int designtor(FileInst* fInst) {
 }
 int static_assert_declaration(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node* stringLiteral = NULL;
+  Token* stringLiteral = NULL;
   int res = expectToken(fInst, Tok_Keyword, Keyw_Static_assert) &&
             expectToken(fInst, Tok_Punct, Punct_paranL) &&
             constant_expression(fInst) &&
             expectToken(fInst, Tok_Punct, Punct_comma) &&
-            (stringLiteral = (Node*)expectToken(fInst, Tok_String, 0)) &&
+            (stringLiteral = (Token*)expectToken(fInst, Tok_String, 0)) &&
             expectToken(fInst, Tok_Punct, Punct_paranR) &&
             expectToken(fInst, Tok_Punct, Punct_semi);
 

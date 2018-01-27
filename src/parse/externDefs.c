@@ -2,7 +2,7 @@
 
 int startParse(FileInst* fInst, FILE* fout) {
   translation_unit(fInst);
-  Node* token = getToken(fInst);
+  Token* token = getToken(fInst);
   if (token == NULL || token->type != Tok_EOF) {
     return -1;
   }

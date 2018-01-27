@@ -19,7 +19,7 @@ typedef enum {
 	Tok_String,
 	Tok_Punct,
 	Tok_EOF
-} NodeType;
+} TokenType;
 
 typedef enum {
 // Punctuators
@@ -119,24 +119,23 @@ typedef enum {
 	Keyw_Thread_local
 } Keyword;
 
-typedef struct Node_ {
-	NodeType type;
+typedef struct {
+	TokenType type;
 	union {
 		unsigned long long int intVal;
 		double floatVal;
 		char *str;
 		Punct punct;
 		Keyword keyword;
-		void *obj;
 	} data;
 	int unitSize;
 	int byteLen;
 	int isSigned;
-} Node;
+} Token;
 
-Node *getToken(FileInst *fileInst);
+Token *getToken(FileInst *fileInst);
 // Return 1 if expected, 0 if not expected
 // Value only valid with punctuator and keyword type
-intptr_t expectToken(FileInst* fileInst, NodeType type, int value); 
+intptr_t expectToken(FileInst* fileInst, TokenType type, int value); 
 
 #endif

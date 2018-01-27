@@ -1,7 +1,7 @@
 #ifndef WVMCC_PARSE_RULES_DEF
 #define WVMCC_PARSE_RULES_DEF
 
-#include "node.h"
+#include "token.h"
 
 // Return -1 if error, 0 if success
 int startParse(FileInst* fInst, FILE* fout);

@@ -2,26 +2,26 @@
 
 int primary_expression(FileInst *fInst) {
   long int fpos = ftell(fInst->fptr);
-  Node *token = (Node *)expectToken(fInst, Tok_Ident, 0);
+  Token *token = (Token *)expectToken(fInst, Tok_Ident, 0);
   int res = (token != NULL);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    token = (Node *)expectToken(fInst, Tok_Int, 0);
+    token = (Token *)expectToken(fInst, Tok_Int, 0);
     res = token != NULL;
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    token = (Node *)expectToken(fInst, Tok_Float, 0);
+    token = (Token *)expectToken(fInst, Tok_Float, 0);
     res = token != NULL;
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    token = (Node *)expectToken(fInst, Tok_Char, 0);
+    token = (Token *)expectToken(fInst, Tok_Char, 0);
     res = token != NULL;
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    token = (Node *)expectToken(fInst, Tok_String, 0);
+    token = (Token *)expectToken(fInst, Tok_String, 0);
     res = token != NULL;
   }
   if (!res) {
@@ -103,15 +103,15 @@ static int postfix_expression_tail(FileInst *fInst) {
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    Node *identifier = NULL;
+    Token *identifier = NULL;
     res = expectToken(fInst, Tok_Punct, Punct_dot) &&
-          (identifier = (Node *)expectToken(fInst, Tok_Ident, 0));
+          (identifier = (Token *)expectToken(fInst, Tok_Ident, 0));
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    Node *identifier = NULL;
+    Token *identifier = NULL;
     res = expectToken(fInst, Tok_Punct, Punct_arrow) &&
-          (identifier = (Node *)expectToken(fInst, Tok_Ident, 0));
+          (identifier = (Token *)expectToken(fInst, Tok_Ident, 0));
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
