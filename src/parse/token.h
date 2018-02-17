@@ -69,7 +69,8 @@ typedef enum {
 	Punct_ass_xor,
 	Punct_ass_or,
 	Punct_comma,
-	Punct_assiplus
+	Punct_assiplus,
+	Punct_hash
 } Punct;
 
 typedef enum {

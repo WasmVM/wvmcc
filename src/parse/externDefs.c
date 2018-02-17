@@ -15,10 +15,10 @@ int translation_unit(FileInst* fInst) {
    */
   int res = external_declaration(fInst) && (translation_unit(fInst) || 1);
   // TODO: codegen
-  if(!res){
+  if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
-  }else{
+  } else {
     return 1;
   }
 }
@@ -28,12 +28,13 @@ int external_declaration(FileInst* fInst) {
   /* function_declaration
    * declaration
    */
-  int res = function_definition(fInst) || declaration(fInst);
+  int res = preprocessor_hint(fInst) || function_definition(fInst) ||
+            declaration(fInst);
   // TODO: codegen
-  if(!res){
+  if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
-  }else{
+  } else {
     return 1;
   }
 }
@@ -45,10 +46,10 @@ int function_definition(FileInst* fInst) {
   int res = declaration_specifiers(fInst) && declarator(fInst) &&
             (declaration_list(fInst) || 1) && compound_statement(fInst);
   // TODO: codegen
-  if(!res){
+  if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
-  }else{
+  } else {
     return 1;
   }
 }
@@ -57,10 +58,36 @@ int declaration_list(FileInst* fInst) {
   long int fpos = ftell(fInst->fptr);
   int res = declaration(fInst) && (declaration_list(fInst) || 1);
   // TODO: codegen
-  if(!res){
+  if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
-  }else{
+  } else {
+    return 1;
+  }
+}
+
+int preprocessor_hint(FileInst* fInst) {
+  long int fpos = ftell(fInst->fptr);
+  Token *lineNum = NULL, *filePath = NULL, *flag = NULL;
+  int res = expectToken(fInst, Tok_Punct, Punct_hash);
+  if (res) {
+    Token* lineNum = (Token*)expectToken(fInst, Tok_Int, 0);
+    Token* filePath = (Token*)expectToken(fInst, Tok_String, 0);
+    Token* flag = (Token*)expectToken(fInst, Tok_Int, 0);
+    if (lineNum && filePath && flag) {
+      fInst->curline = lineNum->data.intVal;
+      free(fInst->fname);
+      fInst->fname = filePath->data.str;
+    }
+    free(lineNum);
+    free(filePath);
+    free(flag);
+  }
+  // TODO: codegen
+  if (!res) {
+    fseek(fInst->fptr, fpos, SEEK_SET);
+    return 0;
+  } else {
     return 1;
   }
 }

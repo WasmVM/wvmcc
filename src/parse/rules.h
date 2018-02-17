@@ -14,6 +14,7 @@ int translation_unit(FileInst* fInst);
 int external_declaration(FileInst* fInst);
 int function_definition(FileInst* fInst);
 int declaration_list(FileInst* fInst);
+int preprocessor_hint(FileInst* fInst);
 
 // Declarations
 int declaration(FileInst* fInst);

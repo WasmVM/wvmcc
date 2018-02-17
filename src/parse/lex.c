@@ -149,12 +149,13 @@ static Token* stringLiteral(FileInst* fileInst, char thisChar) {
       while (isspace(thisChar = nextc(fileInst, NULL))) {
       }
     }
+    ungetc(thisChar, fileInst->fptr);
     // Alloc node
     Token* newToken = malloc(sizeof(Token));
     newToken->type = Tok_String;
     newToken->unitSize = unitSize;
     newToken->byteLen = strIndex;
-    newToken->data.str = realloc(str, strIndex);
+    newToken->data.str = realloc(str, strIndex + unitSize);
     return newToken;
   }
   return NULL;
@@ -165,6 +166,9 @@ static Token* punctuator(FileInst* fileInst, char thisChar) {
   char nextChar;
   switch (thisChar) {
     // single state
+    case '#':
+      newPunct = Punct_hash;
+      break;
     case '[':
       newPunct = Punct_brackL;
       break;
