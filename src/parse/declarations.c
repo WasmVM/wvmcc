@@ -1,11 +1,13 @@
 #include "rules.h"
 
-int declaration(FileInst* fInst) {
+int declaration(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = static_assert_declaration(fInst);
+  int res = static_assert_declaration(fInst, typeMap);
   if (!res) {
+    Type declType;
+    // Declaration Specifiers
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = declaration_specifiers(fInst) && (init_declarator_list(fInst) || 1) &&
+    res = declaration_specifiers(fInst, typeMap) && (init_declarator_list(fInst, typeMap) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_semi);
   }
 
@@ -17,25 +19,25 @@ int declaration(FileInst* fInst) {
   }
 }
 
-int declaration_specifiers(FileInst* fInst) {
+int declaration_specifiers(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      storage_class_specifier(fInst) && (declaration_specifiers(fInst) || 1);
+      storage_class_specifier(fInst, typeMap) && (declaration_specifiers(fInst, typeMap) || 1);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = type_specifier(fInst) && (declaration_specifiers(fInst) || 1);
+    res = type_specifier(fInst, typeMap) && (declaration_specifiers(fInst, typeMap) || 1);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = type_qualifier(fInst) && (declaration_specifiers(fInst) || 1);
+    res = type_qualifier(fInst, typeMap) && (declaration_specifiers(fInst, typeMap) || 1);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = function_specifier(fInst) && (declaration_specifiers(fInst) || 1);
+    res = function_specifier(fInst, typeMap) && (declaration_specifiers(fInst, typeMap) || 1);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = alignment_specifier(fInst) && (declaration_specifiers(fInst) || 1);
+    res = alignment_specifier(fInst, typeMap) && (declaration_specifiers(fInst, typeMap) || 1);
   }
 
   if (!res) {
@@ -46,11 +48,11 @@ int declaration_specifiers(FileInst* fInst) {
   }
 }
 
-int init_declarator_list(FileInst* fInst) {
+int init_declarator_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      init_declarator(fInst) && ((expectToken(fInst, Tok_Punct, Punct_comma) &&
-                                  init_declarator_list(fInst)) ||
+      init_declarator(fInst, typeMap) && ((expectToken(fInst, Tok_Punct, Punct_comma) &&
+                                  init_declarator_list(fInst, typeMap)) ||
                                  1);
 
   if (!res) {
@@ -61,11 +63,11 @@ int init_declarator_list(FileInst* fInst) {
   }
 }
 
-int init_declarator(FileInst* fInst) {
+int init_declarator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      declarator(fInst) &&
-      ((expectToken(fInst, Tok_Punct, Punct_assign) && initializer(fInst)) ||
+      declarator(fInst, typeMap) &&
+      ((expectToken(fInst, Tok_Punct, Punct_assign) && initializer(fInst, typeMap)) ||
        1);
 
   if (!res) {
@@ -76,7 +78,7 @@ int init_declarator(FileInst* fInst) {
   }
 }
 
-int storage_class_specifier(FileInst* fInst) {
+int storage_class_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_typedef);
   if (!res) {
@@ -108,7 +110,7 @@ int storage_class_specifier(FileInst* fInst) {
   }
 }
 
-int type_specifier(FileInst* fInst) {
+int type_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_void);
   if (!res) {
@@ -153,19 +155,19 @@ int type_specifier(FileInst* fInst) {
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = atomic_type_specifier(fInst);
+    res = atomic_type_specifier(fInst, typeMap);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = struct_or_union_specifier(fInst);
+    res = struct_or_union_specifier(fInst, typeMap);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = enum_specifier(fInst);
+    res = enum_specifier(fInst, typeMap);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = typedef_name(fInst);
+    res = typedef_name(fInst, typeMap);
   }
 
   if (!res) {
@@ -176,19 +178,19 @@ int type_specifier(FileInst* fInst) {
   }
 }
 
-int struct_or_union_specifier(FileInst* fInst) {
+int struct_or_union_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = struct_or_union(fInst);
+  int res = struct_or_union(fInst, typeMap);
   if (res) {
     Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
     if (identifier != NULL) {
       res = (expectToken(fInst, Tok_Punct, Punct_braceL) &&
-             struct_declaration_list(fInst) &&
+             struct_declaration_list(fInst, typeMap) &&
              expectToken(fInst, Tok_Punct, Punct_braceR)) ||
             1;
     } else {
       res = expectToken(fInst, Tok_Punct, Punct_braceL) &&
-            struct_declaration_list(fInst) &&
+            struct_declaration_list(fInst, typeMap) &&
             expectToken(fInst, Tok_Punct, Punct_braceR);
     }
   }
@@ -201,7 +203,7 @@ int struct_or_union_specifier(FileInst* fInst) {
   }
 }
 
-int struct_or_union(FileInst* fInst) {
+int struct_or_union(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_struct);
   if (!res) {
@@ -217,9 +219,9 @@ int struct_or_union(FileInst* fInst) {
   }
 }
 
-int struct_declaration_list(FileInst* fInst) {
+int struct_declaration_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = struct_declaration(fInst) && (struct_declaration_list(fInst) || 1);
+  int res = struct_declaration(fInst, typeMap) && (struct_declaration_list(fInst, typeMap) || 1);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -229,13 +231,13 @@ int struct_declaration_list(FileInst* fInst) {
   }
 }
 
-int struct_declaration(FileInst* fInst) {
+int struct_declaration(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = static_assert_declaration(fInst);
+  int res = static_assert_declaration(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = specifier_qualifier_list(fInst) &&
-          (struct_declarator_list(fInst) || 1) &&
+    res = specifier_qualifier_list(fInst, typeMap) &&
+          (struct_declarator_list(fInst, typeMap) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_semi);
   }
 
@@ -247,12 +249,12 @@ int struct_declaration(FileInst* fInst) {
   }
 }
 
-int specifier_qualifier_list(FileInst* fInst) {
+int specifier_qualifier_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = type_specifier(fInst) && (specifier_qualifier_list(fInst) || 1);
+  int res = type_specifier(fInst, typeMap) && (specifier_qualifier_list(fInst, typeMap) || 1);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = type_qualifier(fInst) && (specifier_qualifier_list(fInst) || 1);
+    res = type_qualifier(fInst, typeMap) && (specifier_qualifier_list(fInst, typeMap) || 1);
   }
 
   if (!res) {
@@ -263,11 +265,11 @@ int specifier_qualifier_list(FileInst* fInst) {
   }
 }
 
-int struct_declarator_list(FileInst* fInst) {
+int struct_declarator_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = struct_declarator(fInst) &&
+  int res = struct_declarator(fInst, typeMap) &&
             ((expectToken(fInst, Tok_Punct, Punct_comma) &&
-              struct_declarator_list(fInst)) ||
+              struct_declarator_list(fInst, typeMap)) ||
              1);
 
   if (!res) {
@@ -278,16 +280,16 @@ int struct_declarator_list(FileInst* fInst) {
   }
 }
 
-int struct_declarator(FileInst* fInst) {
+int struct_declarator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = declarator(fInst);
+  int res = declarator(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_colon) &&
-          constant_expression(fInst);
+          constant_expression(fInst, typeMap);
   } else {
     res = ((expectToken(fInst, Tok_Punct, Punct_colon) &&
-            constant_expression(fInst)) ||
+            constant_expression(fInst, typeMap)) ||
            1);
   }
 
@@ -299,19 +301,19 @@ int struct_declarator(FileInst* fInst) {
   }
 }
 
-int enum_specifier(FileInst* fInst) {
+int enum_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_enum);
   if (res) {
     Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
     if (identifier == NULL) {
       res = expectToken(fInst, Tok_Punct, Punct_braceL) &&
-            enumerator_list(fInst) &&
+            enumerator_list(fInst, typeMap) &&
             (expectToken(fInst, Tok_Punct, Punct_comma) || 1) &&
             expectToken(fInst, Tok_Punct, Punct_braceR);
     } else {
       res = ((expectToken(fInst, Tok_Punct, Punct_braceL) &&
-              enumerator_list(fInst) &&
+              enumerator_list(fInst, typeMap) &&
               (expectToken(fInst, Tok_Punct, Punct_comma) || 1) &&
               expectToken(fInst, Tok_Punct, Punct_braceR)) ||
              1);
@@ -326,11 +328,11 @@ int enum_specifier(FileInst* fInst) {
   }
 }
 
-int enumerator_list(FileInst* fInst) {
+int enumerator_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      enumerator(fInst) &&
-      ((expectToken(fInst, Tok_Punct, Punct_comma) && enumerator_list(fInst)) ||
+      enumerator(fInst, typeMap) &&
+      ((expectToken(fInst, Tok_Punct, Punct_comma) && enumerator_list(fInst, typeMap)) ||
        1);
 
   if (!res) {
@@ -341,12 +343,12 @@ int enumerator_list(FileInst* fInst) {
   }
 }
 
-int enumerator(FileInst* fInst) {
+int enumerator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   Token* enumeration_constant = (Token*)expectToken(fInst, Tok_Ident, 0);
   int res =
       enumeration_constant && ((expectToken(fInst, Tok_Punct, Punct_assign) &&
-                                constant_expression(fInst)) ||
+                                constant_expression(fInst, typeMap)) ||
                                1);
 
   if (!res) {
@@ -357,10 +359,10 @@ int enumerator(FileInst* fInst) {
   }
 }
 
-int atomic_type_specifier(FileInst* fInst) {
+int atomic_type_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_Atomic) &&
-            expectToken(fInst, Tok_Punct, Punct_paranL) && type_name(fInst) &&
+            expectToken(fInst, Tok_Punct, Punct_paranL) && type_name(fInst, typeMap) &&
             expectToken(fInst, Tok_Punct, Punct_paranR);
 
   if (!res) {
@@ -371,7 +373,7 @@ int atomic_type_specifier(FileInst* fInst) {
   }
 }
 
-int type_qualifier(FileInst* fInst) {
+int type_qualifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_const);
   if (!res) {
@@ -395,7 +397,7 @@ int type_qualifier(FileInst* fInst) {
   }
 }
 
-int function_specifier(FileInst* fInst) {
+int function_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_inline);
   if (!res) {
@@ -411,11 +413,11 @@ int function_specifier(FileInst* fInst) {
   }
 }
 
-int alignment_specifier(FileInst* fInst) {
+int alignment_specifier(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_Alignas) &&
             expectToken(fInst, Tok_Punct, Punct_paranL) &&
-            (type_name(fInst) || constant_expression(fInst)) &&
+            (type_name(fInst, typeMap) || constant_expression(fInst, typeMap)) &&
             expectToken(fInst, Tok_Punct, Punct_paranR);
 
   if (!res) {
@@ -426,9 +428,9 @@ int alignment_specifier(FileInst* fInst) {
   }
 }
 
-int declarator(FileInst* fInst) {
+int declarator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = (pointer(fInst) || 1) && direct_declarator(fInst);
+  int res = (pointer(fInst, typeMap) || 1) && direct_declarator(fInst, typeMap);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -439,37 +441,37 @@ int declarator(FileInst* fInst) {
 }
 
 // Used to elimate left-recursion
-static int direct_declarator_tail(FileInst* fInst) {
+static int direct_declarator_tail(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Punct, Punct_paranL) &&
-            (parameter_type_list(fInst) || (identifier_list(fInst) || 1)) &&
+            (parameter_type_list(fInst, typeMap) || (identifier_list(fInst, typeMap) || 1)) &&
             expectToken(fInst, Tok_Punct, Punct_paranR);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-          (type_qualifier_list(fInst) || 1) &&
-          (assignment_expression(fInst) || 1) &&
+          (type_qualifier_list(fInst, typeMap) || 1) &&
+          (assignment_expression(fInst, typeMap) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
           expectToken(fInst, Tok_Keyword, Keyw_static) &&
-          (type_qualifier_list(fInst) || 1) && assignment_expression(fInst) &&
+          (type_qualifier_list(fInst, typeMap) || 1) && assignment_expression(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-          type_qualifier_list(fInst) &&
+          type_qualifier_list(fInst, typeMap) &&
           expectToken(fInst, Tok_Keyword, Keyw_static) &&
-          assignment_expression(fInst) &&
+          assignment_expression(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-          (type_qualifier_list(fInst) || 1) &&
+          (type_qualifier_list(fInst, typeMap) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_aster) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
@@ -481,13 +483,13 @@ static int direct_declarator_tail(FileInst* fInst) {
     return 1;
   }
 }
-int direct_declarator(FileInst* fInst) {
+int direct_declarator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
   int res = (identifier || (expectToken(fInst, Tok_Punct, Punct_paranL) &&
-                            declarator(fInst) &&
+                            declarator(fInst, typeMap) &&
                             expectToken(fInst, Tok_Punct, Punct_paranR))) &&
-            direct_declarator_tail(fInst);
+            direct_declarator_tail(fInst, typeMap);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -497,10 +499,10 @@ int direct_declarator(FileInst* fInst) {
   }
 }
 
-int pointer(FileInst* fInst) {
+int pointer(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Punct, Punct_aster) &&
-            (type_qualifier_list(fInst) || 1) && (pointer(fInst) || 1);
+            (type_qualifier_list(fInst, typeMap) || 1) && (pointer(fInst, typeMap) || 1);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -510,9 +512,9 @@ int pointer(FileInst* fInst) {
   }
 }
 
-int type_qualifier_list(FileInst* fInst) {
+int type_qualifier_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = type_qualifier(fInst) && (type_qualifier_list(fInst) || 1);
+  int res = type_qualifier(fInst, typeMap) && (type_qualifier_list(fInst, typeMap) || 1);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -522,10 +524,10 @@ int type_qualifier_list(FileInst* fInst) {
   }
 }
 
-int parameter_type_list(FileInst* fInst) {
+int parameter_type_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      parameter_list(fInst) && ((expectToken(fInst, Tok_Punct, Punct_comma) &&
+      parameter_list(fInst, typeMap) && ((expectToken(fInst, Tok_Punct, Punct_comma) &&
                                  expectToken(fInst, Tok_Punct, Punct_ellips)) ||
                                 1);
 
@@ -537,11 +539,11 @@ int parameter_type_list(FileInst* fInst) {
   }
 }
 
-int parameter_list(FileInst* fInst) {
+int parameter_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      parameter_declaration(fInst) &&
-      ((expectToken(fInst, Tok_Punct, Punct_comma) && parameter_list(fInst)) ||
+      parameter_declaration(fInst, typeMap) &&
+      ((expectToken(fInst, Tok_Punct, Punct_comma) && parameter_list(fInst, typeMap)) ||
        1);
 
   if (!res) {
@@ -552,10 +554,10 @@ int parameter_list(FileInst* fInst) {
   }
 }
 
-int parameter_declaration(FileInst* fInst) {
+int parameter_declaration(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = declaration_specifiers(fInst) &&
-            (declarator(fInst) || (abstract_declarator(fInst) || 1));
+  int res = declaration_specifiers(fInst, typeMap) &&
+            (declarator(fInst, typeMap) || (abstract_declarator(fInst, typeMap) || 1));
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -565,12 +567,12 @@ int parameter_declaration(FileInst* fInst) {
   }
 }
 
-int identifier_list(FileInst* fInst) {
+int identifier_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
   int res =
       identifier &&
-      ((expectToken(fInst, Tok_Punct, Punct_comma) && identifier_list(fInst)) ||
+      ((expectToken(fInst, Tok_Punct, Punct_comma) && identifier_list(fInst, typeMap)) ||
        1);
 
   if (!res) {
@@ -581,10 +583,10 @@ int identifier_list(FileInst* fInst) {
   }
 }
 
-int type_name(FileInst* fInst) {
+int type_name(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      specifier_qualifier_list(fInst) && (abstract_declarator(fInst) || 1);
+      specifier_qualifier_list(fInst, typeMap) && (abstract_declarator(fInst, typeMap) || 1);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -594,10 +596,10 @@ int type_name(FileInst* fInst) {
   }
 }
 
-int abstract_declarator(FileInst* fInst) {
+int abstract_declarator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = direct_abstract_declarator(fInst) ||
-            (pointer(fInst) && (direct_abstract_declarator(fInst) || 1));
+  int res = direct_abstract_declarator(fInst, typeMap) ||
+            (pointer(fInst, typeMap) && (direct_abstract_declarator(fInst, typeMap) || 1));
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -608,31 +610,31 @@ int abstract_declarator(FileInst* fInst) {
 }
 
 // Used to elimate left-recursion
-static int direct_abstract_declarator_tail(FileInst* fInst) {
+static int direct_abstract_declarator_tail(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Punct, Punct_paranL) &&
-            (parameter_type_list(fInst) || 1) &&
+            (parameter_type_list(fInst, typeMap) || 1) &&
             expectToken(fInst, Tok_Punct, Punct_paranR);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-          (type_qualifier_list(fInst) || 1) &&
-          (assignment_expression(fInst) || 1) &&
+          (type_qualifier_list(fInst, typeMap) || 1) &&
+          (assignment_expression(fInst, typeMap) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
           expectToken(fInst, Tok_Keyword, Keyw_static) &&
-          (type_qualifier_list(fInst) || 1) && assignment_expression(fInst) &&
+          (type_qualifier_list(fInst, typeMap) || 1) && assignment_expression(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-          type_qualifier_list(fInst) &&
+          type_qualifier_list(fInst, typeMap) &&
           expectToken(fInst, Tok_Keyword, Keyw_static) &&
-          assignment_expression(fInst) &&
+          assignment_expression(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
   }
   if (!res) {
@@ -649,12 +651,12 @@ static int direct_abstract_declarator_tail(FileInst* fInst) {
     return 1;
   }
 }
-int direct_abstract_declarator(FileInst* fInst) {
+int direct_abstract_declarator(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Punct, Punct_paranL) &&
-            abstract_declarator(fInst) &&
+            abstract_declarator(fInst, typeMap) &&
             expectToken(fInst, Tok_Punct, Punct_paranR) &&
-            direct_abstract_declarator_tail(fInst);
+            direct_abstract_declarator_tail(fInst, typeMap);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -664,11 +666,11 @@ int direct_abstract_declarator(FileInst* fInst) {
   }
 }
 
-int typedef_name(FileInst* fInst) {
+int typedef_name(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
-  // FIXME: Sementic analysis
-  if (identifier == NULL) {
+  Type *type = NULL;
+  if (identifier == NULL || mapGet(typeMap, identifier->data.str, (void **)&type) == -1) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
   } else {
@@ -676,13 +678,13 @@ int typedef_name(FileInst* fInst) {
   }
 }
 
-int initializer(FileInst* fInst) {
+int initializer(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = assignment_expression(fInst);
+  int res = assignment_expression(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Punct, Punct_braceL) &&
-          initializer_list(fInst) &&
+          initializer_list(fInst, typeMap) &&
           (expectToken(fInst, Tok_Punct, Punct_comma) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_braceR);
   }
@@ -695,14 +697,14 @@ int initializer(FileInst* fInst) {
   }
 }
 
-int initializer_list(FileInst* fInst) {
+int initializer_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = (designation(fInst) || 1) && initializer(fInst);
+  int res = (designation(fInst, typeMap) || 1) && initializer(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = initializer_list(fInst) &&
+    res = initializer_list(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_comma) &&
-          (designation(fInst) || 1) && initializer(fInst);
+          (designation(fInst, typeMap) || 1) && initializer(fInst, typeMap);
   }
 
   if (!res) {
@@ -713,10 +715,10 @@ int initializer_list(FileInst* fInst) {
   }
 }
 
-int designation(FileInst* fInst) {
+int designation(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      designator_list(fInst) && expectToken(fInst, Tok_Punct, Punct_assign);
+      designator_list(fInst, typeMap) && expectToken(fInst, Tok_Punct, Punct_assign);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -726,9 +728,9 @@ int designation(FileInst* fInst) {
   }
 }
 
-int designator_list(FileInst* fInst) {
+int designator_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = designtor(fInst) && (designator_list(fInst) || 1);
+  int res = designtor(fInst, typeMap) && (designator_list(fInst, typeMap) || 1);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -738,10 +740,10 @@ int designator_list(FileInst* fInst) {
   }
 }
 
-int designtor(FileInst* fInst) {
+int designtor(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-            constant_expression(fInst) &&
+            constant_expression(fInst, typeMap) &&
             expectToken(fInst, Tok_Punct, Punct_brackR);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -757,12 +759,12 @@ int designtor(FileInst* fInst) {
     return 1;
   }
 }
-int static_assert_declaration(FileInst* fInst) {
+int static_assert_declaration(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   Token* stringLiteral = NULL;
   int res = expectToken(fInst, Tok_Keyword, Keyw_Static_assert) &&
             expectToken(fInst, Tok_Punct, Punct_paranL) &&
-            constant_expression(fInst) &&
+            constant_expression(fInst, typeMap) &&
             expectToken(fInst, Tok_Punct, Punct_comma) &&
             (stringLiteral = (Token*)expectToken(fInst, Tok_String, 0)) &&
             expectToken(fInst, Tok_Punct, Punct_paranR) &&

@@ -1,20 +1,26 @@
 #include "rules.h"
 
+static int identComp(void *a, void *b){
+  return strcmp(a, b);
+}
+
 int startParse(FileInst* fInst, FILE* fout) {
-  translation_unit(fInst);
+  Map *typeMap = mapNew(identComp, free, free);
+  translation_unit(fInst, typeMap);
   Token* token = getToken(fInst);
   if (token == NULL || token->type != Tok_EOF) {
+    mapFree(&typeMap);
     return -1;
   }
+  mapFree(&typeMap);
   return 0;
 }
 
-int translation_unit(FileInst* fInst) {
+int translation_unit(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   /* external_declaration translation_unit?
    */
-  int res = external_declaration(fInst) && (translation_unit(fInst) || 1);
-  // TODO: codegen
+  int res = external_declaration(fInst, typeMap) && (translation_unit(fInst, typeMap) || 1);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -23,14 +29,13 @@ int translation_unit(FileInst* fInst) {
   }
 }
 
-int external_declaration(FileInst* fInst) {
+int external_declaration(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   /* function_declaration
    * declaration
    */
-  int res = preprocessor_hint(fInst) || function_definition(fInst) ||
-            declaration(fInst);
-  // TODO: codegen
+  int res = preprocessor_hint(fInst) || function_definition(fInst, typeMap) ||
+            declaration(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -39,13 +44,12 @@ int external_declaration(FileInst* fInst) {
   }
 }
 
-int function_definition(FileInst* fInst) {
+int function_definition(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   /* declaration-specifiers declarator declaration-list? compound-statement
    */
-  int res = declaration_specifiers(fInst) && declarator(fInst) &&
-            (declaration_list(fInst) || 1) && compound_statement(fInst);
-  // TODO: codegen
+  int res = declaration_specifiers(fInst, typeMap) && declarator(fInst, typeMap) &&
+            (declaration_list(fInst, typeMap) || 1) && compound_statement(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -54,10 +58,9 @@ int function_definition(FileInst* fInst) {
   }
 }
 
-int declaration_list(FileInst* fInst) {
+int declaration_list(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
-  int res = declaration(fInst) && (declaration_list(fInst) || 1);
-  // TODO: codegen
+  int res = declaration(fInst, typeMap) && (declaration_list(fInst, typeMap) || 1);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -83,7 +86,6 @@ int preprocessor_hint(FileInst* fInst) {
     free(filePath);
     free(flag);
   }
-  // TODO: codegen
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
