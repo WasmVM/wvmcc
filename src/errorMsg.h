@@ -53,4 +53,10 @@
   "[CC] %s:%u Error: invalid escape character"
 #define WVMCC_ERR_EXPECT_DECIMAL_POINT \
   "[CC] %s:%u Error: expected '.' in floating constant"
+// Parse
+#define WVMCC_ERR_TOO_MANY_STORAGE_SPECIFIER \
+  "[CC] %s:%u Error: except _Thread_local, storage-class specifier can only given once."
+#define WVMCC_ERR_INVALID_THREAD_LOCAL_SPECIFIER \
+  "[CC] %s:%u Error: _Thread_local can only appear with static or extern."
+
 #endif

@@ -139,6 +139,7 @@ int iteration_statement(FileInst *fInst, Map *typeMap) {
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
+    Type declType;
     res =
         expectToken(fInst, Tok_Keyword, Keyw_for) &&
         expectToken(fInst, Tok_Punct, Punct_paranL) &&

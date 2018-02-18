@@ -5,17 +5,18 @@
 #include "../list.h"
 
 typedef enum {
-    Type_Extern = 1,
-    Type_Static = 2,
-    Type_Thread_local = 4,
-    Type_Auto = 8,
-    Type_Register = 16
+    Type_Auto = 1,
+    Type_Extern,
+    Type_Static,
+    Type_Register,
+    Type_Typedef,
+    Type_Thread_local = 8,
 } TypeStorage;
 
 typedef enum {
-    Type_Void = 1,
+    Type_Int = 1,
+    Type_Void,
     Type_Char,
-    Type_Int,
     Type_float,
     Type_Struct,
     Type_Enum,
@@ -39,6 +40,8 @@ typedef struct {
     char sprcifier;
     char optional;
 } Type;
+
+void initType(Type *type);
 
 typedef struct {
     Type retType;

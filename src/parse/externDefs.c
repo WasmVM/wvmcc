@@ -48,7 +48,8 @@ int function_definition(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   /* declaration-specifiers declarator declaration-list? compound-statement
    */
-  int res = declaration_specifiers(fInst, typeMap) && declarator(fInst, typeMap) &&
+  Type declType;
+  int res = declaration_specifiers(fInst, typeMap, &declType) && declarator(fInst, typeMap) &&
             (declaration_list(fInst, typeMap) || 1) && compound_statement(fInst, typeMap);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
