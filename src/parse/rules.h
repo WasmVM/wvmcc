@@ -29,7 +29,7 @@ int type_specifier(FileInst* fInst, Map* typeMap, Type** declTypePtr);  // TODO:
 int struct_or_union_specifier(FileInst* fInst,
                               Map* typeMap,
                               Type** declTypePtr);       // TODO:
-int struct_or_union(FileInst* fInst, Map* typeMap);  // TODO:
+int struct_or_union(FileInst* fInst, Map* typeMap, Type* declType);
 int struct_declaration_list(FileInst* fInst,
                             Map* typeMap,
                             Type** declTypePtr);                            // TODO:

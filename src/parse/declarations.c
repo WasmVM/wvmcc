@@ -327,7 +327,7 @@ int type_specifier(FileInst* fInst, Map* typeMap, Type** declTypePtr) {
 
 int struct_or_union_specifier(FileInst* fInst, Map* typeMap, Type** declTypePtr) {
   long int fpos = ftell(fInst->fptr);
-  int res = struct_or_union(fInst, typeMap);
+  int res = struct_or_union(fInst, typeMap, *declTypePtr);
   if (res) {
     Token* identifier = (Token*)expectToken(fInst, Tok_Ident, 0);
     if (identifier != NULL) {
@@ -350,20 +350,23 @@ int struct_or_union_specifier(FileInst* fInst, Map* typeMap, Type** declTypePtr)
   }
 }
 
-int struct_or_union(FileInst* fInst, Map* typeMap) {
+int struct_or_union(FileInst* fInst, Map* typeMap, Type* declType) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_struct);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Keyword, Keyw_union);
+    if (!res) {
+      fseek(fInst->fptr, fpos, SEEK_SET);
+      return 0;
+    }
+    // Union
+    declType->sprcifier = Type_Union;
+  }else{
+    // Struct
+    declType->sprcifier = Type_Struct;
   }
-
-  if (!res) {
-    fseek(fInst->fptr, fpos, SEEK_SET);
-    return 0;
-  } else {
-    return 1;
-  }
+  return 1;
 }
 
 int struct_declaration_list(FileInst* fInst, Map* typeMap, Type** declTypePtr) {
