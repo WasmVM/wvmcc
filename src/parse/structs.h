@@ -22,17 +22,17 @@ typedef enum {
     Type_Enum,
     Type_Union,
     Type_Bool,
-    Type_Complex,
     Type_Short,
-    Type_Long,
-    Type_Longlong
 } TypeSpecfier;
 
 typedef enum {
     Type_Unsigned = 1,
     Type_Atomic = 2,
     Type_Pointer = 4,
-    Type_Function = 8
+    Type_Function = 8,
+    Type_Long = 16,
+    Type_Longlong = 32,
+    Type_Complex = 64,
 } TypeOptional;
 
 typedef struct {
@@ -47,5 +47,10 @@ typedef struct {
     Type retType;
     List *params;
 } FuncType;
+
+typedef struct {
+    Type type;
+    List *props;
+} StructType;
 
 #endif

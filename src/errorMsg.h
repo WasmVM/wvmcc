@@ -57,6 +57,13 @@
 #define WVMCC_ERR_TOO_MANY_STORAGE_SPECIFIER \
   "[CC] %s:%u Error: except _Thread_local, storage-class specifier can only given once."
 #define WVMCC_ERR_INVALID_THREAD_LOCAL_SPECIFIER \
-  "[CC] %s:%u Error: _Thread_local can only appear with static or extern."
-
+  "[CC] %s:%u Error: '_Thread_local' can only appear with static or extern."
+#define WVMCC_ERR_INVALID_LONG_SPECIFIER \
+  "[CC] %s:%u Error: 'long' can only appear before 'int'."
+#define WVMCC_ERR_INVALID_SIGNED_UNSIGNED_SPECIFIER \
+  "[CC] %s:%u Error: 'signed' and 'unsigned' can only appear before specifiers."
+#define WVMCC_ERR_TOO_MORE_LONG_SPECIFIER \
+  "[CC] %s:%u Error: 'long' can only appear twice at most."
+#define WVMCC_ERR_DUPLICATE_SPECIFIER \
+  "[CC] %s:%u Error: type specifier duplicates."
 #endif
