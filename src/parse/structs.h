@@ -26,31 +26,55 @@ typedef enum {
 } TypeSpecfier;
 
 typedef enum {
-    Type_Unsigned = 1,
-    Type_Atomic = 2,
-    Type_Pointer = 4,
-    Type_Function = 8,
-    Type_Long = 16,
-    Type_Longlong = 32,
-    Type_Complex = 64,
-} TypeOptional;
+    Type_Atomic = 1,
+    Type_Const = 2,
+    Type_Restrict = 4,
+    Type_Volatile = 8,
+    Type_Unsigned = 16,
+    Type_Long = 32,
+    Type_Longlong = 64,
+    Type_Complex = 128
+} TypeQualifier;
+
+typedef enum {
+    Array_Static = 16,
+    Array_Variable = 32
+} ArrayQualifier;
+
+typedef enum {
+    Type_Array = 1,
+    Type_Function_parameter = 2,
+    Type_Function_identifier = 2
+} DeclaratorType;
+
+typedef struct {
+    char qualifier;
+    union{
+        char *identifier;
+        int size;
+    }length;
+} ArrayDeclarator;
+
+typedef struct {
+    char *pointers;
+    char *identifier;
+    DeclaratorType type;
+    List *list;
+} Declarator;
 
 typedef struct {
     char storage;
-    char sprcifier;
-    char optional;
+    char specifier;
+    char qualifier;
+    Declarator declarator;
 } Type;
 
 void initType(Type *type);
-
-typedef struct {
-    Type retType;
-    List *params;
-} FuncType;
+void freeType(Type *type);
 
 typedef struct {
     Type type;
     List *props;
-} StructType;
+} StructUnion;
 
 #endif
