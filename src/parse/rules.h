@@ -21,56 +21,56 @@ int preprocessor_hint(FileInst* fInst);
 int declaration(FileInst* fInst, Map* typeMap);  // TODO:
 int declaration_specifiers(FileInst* fInst,
                            Map* typeMap,
-                           Type** declTypePtr);           // TODO:
+                           Declaration** declPtr);           // TODO:
 int init_declarator_list(FileInst* fInst, Map* typeMap);  // TODO:
 int init_declarator(FileInst* fInst, Map* typeMap);       // TODO:
-int storage_class_specifier(FileInst* fInst, Map* typeMap, Type* declType);
-int type_specifier(FileInst* fInst, Map* typeMap, Type** declTypePtr);  // TODO:
+int storage_class_specifier(FileInst* fInst, Map* typeMap, Declaration* decl);
+int type_specifier(FileInst* fInst, Map* typeMap, Declaration** declPtr);  // TODO:
 int struct_or_union_specifier(FileInst* fInst,
                               Map* typeMap,
-                              Type** declTypePtr);  // TODO:
-int struct_or_union(FileInst* fInst, Map* typeMap, Type* declType);
+                              Declaration** declPtr);  // TODO:
+int struct_or_union(FileInst* fInst, Map* typeMap, Declaration* decl);
 int struct_declaration_list(FileInst* fInst,
                             Map* typeMap,
-                            Type** declTypePtr);  // TODO:
+                            Declaration** declPtr);  // TODO:
 int struct_declaration(FileInst* fInst,
                        Map* typeMap,
-                       Type** declTypePtr);  // TODO:
+                       Declaration** declPtr);  // TODO:
 int specifier_qualifier_list(FileInst* fInst,
                              Map* typeMap,
-                             Type** declTypePtr);  // TODO:
+                             Declaration** declPtr);  // TODO:
 int struct_declarator_list(FileInst* fInst,
                            Map* typeMap,
-                           Type** declTypePtr);  // TODO:
+                           Declaration** declPtr);  // TODO:
 int struct_declarator(FileInst* fInst,
                       Map* typeMap,
-                      Type** declTypePtr);                 // TODO:
+                      Declaration** declPtr);                 // TODO:
 int enum_specifier(FileInst* fInst, Map* typeMap);         // TODO:
 int enumerator_list(FileInst* fInst, Map* typeMap);        // TODO:
 int enumerator(FileInst* fInst, Map* typeMap);             // TODO:
 int atomic_type_specifier(FileInst* fInst, Map* typeMap);  // TODO:
-int type_qualifier(FileInst* fInst, Map* typeMap, Type* declType);
+int type_qualifier(FileInst* fInst, Map* typeMap, Declaration* decl);
 int function_specifier(FileInst* fInst, Map* typeMap);   // TODO:
 int alignment_specifier(FileInst* fInst, Map* typeMap);  // TODO:
 int declarator(FileInst* fInst, Map* typeMap);           // TODO:
 int direct_declarator(FileInst* fInst, Map* typeMap);    // TODO:
 int pointer(FileInst* fInst, Map* typeMap);              // TODO:
-int type_qualifier_list(FileInst* fInst, Map* typeMap, Type* declType);  // TODO:
+int type_qualifier_list(FileInst* fInst, Map* typeMap, Declaration* decl);  // TODO:
 int parameter_type_list(FileInst* fInst,
                         Map* typeMap,
-                        Type** declTypePtr);                            // TODO:
-int parameter_list(FileInst* fInst, Map* typeMap, Type** declTypePtr);  // TODO:
+                        Declaration** declPtr);                            // TODO:
+int parameter_list(FileInst* fInst, Map* typeMap, Declaration** declPtr);  // TODO:
 int parameter_declaration(FileInst* fInst,
                           Map* typeMap,
-                          Type** declTypePtr);       // TODO:
+                          Declaration** declPtr);       // TODO:
 int identifier_list(FileInst* fInst, Map* typeMap);  // TODO:
 int type_name(FileInst* fInst, Map* typeMap);        // TODO:
 int abstract_declarator(FileInst* fInst,
                         Map* typeMap,
-                        Type** declTypePtr);  // TODO:
+                        Declaration** declPtr);  // TODO:
 int direct_abstract_declarator(FileInst* fInst,
                                Map* typeMap,
-                               Type** declTypePtr);            // TODO:
+                               Declaration** declPtr);            // TODO:
 int typedef_name(FileInst* fInst, Map* typeMap);               // TODO:
 int initializer(FileInst* fInst, Map* typeMap);                // TODO:
 int initializer_list(FileInst* fInst, Map* typeMap);           // TODO:

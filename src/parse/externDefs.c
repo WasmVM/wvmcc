@@ -48,8 +48,8 @@ int function_definition(FileInst* fInst, Map *typeMap) {
   long int fpos = ftell(fInst->fptr);
   /* declaration-specifiers declarator declaration-list? compound-statement
    */
-  Type *declType = malloc(sizeof(Type));
-  initType(declType);
+  Declaration *declType = malloc(sizeof(Declaration));
+  initDeclaration(declType);
   int res = declaration_specifiers(fInst, typeMap, &declType) && declarator(fInst, typeMap) &&
             (declaration_list(fInst, typeMap) || 1) && compound_statement(fInst, typeMap);
   if (!res) {

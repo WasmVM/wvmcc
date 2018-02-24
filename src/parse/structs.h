@@ -57,6 +57,7 @@ typedef struct {
 
 typedef struct {
     char *pointers;
+    char ptrSize;
     char *identifier;
     DeclaratorType type;
     List *list;
@@ -67,13 +68,13 @@ typedef struct {
     char specifier;
     char qualifier;
     Declarator declarator;
-} Type;
+} Declaration;
 
-void initType(Type *type);
-void freeType(Type *type);
+void initDeclaration(Declaration *decl);
+void freeDeclaration(Declaration *decl);
 
 typedef struct {
-    Type type;
+    Declaration decl;
     List *props;
 } StructUnion;
 

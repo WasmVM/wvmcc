@@ -1,25 +1,25 @@
 #include "structs.h"
 
-void initType(Type *type){
-    type->storage = 0;
-    type->specifier = 0;
-    type->qualifier = 0;
+void initDeclaration(Declaration *decl){
+    decl->storage = 0;
+    decl->specifier = 0;
+    decl->qualifier = 0;
 }
 
-void freeType(Type *type){
-    switch(type->specifier){
+void freeDeclaration(Declaration *decl){
+    switch(decl->specifier){
         case Type_Struct:
         case Type_Union:{
-            StructUnion *typePtr = (StructUnion *)type;
-            if(typePtr->props){
-                while(typePtr->props->size > 0){
-                    freeType(listAt(typePtr->props, 0));
+            StructUnion *declPtr = (StructUnion *)decl;
+            if(declPtr->props){
+                while(declPtr->props->size > 0){
+                    freeDeclaration(listAt(declPtr->props, 0));
                 }
-                listFree(&typePtr->props);
+                listFree(&declPtr->props);
             }
-            free(typePtr);
+            free(declPtr);
         }break;
         default:
-            free(type);
+            free(decl);
     }
 }
