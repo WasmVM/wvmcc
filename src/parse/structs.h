@@ -38,13 +38,14 @@ typedef enum {
 
 typedef enum {
     Array_Static = 16,
-    Array_Variable = 32
+    Array_Variable = 32,
+    Array_Unspecified = 64
 } ArrayQualifier;
 
 typedef enum {
     Type_Array = 1,
     Type_Function_parameter = 2,
-    Type_Function_identifier = 2
+    Type_Function_identifier = 3
 } DeclaratorType;
 
 typedef struct {
@@ -60,7 +61,7 @@ typedef struct {
     char ptrSize;
     char *identifier;
     DeclaratorType type;
-    List *list;
+    List *list; // List of array declatators
 } Declarator;
 
 typedef struct {
@@ -75,7 +76,7 @@ void freeDeclaration(Declaration *decl);
 
 typedef struct {
     Declaration decl;
-    List *props;
+    List *props; // List of struct declatators
 } StructUnion;
 
 #endif
