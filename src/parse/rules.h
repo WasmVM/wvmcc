@@ -1,6 +1,7 @@
 #ifndef WVMCC_PARSE_RULES_DEF
 #define WVMCC_PARSE_RULES_DEF
 
+#include "../fileInst.h"
 #include "structs.h"
 #include "token.h"
 
@@ -22,8 +23,8 @@ int declaration(FileInst* fInst, Map* typeMap);  // TODO:
 int declaration_specifiers(FileInst* fInst,
                            Map* typeMap,
                            Declaration** declPtr);           // TODO:
-int init_declarator_list(FileInst* fInst, Map* typeMap);  // TODO:
-int init_declarator(FileInst* fInst, Map* typeMap);       // TODO:
+int init_declarator_list(FileInst* fInst, Map* typeMap, Declaration *decl);  // TODO:
+int init_declarator(FileInst* fInst, Map* typeMap, Declaration *decl);       // TODO:
 int storage_class_specifier(FileInst* fInst, Map* typeMap, Declaration* decl);
 int type_specifier(FileInst* fInst, Map* typeMap, Declaration** declPtr);  // TODO:
 int struct_or_union_specifier(FileInst* fInst,
@@ -49,13 +50,13 @@ int enum_specifier(FileInst* fInst, Map* typeMap);         // TODO:
 int enumerator_list(FileInst* fInst, Map* typeMap);        // TODO:
 int enumerator(FileInst* fInst, Map* typeMap);             // TODO:
 int atomic_type_specifier(FileInst* fInst, Map* typeMap);  // TODO:
-int type_qualifier(FileInst* fInst, Map* typeMap, Declaration* decl);
+int type_qualifier(FileInst* fInst, Map* typeMap, char *qualifier);
 int function_specifier(FileInst* fInst, Map* typeMap);   // TODO:
 int alignment_specifier(FileInst* fInst, Map* typeMap);  // TODO:
-int declarator(FileInst* fInst, Map* typeMap);           // TODO:
-int direct_declarator(FileInst* fInst, Map* typeMap);    // TODO:
-int pointer(FileInst* fInst, Map* typeMap);              // TODO:
-int type_qualifier_list(FileInst* fInst, Map* typeMap, Declaration* decl);  // TODO:
+int declarator(FileInst* fInst, Map* typeMap, Declaration *decl);           // TODO:
+int direct_declarator(FileInst* fInst, Map* typeMap, Declaration *decl);    // TODO:
+int pointer(FileInst* fInst, Map* typeMap, Declaration *decl);
+int type_qualifier_list(FileInst* fInst, Map* typeMap, char *qualifier);  // TODO:
 int parameter_type_list(FileInst* fInst,
                         Map* typeMap,
                         Declaration** declPtr);                            // TODO:
