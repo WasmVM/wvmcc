@@ -7,6 +7,8 @@ void initDeclaration(Declaration *decl){
 }
 
 void freeDeclaration(Declaration *decl){
+    free(decl->declarator.pointers);
+    // TODO: free array_function list
     switch(decl->specifier){
         case Type_Struct:
         case Type_Union:{

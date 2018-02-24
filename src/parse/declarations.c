@@ -677,17 +677,19 @@ static int direct_declarator_tail(FileInst *fInst, Map *typeMap,
 int direct_declarator(FileInst *fInst, Map *typeMap, Declaration *decl) {
   long int fpos = ftell(fInst->fptr);
   Token *identifier = (Token *)expectToken(fInst, Tok_Ident, 0);
-  int res = (identifier || (expectToken(fInst, Tok_Punct, Punct_paranL) &&
-                            declarator(fInst, typeMap, decl) &&
-                            expectToken(fInst, Tok_Punct, Punct_paranR))) &&
-            direct_declarator_tail(fInst, typeMap, &decl);
-
-  if (!res) {
-    fseek(fInst->fptr, fpos, SEEK_SET);
-    return 0;
+  if (identifier) {
+    decl->declarator.identifier = identifier->data.str;
   } else {
-    return 1;
+    int res = expectToken(fInst, Tok_Punct, Punct_paranL) &&
+              declarator(fInst, typeMap, decl) &&
+              expectToken(fInst, Tok_Punct, Punct_paranR);
+    if (!res) {
+      fseek(fInst->fptr, fpos, SEEK_SET);
+      return 0;
+    }
   }
+  direct_declarator_tail(fInst, typeMap, &decl);
+  return 1;
 }
 
 int pointer(FileInst *fInst, Map *typeMap, Declaration *decl) {
