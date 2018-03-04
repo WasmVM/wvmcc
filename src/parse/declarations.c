@@ -631,40 +631,59 @@ int declarator(FileInst *fInst, Map *typeMap, Declaration *decl) {
 static int direct_declarator_tail(FileInst *fInst, Map *typeMap,
                                   Declaration **declPtr) {
   long int fpos = ftell(fInst->fptr);
-  Declaration *decl = *declPtr;
   int res = expectToken(fInst, Tok_Punct, Punct_paranL) &&
             (parameter_type_list(fInst, typeMap, declPtr) ||
              (identifier_list(fInst, typeMap) || 1)) &&
             expectToken(fInst, Tok_Punct, Punct_paranR);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
+    ArrayDeclarator *arrDecl = malloc(sizeof(ArrayDeclarator));
+    arrDecl->tailType = Tail_Array;
+    arrDecl->qualifier = 0;
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
-          (type_qualifier_list(fInst, typeMap, &(decl->qualifier)) || 1) &&
+          (type_qualifier_list(fInst, typeMap, &(arrDecl->qualifier)) || 1) &&
           (assignment_expression(fInst, typeMap) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
+    listAdd((*declPtr)->declarator.list, arrDecl);
+    
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
+    ArrayDeclarator *arrDecl = malloc(sizeof(ArrayDeclarator));
+    arrDecl->tailType = Tail_Array;
+    arrDecl->qualifier = 0;
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
           expectToken(fInst, Tok_Keyword, Keyw_static) &&
-          (type_qualifier_list(fInst, typeMap, &(decl->qualifier)) || 1) &&
+          (type_qualifier_list(fInst, typeMap, &(arrDecl->qualifier)) || 1) &&
           assignment_expression(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
+    arrDecl->qualifier |= Array_Static;
+    listAdd((*declPtr)->declarator.list, arrDecl);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
+    ArrayDeclarator *arrDecl = malloc(sizeof(ArrayDeclarator));
+    arrDecl->tailType = Tail_Array;
+    arrDecl->qualifier = 0;
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
           type_qualifier_list(fInst, typeMap, &(decl->qualifier)) &&
           expectToken(fInst, Tok_Keyword, Keyw_static) &&
           assignment_expression(fInst, typeMap) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
+    arrDecl->qualifier |= Array_Static;
+    listAdd((*declPtr)->declarator.list, arrDecl);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
+    ArrayDeclarator *arrDecl = malloc(sizeof(ArrayDeclarator));
+    arrDecl->tailType = Tail_Array;
+    arrDecl->qualifier = 0;
     res = expectToken(fInst, Tok_Punct, Punct_brackL) &&
           (type_qualifier_list(fInst, typeMap, &(decl->qualifier)) || 1) &&
           expectToken(fInst, Tok_Punct, Punct_aster) &&
           expectToken(fInst, Tok_Punct, Punct_brackR);
+    arrDecl->qualifier |= Array_Unspecified;
+    listAdd((*declPtr)->declarator.list, arrDecl);
   }
 
   if (!res) {

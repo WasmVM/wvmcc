@@ -43,12 +43,14 @@ typedef enum {
 } ArrayQualifier;
 
 typedef enum {
-    Type_Array = 1,
-    Type_Function_parameter = 2,
-    Type_Function_identifier = 3
-} DeclaratorType;
+    Tail_Array = 1,
+    Tail_Function = 2,
+    Tail_Function_va = 3,
+    Tail_Struct = 4;
+} DeclaratorTailType;
 
 typedef struct {
+    char tailType;
     char qualifier;
     union{
         char *identifier;
@@ -60,8 +62,7 @@ typedef struct {
     char *pointers;
     char ptrSize;
     char *identifier;
-    DeclaratorType type;
-    List *list; // List of array declatators
+    List *list; // List of array and param declatators
 } Declarator;
 
 typedef struct {
@@ -73,6 +74,11 @@ typedef struct {
 
 void initDeclaration(Declaration *decl);
 void freeDeclaration(Declaration *decl);
+
+typedef struct {
+    Declaration decl;
+    int bitField;
+} StructUnionProps;
 
 typedef struct {
     Declaration decl;
