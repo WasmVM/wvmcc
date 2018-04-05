@@ -1,6 +1,7 @@
 #ifndef WVMCC_PARSE_STRUCTS_DEF
 #define WVMCC_PARSE_STRUCTS_DEF
 
+#include <limits.h>
 #include "../map.h"
 #include "../list.h"
 
@@ -46,7 +47,7 @@ typedef enum {
     Tail_Array = 1,
     Tail_Function = 2,
     Tail_Function_va = 3,
-    Tail_Struct = 4;
+    Tail_Struct = 4
 } DeclaratorTailType;
 
 typedef struct {
@@ -72,6 +73,17 @@ typedef struct {
     Declarator declarator;
 } Declaration;
 
+typedef enum {
+    Ident_Value = 1,
+    Ident_Function = 2
+} IdentifierType;
+
+typedef struct {
+    char identType;
+    Declaration *declaration;
+    unsigned int offset;
+} Identifier;
+
 void initDeclaration(Declaration *decl);
 void freeDeclaration(Declaration *decl);
 
@@ -84,5 +96,8 @@ typedef struct {
     Declaration decl;
     List *props; // List of struct declatators
 } StructUnion;
+
+extern int stackTop;
+extern int staticTop;
 
 #endif

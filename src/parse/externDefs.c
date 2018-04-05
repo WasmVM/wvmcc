@@ -4,9 +4,9 @@ static int identComp(void *a, void *b){
   return strcmp(a, b);
 }
 
-int startParse(FileInst* fInst, FILE* fout) {
+int startParse(FileInst* fInst, List *declList) {
   Map *typeMap = mapNew(identComp, free, free);
-  translation_unit(fInst, typeMap);
+  translation_unit(fInst, typeMap, declList);
   Token* token = getToken(fInst);
   if (token == NULL || token->type != Tok_EOF) {
     mapFree(&typeMap);
@@ -16,11 +16,11 @@ int startParse(FileInst* fInst, FILE* fout) {
   return 0;
 }
 
-int translation_unit(FileInst* fInst, Map *typeMap) {
+int translation_unit(FileInst* fInst, Map *typeMap, List *declList) {
   long int fpos = ftell(fInst->fptr);
   /* external_declaration translation_unit?
    */
-  int res = external_declaration(fInst, typeMap) && (translation_unit(fInst, typeMap) || 1);
+  int res = external_declaration(fInst, typeMap, declList) && (translation_unit(fInst, typeMap, declList) || 1);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -29,29 +29,26 @@ int translation_unit(FileInst* fInst, Map *typeMap) {
   }
 }
 
-int external_declaration(FileInst* fInst, Map *typeMap) {
+int external_declaration(FileInst* fInst, Map *typeMap, List *declList) {
   long int fpos = ftell(fInst->fptr);
-  /* function_declaration
-   * declaration
-   */
-  int res = preprocessor_hint(fInst) || function_definition(fInst, typeMap) ||
-            declaration(fInst, typeMap);
-  if (!res) {
+  int res = preprocessor_hint(fInst) || function_definition(fInst, typeMap, declList) || declaration(fInst, typeMap, declList);
+    
+  if(!res){
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
-  } else {
+  }else{
     return 1;
   }
 }
 
-int function_definition(FileInst* fInst, Map *typeMap) {
+int function_definition(FileInst* fInst, Map *typeMap, List *declList) {
   long int fpos = ftell(fInst->fptr);
   /* declaration-specifiers declarator declaration-list? compound-statement
    */
   Declaration *decl = malloc(sizeof(Declaration));
   initDeclaration(decl);
   int res = declaration_specifiers(fInst, typeMap, &decl) && declarator(fInst, typeMap, decl) &&
-            (declaration_list(fInst, typeMap) || 1) && compound_statement(fInst, typeMap);
+            (declaration_list(fInst, typeMap, declList) || 1) && compound_statement(fInst, typeMap, declList);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;
@@ -60,9 +57,9 @@ int function_definition(FileInst* fInst, Map *typeMap) {
   }
 }
 
-int declaration_list(FileInst* fInst, Map *typeMap) {
+int declaration_list(FileInst* fInst, Map *typeMap, List *declList) {
   long int fpos = ftell(fInst->fptr);
-  int res = declaration(fInst, typeMap) && (declaration_list(fInst, typeMap) || 1);
+  int res = declaration(fInst, typeMap, declList) && (declaration_list(fInst, typeMap, declList) || 1);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     return 0;

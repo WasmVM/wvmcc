@@ -1,5 +1,8 @@
 #include "structs.h"
 
+int stackTop = 0;
+int staticTop = UINT_MAX;
+
 void initDeclaration(Declaration *decl){
     decl->storage = 0;
     decl->specifier = 0;

@@ -6,20 +6,20 @@
 #include "token.h"
 
 // Return -1 if error, 0 if success
-int startParse(FileInst* fInst, FILE* fout);  // TODO:
+int startParse(FileInst* fInst, List *declList);  // TODO:
 
 // Return 1 if match, 0 if not match, but not indicate whether error
 // happened or not
 
 // External definitions
-int translation_unit(FileInst* fInst, Map* typeMap);      // TODO:
-int external_declaration(FileInst* fInst, Map* typeMap);  // TODO:
-int function_definition(FileInst* fInst, Map* typeMap);   // TODO:
-int declaration_list(FileInst* fInst, Map* typeMap);      // TODO:
+int translation_unit(FileInst* fInst, Map* typeMap, List *declList);      // TODO:
+int external_declaration(FileInst* fInst, Map* typeMap, List *declList);  // TODO:
+int function_definition(FileInst* fInst, Map* typeMap, List *declList);   // TODO:
+int declaration_list(FileInst* fInst, Map* typeMap, List *declList);      // TODO:
 int preprocessor_hint(FileInst* fInst);
 
 // Declarations
-int declaration(FileInst* fInst, Map* typeMap);  // TODO:
+int declaration(FileInst* fInst, Map* typeMap, List *declList);  // TODO:
 int declaration_specifiers(FileInst* fInst,
                            Map* typeMap,
                            Declaration** declPtr);           // TODO:
@@ -107,13 +107,13 @@ int expression(FileInst* fInst, Map* typeMap);                 // TODO:
 int constant_expression(FileInst* fInst, Map* typeMap);        // TODO:
 
 // Statement
-int statement(FileInst* fInst, Map* typeMap);             // TODO:
-int labeled_statement(FileInst* fInst, Map* typeMap);     // TODO:
-int compound_statement(FileInst* fInst, Map* typeMap);    // TODO:
-int block_item_list(FileInst* fInst, Map* typeMap);       // TODO:
-int block_item(FileInst* fInst, Map* typeMap);            // TODO:
+int statement(FileInst* fInst, Map* typeMap, List *declList);             // TODO:
+int labeled_statement(FileInst* fInst, Map* typeMap, List *declList);     // TODO:
+int compound_statement(FileInst* fInst, Map* typeMap, List *declList);    // TODO:
+int block_item_list(FileInst* fInst, Map* typeMap, List *declList);       // TODO:
+int block_item(FileInst* fInst, Map* typeMap, List *declList);            // TODO:
 int expression_statement(FileInst* fInst, Map* typeMap);  // TODO:
-int selection_statement(FileInst* fInst, Map* typeMap);   // TODO:
-int iteration_statement(FileInst* fInst, Map* typeMap);   // TODO:
+int selection_statement(FileInst* fInst, Map* typeMap, List *declList);   // TODO:
+int iteration_statement(FileInst* fInst, Map* typeMap, List *declList);   // TODO:
 int jump_statement(FileInst* fInst, Map* typeMap);        // TODO:
 #endif
