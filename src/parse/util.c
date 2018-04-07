@@ -1,4 +1,5 @@
 #include "token.h"
+#include "util.h"
 
 intptr_t expectToken(FileInst* fileInst, TokenType type, int value) {
   long int fpos = ftell(fileInst->fptr);

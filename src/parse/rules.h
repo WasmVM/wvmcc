@@ -55,12 +55,12 @@ int function_specifier(FileInst* fInst, Map* typeMap);   // TODO:
 int alignment_specifier(FileInst* fInst, Map* typeMap);  // TODO:
 int declarator(FileInst* fInst, Map* typeMap, Declaration *decl);           // TODO:
 int direct_declarator(FileInst* fInst, Map* typeMap, Declaration *decl);    // TODO:
-int pointer(FileInst* fInst, Map* typeMap, Declaration *decl);
+int pointer(FileInst* fInst, Map* typeMap, List *ptrList);
 int type_qualifier_list(FileInst* fInst, Map* typeMap, char *qualifier);  // TODO:
 int parameter_type_list(FileInst* fInst,
                         Map* typeMap,
                         Declaration** declPtr);                            // TODO:
-int parameter_list(FileInst* fInst, Map* typeMap, Declaration** declPtr);  // TODO:
+int parameter_list(FileInst* fInst, Map* typeMap, ParamDeclarator* paramDecl);  // TODO:
 int parameter_declaration(FileInst* fInst,
                           Map* typeMap,
                           Declaration** declPtr);       // TODO:

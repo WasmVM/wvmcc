@@ -44,33 +44,38 @@ typedef enum {
 } ArrayQualifier;
 
 typedef enum {
-    Tail_Array = 1,
-    Tail_Function = 2,
-    Tail_Function_va = 3,
-    Tail_Struct = 4
-} DeclaratorTailType;
+    Decl_Pointer = 1,
+    Decl_Array = 2,
+    Decl_Function = 3,
+    Decl_Function_va = 4
+} DeclaratorType;
 
 typedef struct {
-    char tailType;
+    char declType;
+    List *params;
+} ParamDeclarator;
+
+typedef struct {
+    char declType;
+    char qualifier;
+} PointerDeclarator;
+
+typedef struct {
+    char declType;
     char qualifier;
     union{
         char *identifier;
         int size;
     }length;
+    List *expr;
 } ArrayDeclarator;
-
-typedef struct {
-    char *pointers;
-    char ptrSize;
-    char *identifier;
-    List *list; // List of array and param declatators
-} Declarator;
 
 typedef struct {
     char storage;
     char specifier;
     char qualifier;
-    Declarator declarator;
+    char *identifier;
+    List *declarators;
 } Declaration;
 
 typedef enum {
@@ -81,7 +86,7 @@ typedef enum {
 typedef struct {
     char identType;
     Declaration *declaration;
-    unsigned int offset;
+    int localidx;
 } Identifier;
 
 void initDeclaration(Declaration *decl);
@@ -96,8 +101,5 @@ typedef struct {
     Declaration decl;
     List *props; // List of struct declatators
 } StructUnion;
-
-extern int stackTop;
-extern int staticTop;
 
 #endif

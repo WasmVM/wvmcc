@@ -31,14 +31,19 @@ int translation_unit(FileInst* fInst, Map *typeMap, List *declList) {
 
 int external_declaration(FileInst* fInst, Map *typeMap, List *declList) {
   long int fpos = ftell(fInst->fptr);
-  int res = preprocessor_hint(fInst) || function_definition(fInst, typeMap, declList) || declaration(fInst, typeMap, declList);
-    
+  int res = preprocessor_hint(fInst);
   if(!res){
-    fseek(fInst->fptr, fpos, SEEK_SET);
-    return 0;
-  }else{
-    return 1;
+    if(function_definition(fInst, typeMap, declList)){
+
+    }else if(declaration(fInst, typeMap, declList)){
+      Identifier *ident = (Identifier *)declList->tail->data;
+      ident->localidx = -1;
+    }else{
+      fseek(fInst->fptr, fpos, SEEK_SET);
+      return 0;
+    }
   }
+  return 1;
 }
 
 int function_definition(FileInst* fInst, Map *typeMap, List *declList) {

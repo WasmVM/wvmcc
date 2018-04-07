@@ -1,17 +1,16 @@
 #include "structs.h"
 
-int stackTop = 0;
-int staticTop = UINT_MAX;
-
 void initDeclaration(Declaration *decl){
     decl->storage = 0;
     decl->specifier = 0;
     decl->qualifier = 0;
+    decl->declarators = listNew();
+    decl->identifier = NULL;
 }
 
 void freeDeclaration(Declaration *decl){
-    free(decl->declarator.pointers);
-    // TODO: free array_function list
+    free(decl->identifier);
+    listFree(&(decl->declarators));
     switch(decl->specifier){
         case Type_Struct:
         case Type_Union:{
