@@ -123,7 +123,7 @@ typedef enum {
 typedef struct {
 	TokenType type;
 	union {
-		unsigned long long int intVal;
+		long long int intVal;
 		double floatVal;
 		char *str;
 		Punct punct;

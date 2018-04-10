@@ -102,4 +102,9 @@ typedef struct {
     List *props; // List of struct declatators
 } StructUnion;
 
+typedef struct {
+    Declaration decl;
+    char lvalue;
+} ExprArgs;
+
 #endif

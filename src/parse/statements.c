@@ -1,27 +1,27 @@
 #include "rules.h"
 
-int statement(FileInst *fInst, Map *typeMap, List *declList) {
+int statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
-  int res = labeled_statement(fInst, typeMap, declList);
+  int res = labeled_statement(fInst, typeMap, declList, codeList);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = compound_statement(fInst, typeMap, declList);
+    res = compound_statement(fInst, typeMap, declList, codeList);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = expression_statement(fInst, typeMap);
+    res = expression_statement(fInst, typeMap, declList, codeList);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = selection_statement(fInst, typeMap, declList);
+    res = selection_statement(fInst, typeMap, declList, codeList);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = iteration_statement(fInst, typeMap, declList);
+    res = iteration_statement(fInst, typeMap, declList, codeList);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = jump_statement(fInst, typeMap);
+    res = jump_statement(fInst, typeMap, declList, codeList);
   }
 
   if (!res) {
@@ -31,21 +31,21 @@ int statement(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int labeled_statement(FileInst *fInst, Map *typeMap, List *declList) {
+int labeled_statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
   Token *identifier = (Token *)expectToken(fInst, Tok_Ident, 0);
   int res = identifier && expectToken(fInst, Tok_Punct, Punct_colon) &&
-            statement(fInst, typeMap, declList);
+            statement(fInst, typeMap, declList, codeList);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Keyword, Keyw_case) &&
-          constant_expression(fInst, typeMap) &&
-          expectToken(fInst, Tok_Punct, Punct_colon) && statement(fInst, typeMap, declList);
+          constant_expression(fInst, typeMap, declList, codeList) &&
+          expectToken(fInst, Tok_Punct, Punct_colon) && statement(fInst, typeMap, declList, codeList);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Keyword, Keyw_default) &&
-          expectToken(fInst, Tok_Punct, Punct_colon) && statement(fInst, typeMap, declList);
+          expectToken(fInst, Tok_Punct, Punct_colon) && statement(fInst, typeMap, declList, codeList);
   }
 
   if (!res) {
@@ -55,11 +55,11 @@ int labeled_statement(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int compound_statement(FileInst *fInst, Map *typeMap, List *declList) {
+int compound_statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
   int curIdentLen = declList->size;
   int res = expectToken(fInst, Tok_Punct, Punct_braceL) &&
-            (block_item_list(fInst, typeMap, declList) || 1) &&
+            (block_item_list(fInst, typeMap, declList, codeList) || 1) &&
             expectToken(fInst, Tok_Punct, Punct_braceR);
   //TODO: Clean local declarations
   if (!res) {
@@ -69,9 +69,9 @@ int compound_statement(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int block_item_list(FileInst *fInst, Map *typeMap, List *declList) {
+int block_item_list(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
-  int res = block_item(fInst, typeMap, declList) && (block_item_list(fInst, typeMap, declList) || 1);
+  int res = block_item(fInst, typeMap, declList, codeList) && (block_item_list(fInst, typeMap, declList, codeList) || 1);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -80,9 +80,9 @@ int block_item_list(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int block_item(FileInst *fInst, Map *typeMap, List *declList) {
+int block_item(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
-  int res = declaration(fInst, typeMap, declList) || statement(fInst, typeMap, declList);
+  int res = declaration(fInst, typeMap, declList, codeList) || statement(fInst, typeMap, declList, codeList);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -91,10 +91,10 @@ int block_item(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int expression_statement(FileInst *fInst, Map *typeMap) {
+int expression_statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
   int res =
-      (expression(fInst, typeMap) || 1) && expectToken(fInst, Tok_Punct, Punct_semi);
+      (expression(fInst, typeMap, declList, codeList) || 1) && expectToken(fInst, Tok_Punct, Punct_semi);
 
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
@@ -103,18 +103,18 @@ int expression_statement(FileInst *fInst, Map *typeMap) {
     return 1;
   }
 }
-int selection_statement(FileInst *fInst, Map *typeMap, List *declList) {
+int selection_statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_switch) &&
-            expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap) &&
-            expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList);
+            expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap, declList, codeList) &&
+            expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList, codeList);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res = expectToken(fInst, Tok_Keyword, Keyw_if) &&
-          expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap) &&
-          expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList);
+          expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap, declList, codeList) &&
+          expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList, codeList);
     if (res) {
-      res = expectToken(fInst, Tok_Keyword, Keyw_else) && statement(fInst, typeMap, declList);
+      res = expectToken(fInst, Tok_Keyword, Keyw_else) && statement(fInst, typeMap, declList, codeList);
     }
   }
 
@@ -125,16 +125,16 @@ int selection_statement(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int iteration_statement(FileInst *fInst, Map *typeMap, List *declList) {
+int iteration_statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList) {
   long int fpos = ftell(fInst->fptr);
   int res = expectToken(fInst, Tok_Keyword, Keyw_while) &&
-            expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap) &&
-            expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList);
+            expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap, declList, codeList) &&
+            expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList, codeList);
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
-    res = expectToken(fInst, Tok_Keyword, Keyw_do) && statement(fInst, typeMap, declList) &&
+    res = expectToken(fInst, Tok_Keyword, Keyw_do) && statement(fInst, typeMap, declList, codeList) &&
           expectToken(fInst, Tok_Keyword, Keyw_while) &&
-          expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap) &&
+          expectToken(fInst, Tok_Punct, Punct_paranL) && expression(fInst, typeMap, declList, codeList) &&
           expectToken(fInst, Tok_Punct, Punct_paranR) &&
           expectToken(fInst, Tok_Punct, Punct_semi);
   }
@@ -144,20 +144,20 @@ int iteration_statement(FileInst *fInst, Map *typeMap, List *declList) {
     res =
         expectToken(fInst, Tok_Keyword, Keyw_for) &&
         expectToken(fInst, Tok_Punct, Punct_paranL) &&
-        declaration(fInst, typeMap, declList) &&
-        (expression(fInst, typeMap) || 1) && expectToken(fInst, Tok_Punct, Punct_semi) &&
-        (expression(fInst, typeMap) || 1) &&
-        expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList);
+        declaration(fInst, typeMap, declList, codeList) &&
+        (expression(fInst, typeMap, declList, codeList) || 1) && expectToken(fInst, Tok_Punct, Punct_semi) &&
+        (expression(fInst, typeMap, declList, codeList) || 1) &&
+        expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList, codeList);
   }
   if (!res) {
     fseek(fInst->fptr, fpos, SEEK_SET);
     res =
         expectToken(fInst, Tok_Keyword, Keyw_for) &&
         expectToken(fInst, Tok_Punct, Punct_paranL) &&
-        (expression(fInst, typeMap) || 1) && expectToken(fInst, Tok_Punct, Punct_semi) &&
-        (expression(fInst, typeMap) || 1) && expectToken(fInst, Tok_Punct, Punct_semi) &&
-        (expression(fInst, typeMap) || 1) &&
-        expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList);
+        (expression(fInst, typeMap, declList, codeList) || 1) && expectToken(fInst, Tok_Punct, Punct_semi) &&
+        (expression(fInst, typeMap, declList, codeList) || 1) && expectToken(fInst, Tok_Punct, Punct_semi) &&
+        (expression(fInst, typeMap, declList, codeList) || 1) &&
+        expectToken(fInst, Tok_Punct, Punct_paranR) && statement(fInst, typeMap, declList, codeList);
   }
 
   if (!res) {
@@ -167,7 +167,7 @@ int iteration_statement(FileInst *fInst, Map *typeMap, List *declList) {
     return 1;
   }
 }
-int jump_statement(FileInst *fInst, Map *typeMap){
+int jump_statement(FileInst *fInst, Map *typeMap, List *declList, List *codeList){
       long int fpos = ftell(fInst->fptr);
       Token *identifier = NULL;
   int res = expectToken(fInst, Tok_Keyword, Keyw_goto) && (identifier = (Token *)expectToken(fInst, Tok_Ident, 0)) &&
@@ -186,7 +186,7 @@ int jump_statement(FileInst *fInst, Map *typeMap){
     fseek(fInst->fptr, fpos, SEEK_SET);
     res =
         expectToken(fInst, Tok_Keyword, Keyw_return) &&
-        (expression(fInst, typeMap) || 1) && expectToken(fInst, Tok_Punct, Punct_semi);
+        (expression(fInst, typeMap, declList, codeList) || 1) && expectToken(fInst, Tok_Punct, Punct_semi);
   }
 
   if (!res) {

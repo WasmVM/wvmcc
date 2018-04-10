@@ -22,9 +22,8 @@ int main(int argc, char* argv[]) {
     perror(argv[2]);
     return -3;
   }
-  List *declList = listNew();
   // Parse
-  int err = startParse(fInst, declList);
+  int err = startParse(fInst);
   
   // Clean
   fclose(fout);

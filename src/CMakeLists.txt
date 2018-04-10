@@ -17,6 +17,7 @@ add_executable(wvmcc
 	parse/expressions.c
 	parse/statements.c
 	parse/structs.c
+	codegen/genFuncs.c
 	map.c
 	"list.c"
 )
