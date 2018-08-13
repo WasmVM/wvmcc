@@ -1,5 +1,5 @@
-cmake_minimum_required(VERSION 3.0)
-project(wasmcc)
+cmake_minimum_required(VERSION 3.5)
+project(wvcc)
 set(CMAKE_C_STANDARD "11")
 set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -Wall -g")
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -Werror")
