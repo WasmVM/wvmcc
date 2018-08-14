@@ -3,8 +3,6 @@
 
 #include <stddef.h>
 
-static void BufferFree();
-
 typedef struct {
     void* data;
     size_t length;

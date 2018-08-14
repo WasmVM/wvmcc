@@ -9,6 +9,6 @@ typedef struct {
     int (*run)();
 } PassManager;
 
-PassManager* newPassManager();
+PassManager* new_PassManager();
 
 #endif
