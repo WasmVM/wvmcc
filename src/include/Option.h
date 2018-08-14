@@ -3,9 +3,15 @@
 
 #include <string.h>
 #include <stdlib.h>
+#include <stdio.h>
+
+#ifndef WVMCC_VERSION
+#define WVMCC_VERSION "dev"
+#endif
 
 typedef struct _Option{
-    char* output_file;
+    const char* output_file;
+    const char** input_files;
     void (*free)(struct _Option* this);
 } Option;
 
