@@ -21,7 +21,7 @@ static void print_version(Option* this){
 }
 
 Option* new_Option(int argc, const char* argv[]){
-    Option* newOption = (Option*) malloc(sizeof(Option));
+    Option* newOption = (Option*) calloc(1, sizeof(Option));
     newOption->free = free_Option;
     // Parse option
     for(int i = 0; i < argc; ++i){
@@ -36,6 +36,10 @@ Option* new_Option(int argc, const char* argv[]){
             print_usage(newOption);
         }else if(!strcmp(argv[i], "--version")){
             print_version(newOption);
+        }else{
+            newOption->input_count += 1;
+            newOption->input_files = (const char**) realloc(newOption->input_files, sizeof(const char*) * (newOption->input_count));
+            newOption->input_files[newOption->input_count - 1] = argv[i];
         }
     }
     return newOption;

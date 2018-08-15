@@ -12,7 +12,8 @@
 typedef struct _Option{
     const char* output_file;
     const char** input_files;
-    void (*free)(struct _Option* this);
+    size_t input_count;
+    void (*free)(struct _Option *thisOption);
 } Option;
 
 Option* new_Option(int argc, const char* argv[]);

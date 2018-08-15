@@ -4,3 +4,7 @@ add_executable(wvmcc
 target_link_libraries(wvmcc
     wvmcc_base
 )
+install(
+    TARGETS wvmcc
+    RUNTIME DESTINATION bin/
+)
