@@ -2,14 +2,17 @@
 #define WVMCC_PASS_DEF
 
 #include <stddef.h>
-#include <Buffer.h>
+#include <adt/Buffer.h>
+#include <adt/map.h>
 
 typedef struct _Pass{
     Buffer** input;
     size_t input_count;
     Buffer** output;
     size_t output_count;
+    Map* contextMap;
     int (*run)(struct _Pass* pass);
+    void (*free)(struct _Pass** pass);
 } Pass;
 
 #endif

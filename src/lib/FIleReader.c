@@ -14,25 +14,8 @@
  *    limitations under the License.
  */
 
-#include <PassManager.h>
+#include <FileReader.h>
 
-static void freeContext(void *data){
-    Context* context = (Context *)data;
-    context->free(context);
-}
+Pass* new_FileReader(Buffer** input, size_t input_count, Buffer** output, size_t output_count){
 
-void free_PassManager(PassManager** passManager){
-    free(*passManager);
-    *passManager = NULL;
-}
-
-PassManager* new_PassManager(){
-    PassManager* passManager = (PassManager*) calloc(1, sizeof(PassManager));
-    passManager->passList = listNew();
-    passManager->contextMap = mapNew(strcmp, free, freeContext);
-    return passManager;
-}
-
-int run_PassManager(PassManager* passManager){
-    return 0;
 }

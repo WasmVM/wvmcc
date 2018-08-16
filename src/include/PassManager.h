@@ -1,17 +1,21 @@
-#ifndef WVMCC_PASSMANAGER_DEF
+#ifndef WVMCC_PASSLIST_DEF
 #define WVMCC_PASSMANAGER_DEF
 
 #include <stddef.h>
 #include <stdlib.h>
-#include <Option.h>
-#include <Pass.h>
+#include <string.h>
+#include <adt/list.h>
+#include <adt/map.h>
+#include <adt/Pass.h>
+#include <adt/Context.h>
 
 typedef struct {
-    size_t count;
-    Pass* passes;
+    List* passList;
+    Map* contextMap;
 } PassManager;
 
 PassManager* new_PassManager();
 void free_PassManager(PassManager** passManager);
+int run_PassManager(PassManager* passManager);
 
 #endif
