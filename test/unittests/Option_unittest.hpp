@@ -16,7 +16,7 @@ SKYPAT_F(Option_unittest, configure_output_file)
     };
     Option* option = new_Option(argc, argv);
     EXPECT_FALSE(strcmp(option->output_file, "test"));
-    option->free(option);
+    free_Option(&option);
 }
 
 SKYPAT_F(Option_unittest, configure_input_file)
@@ -31,5 +31,5 @@ SKYPAT_F(Option_unittest, configure_input_file)
     EXPECT_FALSE(strcmp(option->input_files[0], "test.c"));
     EXPECT_FALSE(strcmp(option->input_files[1], "test1.c"));
     EXPECT_FALSE(strcmp(option->input_files[2], "test2.c"));
-    option->free(option);
+    free_Option(&option);
 }

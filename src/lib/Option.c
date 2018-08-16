@@ -1,9 +1,5 @@
 #include <Option.h>
 
-static void free_Option(Option* this){
-    free(this);
-}
-
 static void print_usage(Option* this){
     fprintf(stderr, "Usage: wvmcc [options] file...\n");
     fprintf(stderr, "Options:\n");
@@ -22,7 +18,9 @@ static void print_version(Option* this){
 
 Option* new_Option(int argc, const char* argv[]){
     Option* newOption = (Option*) calloc(1, sizeof(Option));
-    newOption->free = free_Option;
+    newOption->input_files = NULL;
+    newOption->output_file = NULL;
+    newOption->input_count = 0;
     // Parse option
     for(int i = 0; i < argc; ++i){
         if(!strcmp(argv[i], "-o")){
@@ -43,4 +41,9 @@ Option* new_Option(int argc, const char* argv[]){
         }
     }
     return newOption;
+}
+
+void free_Option(Option** option){
+    free(*option);
+    *option = NULL;
 }
