@@ -4,11 +4,12 @@
 #include <stddef.h>
 #include <Buffer.h>
 
-typedef struct {
-    void* context;
-    void* args;
-    int (*run)(Buffer* input, Buffer* output);
-    size_t index;
+typedef struct _Pass{
+    Buffer** input;
+    size_t input_count;
+    Buffer** output;
+    size_t output_count;
+    int (*run)(struct _Pass* pass);
 } Pass;
 
 #endif
