@@ -3,10 +3,10 @@
 
 #include <stddef.h>
 
-typedef struct {
+typedef struct _Buffer{
     void* data;
     size_t length;
-    void (*free)();
+    void (*free)(struct _Buffer**);
 } Buffer;
 
 #endif
