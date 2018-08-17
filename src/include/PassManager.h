@@ -1,4 +1,4 @@
-#ifndef WVMCC_PASSLIST_DEF
+#ifndef WVMCC_PASSMANAGER_DEF
 #define WVMCC_PASSMANAGER_DEF
 
 #include <stddef.h>
