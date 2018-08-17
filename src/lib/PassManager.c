@@ -26,10 +26,14 @@ void free_PassManager(PassManager** passManager){
     *passManager = NULL;
 }
 
+static int key_compare(void* a, void* b){
+    return strcmp((const char*)a, (const char*)b);
+}
+
 PassManager* new_PassManager(){
     PassManager* passManager = (PassManager*) calloc(1, sizeof(PassManager));
     passManager->passList = listNew();
-    passManager->contextMap = mapNew(strcmp, free, freeContext);
+    passManager->contextMap = mapNew(key_compare, free, freeContext);
     return passManager;
 }
 
