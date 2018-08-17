@@ -16,10 +16,16 @@
 
 #include <ByteBuffer.h>
 
-Buffer* new_ByteBuffer(size_t size){
+static void free_ByteBuffer(ByteBuffer** buffer){
+    free((*buffer)->data);
+    free(*buffer);
+    *buffer = NULL;
+}
+
+ByteBuffer* new_ByteBuffer(size_t size){
     Buffer* buffer = (Buffer*) calloc(1, sizeof(Buffer));
     buffer->data = malloc(size);
-    buffer->free = free;
+    buffer->free = free_ByteBuffer;
     buffer->length = size;
     return buffer;
 }

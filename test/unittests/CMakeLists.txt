@@ -16,3 +16,4 @@ function(add_unittest unittest)
 endfunction(add_unittest unittest)
 
 add_unittest(Option_unittest)
+add_unittest(ByteBuffer_unittest)
