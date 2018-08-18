@@ -14,7 +14,7 @@
  *    limitations under the License.
  */
 
-#include "list.h"
+#include <adt/list.h>
 
 List* listNew() {
   List* ret = (List*)malloc(sizeof(List));
