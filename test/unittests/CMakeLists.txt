@@ -1,6 +1,8 @@
-include_directories(${CMAKE_CURRENT_LIST_DIR})
-include_directories(${PROJECT_SOURCE_DIR}/include)
-
+include_directories(
+    ${CMAKE_CURRENT_LIST_DIR}
+    ${PROJECT_SOURCE_DIR}/include
+)
+message(${PROJECT_SOURCE_DIR})
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/test/unittests)
 function(add_unittest unittest)
     set(unittest_src "${PROJECT_BINARY_DIR}/test/unittests/${unittest}.cpp")
@@ -13,7 +15,11 @@ function(add_unittest unittest)
         wvmcc_base
         ${SKYPAT_LIBRARIES}
     )
+    install(TARGETS ${unittest}
+        RUNTIME DESTINATION libexec/wvmcc
+    )
 endfunction(add_unittest unittest)
 
 add_unittest(Option_unittest)
 add_unittest(ByteBuffer_unittest)
+add_unittest(FileReader_unittest)
