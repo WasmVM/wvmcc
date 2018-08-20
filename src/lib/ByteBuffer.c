@@ -24,7 +24,11 @@ static void free_ByteBuffer(ByteBuffer** buffer){
 
 ByteBuffer* new_ByteBuffer(size_t size){
     Buffer* buffer = (Buffer*) calloc(1, sizeof(Buffer));
-    buffer->data = malloc(size);
+    if(size > 0){
+        buffer->data = calloc(size, sizeof(char));
+    }else{
+        buffer->data = NULL;
+    }
     buffer->free = free_ByteBuffer;
     buffer->length = size;
     return buffer;

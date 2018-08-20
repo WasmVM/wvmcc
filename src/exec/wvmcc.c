@@ -14,11 +14,33 @@
  *    limitations under the License.
  */
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <Option.h>
+#include <PassManager.h>
+#include <ByteBuffer.h>
 
 int main(int argc, const char *argv[])
 {
+    // Set Option
     Option* option = new_Option(argc - 1, argv + 1);
+    if(option->input_count < 1){
+        fprintf(stderr, "error: no input file\n");
+        exit(-1);
+    }else if(option->input_count > 1){
+        fprintf(stderr, "error: only one input file is allowed\n");
+        exit(-1);
+    }
+    // Prepare Passes
+    PassManager* passManager = new_PassManager();
+    // FileReader
+    ByteBuffer* inputFileName = new_ByteBuffer(strlen(option->input_files[0]));
+    inputFileName->data = (void *)option->input_files[0];
+    ByteBuffer* inputSrc = new_ByteBuffer(0);
+    
+    // Clean
     free_Option(&option);
+    free_PassManager(&passManager);
     return 0;
 }
