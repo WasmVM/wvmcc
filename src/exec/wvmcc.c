@@ -20,6 +20,7 @@
 #include <Option.h>
 #include <PassManager.h>
 #include <ByteBuffer.h>
+#include <FileReader.h>
 
 int main(int argc, const char *argv[])
 {
@@ -36,9 +37,12 @@ int main(int argc, const char *argv[])
     PassManager* passManager = new_PassManager();
     // FileReader
     ByteBuffer* inputFileName = new_ByteBuffer(strlen(option->input_files[0]));
-    inputFileName->data = (void *)option->input_files[0];
+    strcpy((char*)inputFileName->data, option->input_files[0]);
     ByteBuffer* inputSrc = new_ByteBuffer(0);
-    
+    FileReader* fileReader = new_FileReader(&inputFileName, 1, &inputSrc, 1);
+    passManager->addPass(passManager, fileReader);
+    // Run pass
+    run_PassManager(passManager);
     // Clean
     free_Option(&option);
     free_PassManager(&passManager);

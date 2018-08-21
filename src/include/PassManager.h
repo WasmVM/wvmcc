@@ -9,9 +9,10 @@
 #include <adt/Pass.h>
 #include <adt/Context.h>
 
-typedef struct {
+typedef struct _PassManager{
     List* passList;
     Map* contextMap;
+    void (*addPass)(struct _PassManager* passManager, Pass* pass);
 } PassManager;
 
 PassManager* new_PassManager();
