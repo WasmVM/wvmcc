@@ -5,4 +5,5 @@ add_library(wvmcc_base
     "PassManager.c"
     "ByteBuffer.c"
     "FileReader.c"
+    "Token.c"
 )
