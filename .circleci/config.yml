@@ -1,6 +1,6 @@
 version: 2.0
 jobs:
-  build:
+  "unit-test":
     docker:
       - image: ubuntu:latest
     steps:
@@ -15,8 +15,6 @@ jobs:
             mkdir -p build &&
             cd build &&
             cmake -DCMAKE_BUILD_TYPE=Debug ..
-  "unit-test":
-    steps:
       - run:
           name: "Test"
           command: 
@@ -26,7 +24,4 @@ workflows:
   version: 2
   commit:
     jobs:
-      - build
-      - "unit-test":
-          requires:
-            - build
+      - "unit-test"
