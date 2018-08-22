@@ -15,7 +15,7 @@ jobs:
             mkdir -p build &&
             cd build &&
             cmake -DCMAKE_BUILD_TYPE=Debug ..
-  unit-test:
+  "unit-test":
     steps:
       - run:
           name: "Test"
@@ -24,9 +24,9 @@ jobs:
   
 workflows:
   version: 2
-  push-commit:
+  commit:
     jobs:
       - build
-      - unit-test
+      - "unit-test"
           requires:
             - build
