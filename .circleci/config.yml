@@ -27,6 +27,6 @@ workflows:
   commit:
     jobs:
       - build
-      - "unit-test"
+      - "unit-test":
           requires:
             - build
