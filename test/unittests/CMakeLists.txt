@@ -2,7 +2,7 @@ include_directories(
     ${CMAKE_CURRENT_LIST_DIR}
     ${PROJECT_SOURCE_DIR}/include
 )
-message(${PROJECT_SOURCE_DIR})
+enable_testing()
 file(MAKE_DIRECTORY ${PROJECT_BINARY_DIR}/test/unittests)
 function(add_unittest filepath)
     get_filename_component(unittest ${filepath} NAME_WE)
@@ -17,8 +17,7 @@ function(add_unittest filepath)
         wvmcc_base
         ${SKYPAT_LIBRARIES}
     )
-    install(TARGETS ${unittest}
-        RUNTIME DESTINATION libexec/wvmcc/${unittest_dir}
+    add_test(${unittest} ${PROJECT_BINARY_DIR}/test/unittests/${unittest}
     )
 endfunction(add_unittest unittest)
 

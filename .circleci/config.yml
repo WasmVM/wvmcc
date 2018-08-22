@@ -1,0 +1,32 @@
+version: 2.0
+jobs:
+  build:
+    docker:
+      - image: ubuntu:latest
+    steps:
+      - run:
+          name: "Install CircleCI prerequisite"
+          command:
+            apt-get update && apt-get install -y git ssh tar gzip ca-certificates
+      - checkout
+      - run:
+          name: "Build"
+          command: 
+            mkdir -p build &&
+            cd build &&
+            cmake -DCMAKE_BUILD_TYPE=Debug ..
+  unit-test:
+    steps:
+      - run:
+          name: "Test"
+          command: 
+            ctest
+  
+workflows:
+  version: 2
+  push-commit:
+    jobs:
+      - build
+      - unit-test
+          requires:
+            - build
