@@ -15,7 +15,7 @@ jobs:
       - run:
           name: "Build SkyPat"
           command:
-            "[ ! -d SkyPat-install ] && mkdir -p SkyPat-install && export SKYPAT_PATH=$PWD/SkyPat-install && git clone --branch v3.1.1 --depth 1 https://github.com/skymizer/SkyPat.git SkyPat-src && cd SkyPat-src && ./autogen.sh && ./configure --prefix=$SKYPAT_PATH && make install && cd .."
+            "if [ ! -d SkyPat-install ]; then mkdir -p SkyPat-install && export SKYPAT_PATH=$PWD/SkyPat-install && git clone --branch v3.1.1 --depth 1 https://github.com/skymizer/SkyPat.git SkyPat-src && cd SkyPat-src && ./autogen.sh && ./configure --prefix=$SKYPAT_PATH && make install && cd .. ; fi"
       - save_cache:
           key: SkyPat-install
           paths:
