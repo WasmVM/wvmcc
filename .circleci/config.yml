@@ -25,7 +25,7 @@ jobs:
           command: 
             mkdir -p build &&
             cd build &&
-            cmake -DCMAKE_BUILD_TYPE=Debug -DSKYPAT_INCLUDE_DIR=../SkyPat-install/include -DSKYPAT_LIBRARY_DIR=../SkyPat-install/lib ..
+            cmake -DCMAKE_BUILD_TYPE=Debug -DSKYPAT_INCLUDE_DIR=../SkyPat-install/include -DSKYPAT_LIBRARY_DIR=../SkyPat-install/lib .. && make -j4
       - run:
           name: "Test"
           command: 
