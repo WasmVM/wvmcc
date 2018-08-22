@@ -25,7 +25,7 @@ SKYPAT_F(Token_unittest, Keyword_Unknown)
 SKYPAT_F(Token_unittest, Keyword_auto)
 {
     Token* token = new_KeywordToken(Keyword_auto);
-    EXPECT_EQ(token->type, Keyword_auto);
+    EXPECT_EQ(token->type, Token_Keyword);
     EXPECT_EQ(token->value.keyword, Keyword_auto);
     token->free(&token);
 }

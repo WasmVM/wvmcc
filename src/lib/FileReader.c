@@ -22,19 +22,19 @@ static int run_FileReader(Pass* pass){
         FILE* fin = fopen(fileName, "rb");
         if(!fin){
             int curerrno = errno;
-            fprintf(stderr, "error: %s in $s\n", strerror(errno), fileName);
+            fprintf(stderr, "error: %s in %s\n", strerror(errno), fileName);
             return curerrno;
         }
         if(fseek(fin, 0, SEEK_END)){
             int curerrno = errno;
-            fprintf(stderr, "error: %s in $s\n", strerror(errno), fileName);
+            fprintf(stderr, "error: %s in %s\n", strerror(errno), fileName);
             return curerrno;
         }
         // read to output
         pass->output[i]->length = ftell(fin);
         if(pass->output[i]->length == -1L){
             int curerrno = errno;
-            fprintf(stderr, "error: %s in $s\n", strerror(errno), fileName);
+            fprintf(stderr, "error: %s in %s\n", strerror(errno), fileName);
             return curerrno;
         }
         rewind(fin);

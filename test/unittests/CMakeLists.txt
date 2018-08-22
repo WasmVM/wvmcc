@@ -15,7 +15,7 @@ function(add_unittest filepath)
     )
     target_link_libraries(${unittest}
         wvmcc_base
-        ${SKYPAT_LIBRARIES}
+        skypat
     )
     add_test(${unittest} ${PROJECT_BINARY_DIR}/test/unittests/${unittest})
 endfunction(add_unittest unittest)
