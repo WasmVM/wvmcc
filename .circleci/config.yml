@@ -25,7 +25,7 @@ jobs:
           command: 
             mkdir -p build &&
             cd build &&
-            cmake -DCMAKE_BUILD_TYPE=Debug -DSKYPAT_PATH=../SkyPat-install ..
+            cmake -DCMAKE_BUILD_TYPE=Debug -DSKYPAT_PATH=$SKYPAT_PATH ..
       - run:
           name: "Test"
           command: 

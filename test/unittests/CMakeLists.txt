@@ -17,8 +17,7 @@ function(add_unittest filepath)
         wvmcc_base
         ${SKYPAT_LIBRARIES}
     )
-    add_test(${unittest} ${PROJECT_BINARY_DIR}/test/unittests/${unittest}
-    )
+    add_test(${unittest} ${PROJECT_BINARY_DIR}/test/unittests/${unittest})
 endfunction(add_unittest unittest)
 
 add_unittest(adt/Token_unittest)
