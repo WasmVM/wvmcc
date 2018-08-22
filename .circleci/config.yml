@@ -5,16 +5,27 @@ jobs:
       - image: ubuntu:latest
     steps:
       - run:
-          name: "Install CircleCI prerequisite"
+          name: "Install prerequisite"
           command:
-            apt-get update && apt-get install -y git ssh tar gzip ca-certificates
+            apt-get update && apt-get install -y git ssh tar gzip ca-certificates cmake wget automake autoconf libtool build-essential
       - checkout
+      - restore_cache:
+          keys:
+            - SkyPat-install
+      - run:
+          name: "Build SkyPat"
+          command:
+            "[ ! -d SkyPat-install ] && mkdir -p SkyPat-install && git clone --branch v3.1.1 --depth 1 https://github.com/skymizer/SkyPat.git SkyPat-src && cd SkyPat-src && ./autogen.sh && ./configure --prefix=../SkyPat-install && make install"
+      - save_cache:
+          key: SkyPat-install
+          paths:
+            - "SkyPat-install"
       - run:
           name: "Build"
           command: 
             mkdir -p build &&
             cd build &&
-            cmake -DCMAKE_BUILD_TYPE=Debug ..
+            cmake -DCMAKE_BUILD_TYPE=Debug -DSKYPAT_PATH=../SkyPat-install ..
       - run:
           name: "Test"
           command: 
