@@ -2,7 +2,7 @@
 
 #define restrict __restrict__
 extern "C"{
-    #include <Token.h>
+    #include <adt/Token.h>
     #include <string.h>
 }
 #undef restrict

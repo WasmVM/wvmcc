@@ -1,9 +1,9 @@
 add_library(wvmcc_base
     "adt/list.c"
     "adt/map.c"
+    "adt/Token.c"
     "Option.c"
     "PassManager.c"
     "ByteBuffer.c"
     "FileReader.c"
-    "Token.c"
 )

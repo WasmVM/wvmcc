@@ -14,7 +14,7 @@
  *    limitations under the License.
  */
 
-#include <Token.h>
+#include <adt/Token.h>
 
 static void free_Token(Token** token){
     if((*token)->type == Token_Identifier){
