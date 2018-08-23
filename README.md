@@ -1,8 +1,11 @@
 # WVMCC
 
+[![CircleCI](https://circleci.com/gh/LuisHsu/wvmcc/tree/master.svg?style=svg)](https://circleci.com/gh/LuisHsu/wvmcc/tree/master)
+
 #### 為 [WasmVM](https://github.com/LuisHsu/WasmVM) 打造的編譯器
 
 A C compiler for [WasmVM](https://github.com/LuisHsu/WasmVM)
+
 
 ## 先備條件 Prerequisite
 
