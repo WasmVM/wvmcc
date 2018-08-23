@@ -23,6 +23,16 @@ List* listNew() {
   ret->tail = NULL;
   return ret;
 }
+void listPush(List* theList, void* val) {
+  ListNode* newNode = (ListNode*)malloc(sizeof(List));
+  newNode->next = theList->head;
+  newNode->data = val;
+  ++theList->size;
+  theList->head = newNode;
+  if (theList->head == NULL) {
+    theList->tail = newNode;
+  }
+}
 void listAdd(List* theList, void* val) {
   ListNode* newNode = (ListNode*)malloc(sizeof(List));
   newNode->next = NULL;
