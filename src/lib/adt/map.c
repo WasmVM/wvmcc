@@ -116,7 +116,6 @@ void mapInsert(Map* thisMap, void* key, void* value) {
     }
   }
   // Swap value
-  void* tmp = NULL;
   switch (cmpres) {
     case -1:
       target->data[0].key ^= keyInt;
@@ -219,11 +218,11 @@ void mapInsert(Map* thisMap, void* key, void* value) {
   leftNode->parent = thisMap->head;
   rightNode->parent = thisMap->head;
 }
+
 int mapRemove(Map* thisMap, void* key) {
   if (thisMap->head == NULL) {
     return -1;
   }
-  intptr_t keyInt = (intptr_t)key;
   // Traverse to target
   MapNode* target = thisMap->head;
   intptr_t* swapKey = NULL;
