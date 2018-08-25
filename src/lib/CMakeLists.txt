@@ -6,4 +6,10 @@ add_library(wvmcc_base
     "PassManager.c"
     "ByteBuffer.c"
     "FileReader.c"
+    "TokenBuffer.c"
+)
+
+install(TARGETS wvmcc_base
+    LIBRARY DESTINATION lib
+    ARCHIVE DESTINATION lib
 )
