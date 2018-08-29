@@ -33,3 +33,11 @@ ByteBuffer* new_ByteBuffer(size_t size){
     buffer->length = size;
     return buffer;
 }
+
+int set_ByteBuffer(ByteBuffer* buffer, size_t offset, const void* data, size_t length){
+    if(offset + length > buffer->length){
+        return -1;
+    }
+    memcpy(buffer->data + offset, data, length);
+    return 0;
+}
