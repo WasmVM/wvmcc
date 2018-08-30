@@ -7,7 +7,7 @@ extern "C"{
 }
 #undef restrict
 
-SKYPAT_F(Lexer, input_not_equal_output)
+SKYPAT_F(Lexer_unittest, input_not_equal_output)
 {
     Buffer* input[3] = {
         new Buffer,
@@ -28,7 +28,7 @@ SKYPAT_F(Lexer, input_not_equal_output)
     }
 }
 
-SKYPAT_F(Lexer, create_delete)
+SKYPAT_F(Lexer_unittest, create_delete)
 {
     Buffer* input[2] = {
         new Buffer,
@@ -48,12 +48,26 @@ SKYPAT_F(Lexer, create_delete)
     }
 }
 
-SKYPAT_F(Lexer_unittest, Keyword)
+SKYPAT_F(Lexer_unittest, unsigned)
 {
-
+    // Input
+    ByteBuffer* input = new_ByteBuffer(8);
+    set_ByteBuffer(input, 0, "unsigned", 8);
+    // Outputs
+    Buffer* output = (Buffer*)new_TokenBuffer();
+    Lexer* lexer = new_Lexer(&input, 1, &output, 1);
+    lexer->run(lexer);
+    // Check
+    Token* token = (Token*)listAt((List*)output->data, 0);
+    EXPECT_EQ(token->type, Token_Keyword);
+    EXPECT_EQ(token->value.keyword, Keyword_unsigned);
+    // Clean
+    input->free(&input);
+    output->free(&output);
+    lexer->free(&lexer);
 }
 
-SKYPAT_F(Identifier, normal)
+SKYPAT_F(Lexer_unittest, normal)
 {
     // Input
     ByteBuffer* input = new_ByteBuffer(5);
@@ -72,7 +86,7 @@ SKYPAT_F(Identifier, normal)
     lexer->free(&lexer);
 }
 
-SKYPAT_F(Identifier, number_prefixed)
+SKYPAT_F(Lexer_unittest, number_prefixed)
 {
     // Input
     ByteBuffer* input = new_ByteBuffer(5);

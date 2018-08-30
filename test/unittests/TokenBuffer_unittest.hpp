@@ -7,7 +7,7 @@ extern "C"{
 }
 #undef restrict
 
-SKYPAT_F(TokenBuffer, create_delete)
+SKYPAT_F(TokenBuffer_unittest, create_delete)
 {
     TokenBuffer* tokenBuffer = new_TokenBuffer();
     EXPECT_EQ(tokenBuffer->buffer.length, 0);
@@ -15,7 +15,7 @@ SKYPAT_F(TokenBuffer, create_delete)
     EXPECT_EQ(tokenBuffer, NULL);
 }
 
-SKYPAT_F(TokenBuffer, polymorphism)
+SKYPAT_F(TokenBuffer_unittest, polymorphism)
 {
     Buffer* buffer = (Buffer*)new_TokenBuffer();
     EXPECT_EQ(buffer->length, 0);
@@ -23,7 +23,7 @@ SKYPAT_F(TokenBuffer, polymorphism)
     EXPECT_EQ(buffer, NULL);
 }
 
-SKYPAT_F(TokenBuffer, add_token)
+SKYPAT_F(TokenBuffer_unittest, add_token)
 {
     TokenBuffer* tokenBuffer = (TokenBuffer*)new_TokenBuffer();
     Token* token = new_UnknownToken();
