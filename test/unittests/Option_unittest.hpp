@@ -7,7 +7,7 @@ extern "C"{
 }
 #undef restrict
 
-SKYPAT_F(Option_unittest, configure_output_file)
+SKYPAT_F(Option, configure_output_file)
 {
     int argc = 2;
     const char** argv = new const char* [2]{
@@ -19,7 +19,7 @@ SKYPAT_F(Option_unittest, configure_output_file)
     free_Option(&option);
 }
 
-SKYPAT_F(Option_unittest, configure_input_file)
+SKYPAT_F(Option, configure_input_file)
 {
     int argc = 3;
     const char* argv[3] = {

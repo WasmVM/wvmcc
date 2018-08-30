@@ -2,7 +2,7 @@
 #define WVMCC_TOKENBUFFER_DEF
 
 #include <stdlib.h>
-#include <adt/list.h>
+#include <adt/List.h>
 #include <adt/Token.h>
 #include <adt/Buffer.h>
 

@@ -7,7 +7,7 @@ extern "C"{
 }
 #undef restrict
 
-SKYPAT_F(PassManager_unittest, create_delete)
+SKYPAT_F(PassManager, create_delete)
 {
     PassManager* passManager = new_PassManager();
     EXPECT_EQ(passManager->passList->size, 0);

@@ -9,7 +9,7 @@ extern "C"{
 }
 #undef restrict
 
-SKYPAT_F(FileReader_unittest, input_not_equal_output)
+SKYPAT_F(FileReader, input_not_equal_output)
 {
     Buffer* input[3] = {
         new Buffer,
@@ -30,7 +30,7 @@ SKYPAT_F(FileReader_unittest, input_not_equal_output)
     }
 }
 
-SKYPAT_F(FileReader_unittest, read_file)
+SKYPAT_F(FileReader, read_file)
 {
     const char* fileName = ".testFile";
     // Create test file

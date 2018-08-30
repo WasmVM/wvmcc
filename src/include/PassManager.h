@@ -4,8 +4,8 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
-#include <adt/list.h>
-#include <adt/map.h>
+#include <adt/List.h>
+#include <adt/Map.h>
 #include <adt/Pass.h>
 #include <adt/Context.h>
 

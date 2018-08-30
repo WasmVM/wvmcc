@@ -7,14 +7,14 @@ extern "C"{
 }
 #undef restrict
 
-SKYPAT_F(ByteBuffer_unittest, create_delete)
+SKYPAT_F(ByteBuffer, create_delete)
 {
     ByteBuffer *buffer = new_ByteBuffer(4);
     EXPECT_EQ(buffer->length, 4);
     buffer->free(&buffer);
 }
 
-SKYPAT_F(ByteBuffer_unittest, set)
+SKYPAT_F(ByteBuffer, set)
 {
     ByteBuffer *buffer = new_ByteBuffer(5);
     EXPECT_EQ(buffer->length, 5);
