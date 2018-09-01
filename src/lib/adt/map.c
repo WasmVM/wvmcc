@@ -14,7 +14,7 @@
  *    limitations under the License.
  */
 
-#include <adt/map.h>
+#include <adt/Map.h>
 
 Map* mapNew(keyComp_t keyComp, pairFree_t keyFree, pairFree_t valueFree) {
   Map* newMap = (Map*)malloc(sizeof(Map));

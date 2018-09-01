@@ -40,6 +40,7 @@ static int run_lexer(Lexer* lexer){
                 (token = lex_Punctuator(&cursor))
             ){
                 output->add(output, token);
+                ++cursor;
             }else{
                 // TODO: Error handling
                 fprintf(stderr, "[Lexer] Unknown token.\n");
@@ -71,9 +72,6 @@ Pass* new_Lexer(Buffer** input, size_t input_count, Buffer** output, size_t outp
     pass->run = run_lexer;
     pass->free = free_lexer;
     return pass;
-}
-Token* lex_Keyword(char **inputPtr){
-    return NULL;
 }
 Token* lex_Integer(char **inputPtr){
     return NULL;

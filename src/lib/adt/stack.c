@@ -14,7 +14,7 @@
  *    limitations under the License.
  */
 
-#include "stack.h"
+#include <adt/Stack.h>
 
 Stack* stackNew() {
   Stack* newStack = (Stack*)malloc(sizeof(Stack));

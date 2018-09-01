@@ -9,6 +9,7 @@ add_library(wvmcc_base
     "TokenBuffer.c"
     "lexer/Lexer.c"
     "lexer/identifier.c"
+    "lexer/keyword.c"
 )
 
 install(TARGETS wvmcc_base

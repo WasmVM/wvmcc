@@ -32,7 +32,7 @@ Token* lex_Identifier(char **inputPtr){
         size_t length = cursor - *inputPtr;
         char* matched = (char*) calloc(length + 1, sizeof(char));
         strncpy(matched, *inputPtr, length);
-        *inputPtr += length + 1;
+        *inputPtr += length;
         return new_IdentifierToken(matched);
     }
     return NULL;
