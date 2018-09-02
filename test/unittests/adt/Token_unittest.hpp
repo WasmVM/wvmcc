@@ -1,6 +1,7 @@
 #include <skypat/skypat.h>
 
 #define restrict __restrict__
+#define _Bool bool
 extern "C"{
     #include <adt/Token.h>
     #include <string.h>
@@ -42,9 +43,11 @@ SKYPAT_F(Token_unittest, Identifier)
 
 SKYPAT_F(Token_unittest, Integer)
 {
-    Token* token = new_IntegerToken(1234);
+    Token* token = new_IntegerToken(1234, 4, 0);
     EXPECT_EQ(token->type, Token_Integer);
     EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_EQ(token->isUnsigned, 0);
     token->free(&token);
 }
 

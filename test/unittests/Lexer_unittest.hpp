@@ -1,6 +1,7 @@
 #include <skypat/skypat.h>
 
 #define restrict __restrict__
+#define _Bool bool
 extern "C"{
     #include <ByteBuffer.h>
     #include <Lexer.h>
@@ -198,9 +199,118 @@ SKYPAT_F(Lexer_unittest, Identifier_number_prefixed)
     lexer->free(&lexer);
 }
 
-SKYPAT_F(Lexer_unittest, Integer)
+SKYPAT_F(Lexer_unittest, Integer_decimal)
 {
-
+    // Input
+    ByteBuffer* input[9];
+    for(size_t i = 0; i < 9; ++i){
+        input[i] = new_ByteBuffer(8);
+    }
+    set_ByteBuffer(input[0], 0, "1234", 5);
+    set_ByteBuffer(input[1], 0, "1234u", 6);
+    set_ByteBuffer(input[2], 0, "1234U", 6);
+    set_ByteBuffer(input[3], 0, "-1234l", 7);
+    set_ByteBuffer(input[4], 0, "1234lu", 7);
+    set_ByteBuffer(input[5], 0, "1234ull", 8);
+    set_ByteBuffer(input[6], 0, "1234LL", 8);
+    set_ByteBuffer(input[7], 0, "1234Ul", 7);
+    set_ByteBuffer(input[8], 0, "1234Lu", 7);
+    // Output
+    Buffer* output[9]
+    for(size_t i = 0; i < 9; ++i){
+        input[i] = new_TokenBuffer();
+    }
+    // Run
+    Lexer* lexer = new_Lexer(&input, 1, &output, 1);
+    ASSERT_NE(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output[0]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_FALSE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[1]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_TRUE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[2]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_TRUE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[3]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, -1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_FALSE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[4]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_TRUE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[5]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 8);
+    EXPECT_TRUE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[6]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 8);
+    EXPECT_FALSE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[7]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_TRUE(token->isUnsigned);
+    token = (Token*)listAt((List*)output[8]->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 1234);
+    EXPECT_EQ(token->byteSize, 4);
+    EXPECT_TRUE(token->isUnsigned);
+    // Clean
+    for(size_t i = 0; i < 9; ++i){
+        input->free(&input);
+        output->free(&output);
+    }
+    lexer->free(&lexer);
+}
+SKYPAT_F(Lexer_unittest, Integer_octal)
+{
+    // Input
+    ByteBuffer* input = new_ByteBuffer(5);
+    set_ByteBuffer(input, 0, "023", 5);
+    // Output
+    Buffer* output = (Buffer*)new_TokenBuffer();
+    Lexer* lexer = new_Lexer(&input, 1, &output, 1);
+    ASSERT_NE(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 19);
+    // Clean
+    input->free(&input);
+    output->free(&output);
+    lexer->free(&lexer);
+}
+SKYPAT_F(Lexer_unittest, Integer_hexadecimal)
+{
+    // Input
+    ByteBuffer* input = new_ByteBuffer(5);
+    set_ByteBuffer(input, 0, "0xa", 5);
+    // Output
+    Buffer* output = (Buffer*)new_TokenBuffer();
+    Lexer* lexer = new_Lexer(&input, 1, &output, 1);
+    ASSERT_NE(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output->data, 0);
+    EXPECT_EQ(token->type, Token_Integer);
+    EXPECT_EQ(token->value.integer, 10);
+    // Clean
+    input->free(&input);
+    output->free(&output);
+    lexer->free(&lexer);
 }
 
 SKYPAT_F(Lexer_unittest, Floating)

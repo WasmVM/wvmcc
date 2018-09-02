@@ -1,6 +1,7 @@
 #include <skypat/skypat.h>
 
 #define restrict __restrict__
+#define _Bool bool
 extern "C"{
     #include <ByteBuffer.h>
     #include <string.h>
