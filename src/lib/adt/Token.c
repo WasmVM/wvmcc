@@ -48,11 +48,13 @@ Token* new_IdentifierToken(const char *identifier){
     token->free = free_Token;
     return token;
 }
-Token* new_IntegerToken(const unsigned long long int value){
+Token* new_IntegerToken(const unsigned long long int value, const unsigned int byteSize, const _Bool isUnsigned){
     Token* token = (Token*) malloc(sizeof(Token));
     token->type = Token_Integer;
     token->value.integer = value;
     token->free = free_Token;
+    token->byteSize = byteSize;
+    token->isUnsigned = isUnsigned;
     return token;
 }
 Token* new_FloatingToken(const double value){

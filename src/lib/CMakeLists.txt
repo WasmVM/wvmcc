@@ -10,6 +10,7 @@ add_library(wvmcc_base
     "lexer/Lexer.c"
     "lexer/identifier.c"
     "lexer/keyword.c"
+    "lexer/integer.c"
 )
 
 install(TARGETS wvmcc_base

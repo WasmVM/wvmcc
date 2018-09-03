@@ -73,9 +73,6 @@ Pass* new_Lexer(Buffer** input, size_t input_count, Buffer** output, size_t outp
     pass->free = free_lexer;
     return pass;
 }
-Token* lex_Integer(char **inputPtr){
-    return NULL;
-}
 Token* lex_Floating(char **inputPtr){
     return NULL;
 }

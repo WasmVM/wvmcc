@@ -182,47 +182,36 @@ SKYPAT_F(Lexer_unittest, Identifier_normal)
     lexer->free(&lexer);
 }
 
-SKYPAT_F(Lexer_unittest, Identifier_number_prefixed)
-{
-    // Input
-    ByteBuffer* input = new_ByteBuffer(5);
-    set_ByteBuffer(input, 0, "0test", 5);
-    // Output
-    Buffer* output = (Buffer*)new_TokenBuffer();
-    Lexer* lexer = new_Lexer(&input, 1, &output, 1);
-    ASSERT_NE(lexer->run(lexer), 0);
-    // Check
-    EXPECT_EQ(((List*)output->data)->size, 0);
-    // Clean
-    input->free(&input);
-    output->free(&output);
-    lexer->free(&lexer);
-}
-
 SKYPAT_F(Lexer_unittest, Integer_decimal)
 {
     // Input
     ByteBuffer* input[9];
-    for(size_t i = 0; i < 9; ++i){
-        input[i] = new_ByteBuffer(8);
-    }
+    input[0] = new_ByteBuffer(5);
     set_ByteBuffer(input[0], 0, "1234", 5);
+    input[1] = new_ByteBuffer(6);
     set_ByteBuffer(input[1], 0, "1234u", 6);
+    input[2] = new_ByteBuffer(6);
     set_ByteBuffer(input[2], 0, "1234U", 6);
-    set_ByteBuffer(input[3], 0, "-1234l", 7);
+    input[3] = new_ByteBuffer(7);
+    set_ByteBuffer(input[3], 0, "1234l", 7);
+    input[4] = new_ByteBuffer(7);
     set_ByteBuffer(input[4], 0, "1234lu", 7);
+    input[5] = new_ByteBuffer(8);
     set_ByteBuffer(input[5], 0, "1234ull", 8);
+    input[6] = new_ByteBuffer(8);
     set_ByteBuffer(input[6], 0, "1234LL", 8);
+    input[7] = new_ByteBuffer(7);
     set_ByteBuffer(input[7], 0, "1234Ul", 7);
+    input[8] = new_ByteBuffer(7);
     set_ByteBuffer(input[8], 0, "1234Lu", 7);
     // Output
-    Buffer* output[9]
+    Buffer* output[9];
     for(size_t i = 0; i < 9; ++i){
-        input[i] = new_TokenBuffer();
+        output[i] = (Buffer*) new_TokenBuffer();
     }
     // Run
-    Lexer* lexer = new_Lexer(&input, 1, &output, 1);
-    ASSERT_NE(lexer->run(lexer), 0);
+    Lexer* lexer = new_Lexer(input, 9, output, 9);
+    ASSERT_EQ(lexer->run(lexer), 0);
     // Check
     Token* token = (Token*)listAt((List*)output[0]->data, 0);
     EXPECT_EQ(token->type, Token_Integer);
@@ -241,7 +230,7 @@ SKYPAT_F(Lexer_unittest, Integer_decimal)
     EXPECT_TRUE(token->isUnsigned);
     token = (Token*)listAt((List*)output[3]->data, 0);
     EXPECT_EQ(token->type, Token_Integer);
-    EXPECT_EQ(token->value.integer, -1234);
+    EXPECT_EQ(token->value.integer, 1234);
     EXPECT_EQ(token->byteSize, 4);
     EXPECT_FALSE(token->isUnsigned);
     token = (Token*)listAt((List*)output[4]->data, 0);
@@ -271,20 +260,20 @@ SKYPAT_F(Lexer_unittest, Integer_decimal)
     EXPECT_TRUE(token->isUnsigned);
     // Clean
     for(size_t i = 0; i < 9; ++i){
-        input->free(&input);
-        output->free(&output);
+        input[i]->free(&input[i]);
+        output[i]->free(&output[i]);
     }
     lexer->free(&lexer);
 }
 SKYPAT_F(Lexer_unittest, Integer_octal)
 {
     // Input
-    ByteBuffer* input = new_ByteBuffer(5);
-    set_ByteBuffer(input, 0, "023", 5);
+    ByteBuffer* input = new_ByteBuffer(4);
+    set_ByteBuffer(input, 0, "023", 4);
     // Output
     Buffer* output = (Buffer*)new_TokenBuffer();
     Lexer* lexer = new_Lexer(&input, 1, &output, 1);
-    ASSERT_NE(lexer->run(lexer), 0);
+    ASSERT_EQ(lexer->run(lexer), 0);
     // Check
     Token* token = (Token*)listAt((List*)output->data, 0);
     EXPECT_EQ(token->type, Token_Integer);
@@ -297,12 +286,12 @@ SKYPAT_F(Lexer_unittest, Integer_octal)
 SKYPAT_F(Lexer_unittest, Integer_hexadecimal)
 {
     // Input
-    ByteBuffer* input = new_ByteBuffer(5);
-    set_ByteBuffer(input, 0, "0xa", 5);
+    ByteBuffer* input = new_ByteBuffer(4);
+    set_ByteBuffer(input, 0, "0xa", 4);
     // Output
     Buffer* output = (Buffer*)new_TokenBuffer();
     Lexer* lexer = new_Lexer(&input, 1, &output, 1);
-    ASSERT_NE(lexer->run(lexer), 0);
+    ASSERT_EQ(lexer->run(lexer), 0);
     // Check
     Token* token = (Token*)listAt((List*)output->data, 0);
     EXPECT_EQ(token->type, Token_Integer);

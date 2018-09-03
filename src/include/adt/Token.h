@@ -78,13 +78,15 @@ typedef struct _Token{
         Keyword keyword;
         Punctuator punctuator;
     } value;
+    unsigned int byteSize;
+    _Bool isUnsigned;
     void (*free)(struct _Token** token);
 } Token;
 
 Token* new_UnknownToken();
 Token* new_KeywordToken(const Keyword keyword);
 Token* new_IdentifierToken(const char *identifier);
-Token* new_IntegerToken(const unsigned long long int value);
+Token* new_IntegerToken(const unsigned long long int value, const unsigned int byteSize, const _Bool isUnsigned);
 Token* new_FloatingToken(const double value);
 Token* new_CharacterToken(const char value);
 Token* new_StringToken(const char *string);
