@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stddef.h>
 #include <string.h>
+#include <math.h>
 #include <adt/Token.h>
 #include <TokenBuffer.h>
 #include <ByteBuffer.h>

@@ -87,7 +87,7 @@ Token* new_UnknownToken();
 Token* new_KeywordToken(const Keyword keyword);
 Token* new_IdentifierToken(const char *identifier);
 Token* new_IntegerToken(const unsigned long long int value, const unsigned int byteSize, const _Bool isUnsigned);
-Token* new_FloatingToken(const double value);
+Token* new_FloatingToken(const double value, const unsigned int byteSize);
 Token* new_CharacterToken(const char value);
 Token* new_StringToken(const char *string);
 Token* new_PunctuatorToken(const Punctuator punctuator);

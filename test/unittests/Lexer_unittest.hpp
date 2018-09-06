@@ -302,9 +302,116 @@ SKYPAT_F(Lexer_unittest, Integer_hexadecimal)
     lexer->free(&lexer);
 }
 
-SKYPAT_F(Lexer_unittest, Floating)
+SKYPAT_F(Lexer_unittest, Floating_decimal)
 {
+    // Input
+    ByteBuffer* input[6];
+    input[0] = new_ByteBuffer(5);
+    set_ByteBuffer(input[0], 0, "2.25", 5);
+    input[1] = new_ByteBuffer(4);
+    set_ByteBuffer(input[1], 0, ".25", 4);
+    input[2] = new_ByteBuffer(3);
+    set_ByteBuffer(input[2], 0, "2.", 3);
+    input[3] = new_ByteBuffer(7);
+    set_ByteBuffer(input[3], 0, "2.25e3", 7);
+    input[4] = new_ByteBuffer(6);
+    set_ByteBuffer(input[4], 0, "25e-2f", 6);
+    input[5] = new_ByteBuffer(9);
+    set_ByteBuffer(input[5], 0, "2.25e+1L", 9);
+    // Output
+    Buffer* output[6];
+    for(size_t i = 0; i < 6; ++i){
+        output[i] = (Buffer*) new_TokenBuffer();
+    }
+    Lexer* lexer = new_Lexer(input, 6, output, 6);
+    ASSERT_EQ(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output[0]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 2.25);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[1]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 0.25);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[2]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 2);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[3]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 2250);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[4]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 0.25);
+    EXPECT_EQ(token->byteSize, 4);
+    token = (Token*)listAt((List*)output[5]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 22.5);
+    EXPECT_EQ(token->byteSize, 8);
+    // Clean
+    for(size_t i = 0; i < 6; ++i){
+        input[i]->free(&input[i]);
+        output[i]->free(&output[i]);
+    }
+    lexer->free(&lexer);
+}
 
+SKYPAT_F(Lexer_unittest, Floating_hexadecimal)
+{
+    // Input
+    ByteBuffer* input[6];
+    input[0] = new_ByteBuffer(6);
+    set_ByteBuffer(input[0], 0, "0xa.8", 6);
+    input[1] = new_ByteBuffer(5);
+    set_ByteBuffer(input[1], 0, "0x.4", 5);
+    input[2] = new_ByteBuffer(5);
+    set_ByteBuffer(input[2], 0, "0XF.", 5);
+    input[3] = new_ByteBuffer(8);
+    set_ByteBuffer(input[3], 0, "0x2.4p2", 8);
+    input[4] = new_ByteBuffer(8);
+    set_ByteBuffer(input[4], 0, "0xcp-2f", 8);
+    input[5] = new_ByteBuffer(10);
+    set_ByteBuffer(input[5], 0, "0x2.1P+3L", 10);
+    // Output
+    Buffer* output[6];
+    for(size_t i = 0; i < 6; ++i){
+        output[i] = (Buffer*) new_TokenBuffer();
+    }
+    Lexer* lexer = new_Lexer(input, 6, output, 6);
+    ASSERT_EQ(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output[0]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 10.5);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[1]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 0.25);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[2]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 15);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[3]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 9);
+    EXPECT_EQ(token->byteSize, 8);
+    token = (Token*)listAt((List*)output[4]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 3);
+    EXPECT_EQ(token->byteSize, 4);
+    token = (Token*)listAt((List*)output[5]->data, 0);
+    EXPECT_EQ(token->type, Token_Floating);
+    EXPECT_EQ(token->value.floating, 16.5);
+    EXPECT_EQ(token->byteSize, 8);
+    // Clean
+    for(size_t i = 0; i < 6; ++i){
+        input[i]->free(&input[i]);
+        output[i]->free(&output[i]);
+    }
+    lexer->free(&lexer);
 }
 
 SKYPAT_F(Lexer_unittest, Character)

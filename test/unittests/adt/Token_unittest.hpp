@@ -53,9 +53,10 @@ SKYPAT_F(Token_unittest, Integer)
 
 SKYPAT_F(Token_unittest, Floating)
 {
-    Token* token = new_FloatingToken(3.1415926);
+    Token* token = new_FloatingToken(3.1415926, 4);
     EXPECT_EQ(token->type, Token_Floating);
     EXPECT_EQ(token->value.floating, 3.1415926);
+    EXPECT_EQ(token->byteSize, 4);
     token->free(&token);
 }
 
