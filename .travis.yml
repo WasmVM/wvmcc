@@ -22,7 +22,11 @@ matrix:
 
 before_install:
   - if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
-    brew update && brew install libtool ; 
+    git clone https://github.com/skymizer/SkyPat.git &&
+    cd SkyPat && 
+    ./autogen.sh &&
+    ./configure &&
+    make install ;
     fi
   - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
     sudo docker pull luishsu/wvmcc:${PLATFORM} &&
