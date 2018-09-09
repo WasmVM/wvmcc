@@ -1,6 +1,7 @@
 #ifndef WVMCC_TOKEN_DEF
 #define WVMCC_TOKEN_DEF
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 

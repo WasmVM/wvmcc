@@ -30,7 +30,7 @@ int ustrcmp(const uint32_t* str1, const uint32_t* str2){
         ++str1;
         ++str2;
     }
-    return *str1 - *str2;
+    return (*str1 > *str2) ? 1 : ((*str1 == *str2) ? 0 : -1);
 }
 
 uint32_t *ustrcpy(uint32_t* dst, const uint32_t* src){
