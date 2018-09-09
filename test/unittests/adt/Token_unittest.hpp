@@ -72,12 +72,14 @@ SKYPAT_F(Token_unittest, Character)
 
 SKYPAT_F(Token_unittest, String)
 {
-    uint32_t *string = (uint32_t*) calloc(5, sizeof(uint32_t));
-    ustrcpy(string, to_ustring("TestTest"));
+    uint32_t *string = (uint32_t*) calloc(9, sizeof(uint32_t));
+    uint32_t *testString = to_ustring("TestTest");
+    ustrcpy(string, testString);
     Token* token = new_StringToken(string, 1);
     EXPECT_EQ(token->type, Token_String);
-    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring("TestTest")));
+    EXPECT_FALSE(ustrcmp(token->value.string, testString));
     token->free(&token);
+    free(testString);
 }
 
 SKYPAT_F(Token_unittest, Punctuator)
