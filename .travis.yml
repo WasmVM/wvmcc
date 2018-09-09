@@ -1,0 +1,38 @@
+language: cpp
+os:
+  - linux
+
+sudo: required
+dist: trusty
+notifications: 
+  email: false
+
+git:
+  submodules: false
+  depth: 1
+
+services: 
+  - docker
+
+matrix:
+  include:
+    env:
+      - PLATFORM="ubuntu-18.04"
+
+jobs:
+  include:
+    - stage: "Create container"
+      script:
+        - "sudo docker pull luishsu/wvmcc:${PLATFORM}"
+        - "sudo docker create --privileged=true -t --name ${PLATFORM} --volume ${TRAVIS_BUILD_DIR}:/root luishsu/wvmcc:${PLATFORM}"
+        - "sudo docker start ${PLATFORM}"
+    - stage: "Build"
+      script: 
+        - sudo docker exec -t ${PLATFORM} /bin/bash -c "mkdir ~/build-cmake"
+        - sudo docker exec -t ${PLATFORM} /bin/bash -c "cd ~/build-cmake && cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=../install-cmake .."
+        - sudo docker exec -t ${PLATFORM} /bin/bash -c "cd ~/build-cmake && make -j8 install"
+    - stage: "Test"
+      script: 
+        - sudo docker exec -t ${PLATFORM} /bin/bash -c "mkdir ~/build-cmake"
+        - sudo docker exec -t ${PLATFORM} /bin/bash -c "cd ~/build-cmake && cmake -DCMAKE_BUILD_TYPE=Debug -DCMAKE_INSTALL_PREFIX=../install-cmake .."
+        - sudo docker exec -t ${PLATFORM} /bin/bash -c "cd ~/build-cmake && make -j8 install"
