@@ -4,7 +4,9 @@
 #define _Bool bool
 extern "C"{
     #include <adt/Token.h>
+    #include <Util.h>
     #include <string.h>
+    #include <stdint.h>
 }
 #undef restrict
 
@@ -62,19 +64,19 @@ SKYPAT_F(Token_unittest, Floating)
 
 SKYPAT_F(Token_unittest, Character)
 {
-    Token* token = new_CharacterToken('a');
+    Token* token = new_CharacterToken((uint32_t)'a', 1);
     EXPECT_EQ(token->type, Token_Character);
-    EXPECT_EQ(token->value.character, 'a');
+    EXPECT_EQ(token->value.character, (uint32_t)'a');
     token->free(&token);
 }
 
 SKYPAT_F(Token_unittest, String)
 {
-    char *string = (char*) calloc(5, sizeof(char));
-    strcpy(string, "TestTest");
-    Token* token = new_StringToken(string);
+    uint32_t *string = (uint32_t*) calloc(5, sizeof(uint32_t));
+    ustrcpy(string, to_ustring("TestTest"));
+    Token* token = new_StringToken(string, 1);
     EXPECT_EQ(token->type, Token_String);
-    EXPECT_FALSE(strcmp(token->value.string, "TestTest"));
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring("TestTest")));
     token->free(&token);
 }
 

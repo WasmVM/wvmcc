@@ -3,6 +3,7 @@ add_library(wvmcc_base
     "adt/Map.c"
     "adt/Token.c"
     "Option.c"
+    "Util.c"
     "PassManager.c"
     "ByteBuffer.c"
     "FileReader.c"
@@ -12,6 +13,7 @@ add_library(wvmcc_base
     "lexer/keyword.c"
     "lexer/integer.c"
     "lexer/floating.c"
+    "lexer/character.c"
 )
 
 install(TARGETS wvmcc_base

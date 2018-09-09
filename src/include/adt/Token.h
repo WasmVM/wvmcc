@@ -72,8 +72,8 @@ typedef struct _Token{
     union {
         double floating;
         unsigned long long int integer;
-        char character;
-        const char *string;
+        uint32_t character;
+        const uint32_t *string;
         const char *identifier;
         Keyword keyword;
         Punctuator punctuator;
@@ -88,8 +88,8 @@ Token* new_KeywordToken(const Keyword keyword);
 Token* new_IdentifierToken(const char *identifier);
 Token* new_IntegerToken(const unsigned long long int value, const unsigned int byteSize, const _Bool isUnsigned);
 Token* new_FloatingToken(const double value, const unsigned int byteSize);
-Token* new_CharacterToken(const char value);
-Token* new_StringToken(const char *string);
+Token* new_CharacterToken(const uint32_t value, const unsigned int byteSize);
+Token* new_StringToken(const uint32_t *string, const unsigned int byteSize);
 Token* new_PunctuatorToken(const Punctuator punctuator);
 
 #endif

@@ -416,7 +416,160 @@ SKYPAT_F(Lexer_unittest, Floating_hexadecimal)
 
 SKYPAT_F(Lexer_unittest, Character)
 {
-
+    // Input
+    ByteBuffer* input[23];
+    input[0] = new_ByteBuffer(4);
+    set_ByteBuffer(input[0], 0, "'a'", 4);
+    input[1] = new_ByteBuffer(4);
+    set_ByteBuffer(input[1], 0, "'A'", 4);
+    input[2] = new_ByteBuffer(4);
+    set_ByteBuffer(input[2], 0, "'0'", 4);
+    input[3] = new_ByteBuffer(4);
+    set_ByteBuffer(input[3], 0, "'+'", 4);
+    input[4] = new_ByteBuffer(4);
+    set_ByteBuffer(input[4], 0, "'('", 4);
+    input[5] = new_ByteBuffer(6);
+    set_ByteBuffer(input[5], 0, "L'\\06'", 6);
+    input[6] = new_ByteBuffer(7);
+    set_ByteBuffer(input[6], 0, "u'\\32'", 7);
+    input[7] = new_ByteBuffer(8);
+    set_ByteBuffer(input[7], 0, "U'\\xab'", 8);
+    input[8] = new_ByteBuffer(10);
+    set_ByteBuffer(input[8], 0, "u'\\u10ab'", 10);
+    input[9] = new_ByteBuffer(14);
+    set_ByteBuffer(input[9], 0, "U'\\U0010fffd'", 14);
+    input[10] = new_ByteBuffer(5);
+    set_ByteBuffer(input[10], 0, "'\\\''", 5);
+    input[11] = new_ByteBuffer(5);
+    set_ByteBuffer(input[11], 0, "'\\\"'", 5);
+    input[12] = new_ByteBuffer(5);
+    set_ByteBuffer(input[12], 0, "'\\\?'", 5);
+    input[13] = new_ByteBuffer(5);
+    set_ByteBuffer(input[13], 0, "'\\\\'", 5);
+    input[14] = new_ByteBuffer(5);
+    set_ByteBuffer(input[14], 0, "'\\a'", 5);
+    input[15] = new_ByteBuffer(5);
+    set_ByteBuffer(input[15], 0, "'\\b'", 5);
+    input[16] = new_ByteBuffer(5);
+    set_ByteBuffer(input[16], 0, "'\\f'", 5);
+    input[17] = new_ByteBuffer(5);
+    set_ByteBuffer(input[17], 0, "'\\n'", 5);
+    input[18] = new_ByteBuffer(5);
+    set_ByteBuffer(input[18], 0, "'\\r'", 5);
+    input[19] = new_ByteBuffer(5);
+    set_ByteBuffer(input[19], 0, "'\\t'", 5);
+    input[20] = new_ByteBuffer(5);
+    set_ByteBuffer(input[20], 0, "'\\v'", 5);
+    input[21] = new_ByteBuffer(3);
+    set_ByteBuffer(input[21], 0, "''", 3);
+    input[22] = new_ByteBuffer(5);
+    set_ByteBuffer(input[22], 0, "'\\0'", 5);
+    // Output
+    Buffer* output[23];
+    for(size_t i = 0; i < 23; ++i){
+        output[i] = (Buffer*) new_TokenBuffer();
+    }
+    Lexer* lexer = new_Lexer(input, 23, output, 23);
+    ASSERT_EQ(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output[0]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, 'a');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[1]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, 'A');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[2]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '0');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[3]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '+');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[4]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '(');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[5]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, L'\06');
+    EXPECT_EQ(token->byteSize, 2);
+    token = (Token*)listAt((List*)output[6]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, u'\32');
+    EXPECT_EQ(token->byteSize, 2);
+    token = (Token*)listAt((List*)output[7]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, U'\xab');
+    EXPECT_EQ(token->byteSize, 4);
+    token = (Token*)listAt((List*)output[8]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, u'\u10ab');
+    EXPECT_EQ(token->byteSize, 2);
+    token = (Token*)listAt((List*)output[9]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, U'\U0010fffd');
+    EXPECT_EQ(token->byteSize, 4);
+    token = (Token*)listAt((List*)output[10]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\'');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[11]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\"');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[12]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\?');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[13]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\\');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[14]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\a');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[15]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\b');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[16]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\f');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[17]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\n');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[18]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\r');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[19]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\t');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[20]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\v');
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[21]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, 0);
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[22]->data, 0);
+    EXPECT_EQ(token->type, Token_Character);
+    EXPECT_EQ(token->value.character, '\0');
+    EXPECT_EQ(token->byteSize, 1);
+    // Clean
+    for(size_t i = 0; i < 23; ++i){
+        input[i]->free(&input[i]);
+        output[i]->free(&output[i]);
+    }
+    lexer->free(&lexer);
 }
 
 SKYPAT_F(Lexer_unittest, String)

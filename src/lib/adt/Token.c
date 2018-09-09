@@ -65,18 +65,20 @@ Token* new_FloatingToken(const double value, const unsigned int byteSize){
     token->byteSize = byteSize;
     return token;
 }
-Token* new_CharacterToken(const char value){
+Token* new_CharacterToken(const uint32_t value, const unsigned int byteSize){
     Token* token = (Token*) malloc(sizeof(Token));
     token->type = Token_Character;
     token->value.character = value;
     token->free = free_Token;
+    token->byteSize = byteSize;
     return token;
 }
-Token* new_StringToken(const char *string){
+Token* new_StringToken(const uint32_t *string, const unsigned int byteSize){
     Token* token = (Token*) malloc(sizeof(Token));
     token->type = Token_String;
     token->value.string = string;
     token->free = free_Token;
+    token->byteSize = byteSize;
     return token;
 }
 Token* new_PunctuatorToken(const Punctuator punctuator){
