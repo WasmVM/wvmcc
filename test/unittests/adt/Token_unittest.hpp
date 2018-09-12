@@ -73,7 +73,7 @@ SKYPAT_F(Token_unittest, Character)
 SKYPAT_F(Token_unittest, String)
 {
     uint32_t *string = (uint32_t*) calloc(9, sizeof(uint32_t));
-    uint32_t *testString = to_ustring("TestTest");
+    uint32_t *testString = to_ustring("TestTest", sizeof(char));
     ustrcpy(string, testString);
     Token* token = new_StringToken(string, 1);
     EXPECT_EQ(token->type, Token_String);

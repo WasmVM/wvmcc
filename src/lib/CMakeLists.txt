@@ -15,6 +15,7 @@ add_library(wvmcc_base
     "lexer/integer.c"
     "lexer/floating.c"
     "lexer/character.c"
+    "lexer/string.c"
 )
 
 install(TARGETS wvmcc_base

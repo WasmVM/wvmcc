@@ -5,6 +5,7 @@
 extern "C"{
     #include <ByteBuffer.h>
     #include <Lexer.h>
+    #include <Util.h>
 }
 #undef restrict
 
@@ -574,7 +575,58 @@ SKYPAT_F(Lexer_unittest, Character)
 
 SKYPAT_F(Lexer_unittest, String)
 {
-
+    // Input
+    ByteBuffer* input[6];
+    input[0] = new_ByteBuffer(8);
+    set_ByteBuffer(input[0], 0, "\"Hello\"", 8);
+    input[1] = new_ByteBuffer(14);
+    set_ByteBuffer(input[1], 0, "u8\"He\\033llo\"", 14);
+    input[2] = new_ByteBuffer(15);
+    set_ByteBuffer(input[2], 0, "u\"He\\u0123llo\"", 15);
+    input[3] = new_ByteBuffer(19);
+    set_ByteBuffer(input[3], 0, "U\"He\\U0010fffdllo\"", 19);
+    input[4] = new_ByteBuffer(11);
+    set_ByteBuffer(input[4], 0, "L\"He\\nllo\"", 11);
+    input[5] = new_ByteBuffer(3);
+    set_ByteBuffer(input[5], 0, "\"\"", 3);
+    // Output
+    Buffer* output[6];
+    for(size_t i = 0; i < 6; ++i){
+        output[i] = (Buffer*) new_TokenBuffer();
+    }
+    Lexer* lexer = new_Lexer(input, 6, output, 6);
+    ASSERT_EQ(lexer->run(lexer), 0);
+    // Check
+    Token* token = (Token*)listAt((List*)output[0]->data, 0);
+    EXPECT_EQ(token->type, Token_String);
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring("Hello", sizeof(char))));
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[1]->data, 0);
+    EXPECT_EQ(token->type, Token_String);
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring(u8"He\033llo", sizeof(uint8_t))));
+    EXPECT_EQ(token->byteSize, 1);
+    token = (Token*)listAt((List*)output[2]->data, 0);
+    EXPECT_EQ(token->type, Token_String);
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring(u"He\u0123llo", sizeof(uint16_t))));
+    EXPECT_EQ(token->byteSize, 2);
+    token = (Token*)listAt((List*)output[3]->data, 0);
+    EXPECT_EQ(token->type, Token_String);
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring(U"He\U0010fffdllo", sizeof(uint32_t))));
+    EXPECT_EQ(token->byteSize, 4);
+    token = (Token*)listAt((List*)output[4]->data, 0);
+    EXPECT_EQ(token->type, Token_String);
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring(L"He\nllo", sizeof(wchar_t))));
+    EXPECT_EQ(token->byteSize, 2);
+    token = (Token*)listAt((List*)output[5]->data, 0);
+    EXPECT_EQ(token->type, Token_String);
+    EXPECT_FALSE(ustrcmp(token->value.string, to_ustring("", sizeof(char))));
+    EXPECT_EQ(token->byteSize, 1);
+    // Clean
+    for(size_t i = 0; i < 6; ++i){
+        input[i]->free(&input[i]);
+        output[i]->free(&output[i]);
+    }
+    lexer->free(&lexer);
 }
 
 SKYPAT_F(Lexer_unittest, Punctuator)
