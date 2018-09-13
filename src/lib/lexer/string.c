@@ -119,7 +119,7 @@ Token* lex_String(char **inputPtr){
         *inputPtr = ++cursor;
         uint32_t* uString = (uint32_t*) calloc(strVec->length + 1, sizeof(uint32_t));
         if(strVec->data){
-            memcpy(uString, strVec->data, (strVec->length + 1) * sizeof(uint32_t));
+            memcpy(uString, strVec->data, strVec->length * sizeof(uint32_t));
         }
         free_Vector(&strVec);
         return new_StringToken(uString, byteSize);
