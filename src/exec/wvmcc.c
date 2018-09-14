@@ -17,7 +17,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <Option.h>
+#include <CCOption.h>
 #include <PassManager.h>
 #include <ByteBuffer.h>
 #include <FileReader.h>
@@ -25,7 +25,7 @@
 int main(int argc, const char *argv[])
 {
     // Set Option
-    Option* option = new_Option(argc - 1, argv + 1);
+    CCOption* option = new_CCOption(argc - 1, argv + 1);
     if(option->input_count < 1){
         fprintf(stderr, "error: no input file\n");
         exit(-1);
@@ -44,7 +44,7 @@ int main(int argc, const char *argv[])
     // Run pass
     run_PassManager(passManager);
     // Clean
-    free_Option(&option);
+    free_CCOption(&option);
     free_PassManager(&passManager);
     return 0;
 }

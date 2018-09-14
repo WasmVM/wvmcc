@@ -1,5 +1,5 @@
-#ifndef WVMCC_OPTION_DEF
-#define WVMCC_OPTION_DEF
+#ifndef WVMCC_CCOPTION_DEF
+#define WVMCC_CCOPTION_DEF
 
 #include <string.h>
 #include <stdlib.h>
@@ -9,13 +9,13 @@
 #define WVMCC_VERSION "dev"
 #endif
 
-typedef struct _Option{
+typedef struct _CCOption{
     const char* output_file;
     const char** input_files;
     size_t input_count;
-} Option;
+} CCOption;
 
-Option* new_Option(int argc, const char* argv[]);
-void free_Option(Option** option);
+CCOption* new_CCOption(int argc, const char* argv[]);
+void free_CCOption(CCOption** option);
 
 #endif

@@ -3,7 +3,6 @@ add_library(wvmcc_base
     "adt/Map.c"
     "adt/Token.c"
     "adt/Vector.c"
-    "Option.c"
     "Util.c"
     "PassManager.c"
     "ByteBuffer.c"

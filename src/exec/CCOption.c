@@ -14,9 +14,9 @@
  *    limitations under the License.
  */
 
-#include <Option.h>
+#include <CCOption.h>
 
-static void print_usage(Option* this){
+static void print_usage(CCOption* this){
     fprintf(stderr, "Usage: wvmcc [options] file...\n");
     fprintf(stderr, "Options:\n");
     fprintf(stderr, "  -o <file>      Place the output into <file>.\n");
@@ -26,14 +26,14 @@ static void print_usage(Option* this){
     exit(-1);
 }
 
-static void print_version(Option* this){
+static void print_version(CCOption* this){
     printf("wvmcc %s\n", WVMCC_VERSION);
     free(this);
     exit(0);
 }
 
-Option* new_Option(int argc, const char* argv[]){
-    Option* newOption = (Option*) calloc(1, sizeof(Option));
+CCOption* new_CCOption(int argc, const char* argv[]){
+    CCOption* newOption = (CCOption*) calloc(1, sizeof(CCOption));
     newOption->input_files = NULL;
     newOption->output_file = NULL;
     newOption->input_count = 0;
@@ -59,7 +59,7 @@ Option* new_Option(int argc, const char* argv[]){
     return newOption;
 }
 
-void free_Option(Option** option){
+void free_CCOption(CCOption** option){
     free(*option);
     *option = NULL;
 }
