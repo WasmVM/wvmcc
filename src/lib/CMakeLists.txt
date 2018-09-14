@@ -16,6 +16,7 @@ add_library(wvmcc_base
     "lexer/floating.c"
     "lexer/character.c"
     "lexer/string.c"
+    "lexer/punctuator.c"
 )
 
 install(TARGETS wvmcc_base

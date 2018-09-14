@@ -73,6 +73,3 @@ Pass* new_Lexer(Buffer** input, size_t input_count, Buffer** output, size_t outp
     pass->free = free_lexer;
     return pass;
 }
-Token* lex_Punctuator(char **inputPtr){
-    return NULL;
-}
