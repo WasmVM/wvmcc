@@ -1,14 +1,37 @@
-//    Copyright 2018 Luis Hsu
-// 
-//    Licensed under the Apache License, Version 2.0 (the "License");
-//    you may not use this file except in compliance with the License.
-//    You may obtain a copy of the License at
-// 
-//        http://www.apache.org/licenses/LICENSE-2.0
-// 
-//    Unless required by applicable law or agreed to in writing, software
-//    distributed under the License is distributed on an "AS IS" BASIS,
-//    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//    See the License for the specific language governing permissions and
-//    limitations under the License.
+#ifndef WVMCC_RULE_DEF
+#define WVMCC_RULE_DEF
 
+#include <string>
+#include <vector>
+#include <cstddef>
+
+#define restrict __restrict__
+#define _Bool bool
+extern "C"{
+    #include <adt/Buffer.h>
+}
+#undef restrict
+
+class Rule{
+public:
+    class Element{
+    public:
+        std::string name;
+        bool isOptional;
+    };
+    std::string target;
+    std::vector<Element> elements;
+    void print();
+};
+
+class RuleBuffer{
+    Buffer buffer;
+public:
+    RuleBuffer();
+    virtual ~RuleBuffer();
+    Buffer* getBuffer();
+    void addRule(Rule& rule);
+    Rule& getRule(std::string target, size_t index);
+};
+
+#endif
