@@ -22,6 +22,7 @@ static void freeContext(void *data){
 }
 
 static void add_pass(PassManager* passManager, Pass* pass){
+    pass->contextMap = passManager->contextMap;
     listAdd(passManager->passList, pass);
 }
 
