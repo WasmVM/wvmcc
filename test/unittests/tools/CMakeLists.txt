@@ -12,4 +12,5 @@ macro(add_tools_unittest unittest extra_src)
     add_unittest(${unittest} tools/ ${extra_src})
 endmacro(add_tools_unittest unittest extra_src)
 
-add_tools_unittest(Rule_unittest ${tools_src}/parserGen/Rule.cpp)
+add_tools_unittest(Rule_unittest $<TARGET_OBJECTS:wvmcc-parsergen-objs>)
+add_tools_unittest(RuleParser_unittest $<TARGET_OBJECTS:wvmcc-parsergen-objs>)

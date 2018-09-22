@@ -1,7 +1,10 @@
-include_directories(${CMAKE_CURRENT_LIST_DIR})
+add_library(wvmcc-parsergen-objs OBJECT
+    "RuleParser.cpp"
+    "Rule.cpp"
+)
 add_executable(wvmcc-parsergen
     "main.cpp"
-    "RuleParser.cpp"
+    $<TARGET_OBJECTS:wvmcc-parsergen-objs>
 )
 target_link_libraries(wvmcc-parsergen
     wvmcc_base

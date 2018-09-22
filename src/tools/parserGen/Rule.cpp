@@ -12,7 +12,7 @@
 //    See the License for the specific language governing permissions and
 //    limitations under the License.
 
-#include "Rule.hpp"
+#include <parserGen/Rule.hpp>
 
 static void free_RuleBuffer_data(void* data){
     RuleMap* ruleMap = (RuleMap*)data;
