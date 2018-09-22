@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <cstddef>
 #include <cstring>
+#include <queue>
 #include <iostream>
 #include <parserGen/Rule.hpp>
 

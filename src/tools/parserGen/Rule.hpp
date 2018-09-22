@@ -17,16 +17,10 @@ extern "C"{
 
 class Rule{
 public:
-    class Element{
-    public:
-        Element(std::string name = "", bool isOptional = false);
-        std::string name;
-        bool isOptional;
-    };
     std::string target;
-    std::vector<Element> elements;
+    std::vector<std::string> elements;
     Rule(std::string target = "");
-    void addElement(std::string name = "", bool isOptional = false);
+    Rule(const Rule&);
     void print();
 };
 

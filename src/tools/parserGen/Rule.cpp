@@ -26,22 +26,17 @@ static void free_RuleBuffer(Buffer** bufferPtr){
 Rule::Rule(std::string target):
     target(target){
 }
-Rule::Element::Element(std::string name, bool isOptional):
-    name(name), isOptional(isOptional){
+Rule::Rule(const Rule &rule){
+    target = rule.target;
+    elements.assign(rule.elements.begin(), rule.elements.end());
 }
 void Rule::print(){
     std::cout << target << " => ";
-    for(std::vector<Element>::iterator it = elements.begin(); it != elements.end(); ++it){
-        std::cout << it->name;
-        if(it->isOptional){
-            std::cout << "?";
-        }
+    for(std::vector<std::string>::iterator it = elements.begin(); it != elements.end(); ++it){
+        std::cout << *it;
         std::cout << " ";
     }
     std::cout << std::endl;
-}
-void Rule::addElement(std::string name, bool isOptional){
-    elements.push_back(Element(name, isOptional));
 }
 RuleBuffer::RuleBuffer(){
     buffer.data = new RuleMap;

@@ -34,14 +34,31 @@ static int parseLine(std::string lineStr, RuleBuffer* ruleBuffer){
     while(lineStr.find_first_not_of(" \t\v\r\n") != std::string::npos){
         std::string elementStr(lineStr.substr(0, lineStr.find_first_of(" \t\v\r\n")));
         lineStr = trim(lineStr.substr(elementStr.size()));
-        bool isOptional = false;
-        if(elementStr.back() == '?' && (elementStr.size() != 1)){
-            isOptional = true;
-            elementStr.pop_back();
-        }
-        rule.addElement(elementStr, isOptional);
+        rule.elements.push_back(elementStr);
     }
-    ruleBuffer->addRule(rule);
+    // Expand optional
+    std::queue<Rule> ruleQueue;
+    ruleQueue.push(rule);
+    while(!ruleQueue.empty()){
+        Rule nextRule = ruleQueue.front();
+        ruleQueue.pop();
+        bool hasOptional = false;
+        size_t index = 0;
+        for(std::vector<std::string>::iterator it = nextRule.elements.begin(); it != nextRule.elements.end(); ++it, ++index){
+            if((it->back() == '?') && (it->size() != 1)){
+                hasOptional = true;
+                Rule forkedRule(nextRule);
+                forkedRule.elements.erase(forkedRule.elements.begin() + index);
+                ruleQueue.push(forkedRule);
+                it->pop_back();
+            }
+        }
+        if(hasOptional){
+            ruleQueue.push(nextRule);
+        }else{
+            ruleBuffer->addRule(nextRule);
+        }
+    }
     return 0;
 }
 
