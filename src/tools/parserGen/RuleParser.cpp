@@ -35,7 +35,7 @@ static int parseLine(std::string lineStr, RuleBuffer* ruleBuffer){
         std::string elementStr(lineStr.substr(0, lineStr.find_first_of(" \t\v\r\n")));
         lineStr = trim(lineStr.substr(elementStr.size()));
         bool isOptional = false;
-        if(elementStr.back() == '?'){
+        if(elementStr.back() == '?' && (elementStr.size() != 1)){
             isOptional = true;
             elementStr.pop_back();
         }

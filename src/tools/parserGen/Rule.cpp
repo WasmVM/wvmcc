@@ -68,12 +68,12 @@ RuleMap::iterator RuleBuffer::getTargetRules(const std::string target){
     return ruleMap.find(target);
 }
 RuleMap::iterator RuleBuffer::begin(){
-    RuleMap& ruleMap = *(RuleMap*)buffer.data;
-    return ruleMap.begin();
+    RuleMap* ruleMap = (RuleMap*)buffer.data;
+    return ruleMap->begin();
 }
 RuleMap::iterator RuleBuffer::end(){
-    RuleMap& ruleMap = *(RuleMap*)buffer.data;
-    return ruleMap.end();
+    RuleMap* ruleMap = (RuleMap*)buffer.data;
+    return ruleMap->end();
 }
 RuleMap::iterator RuleBuffer::find(const std::string target){
     RuleMap& ruleMap = *(RuleMap*)buffer.data;
