@@ -47,15 +47,6 @@ int main(int argc, char const *argv[])
     passManager->addPass(passManager, ruleParser.getPass());
     // Run pass
     run_PassManager(passManager);
-
-    // Print rule
-    RuleBuffer* ruleBuffer = ruleParser.getRuleBuffer();
-    for(RuleMap::iterator it = ruleBuffer->begin(); it != ruleBuffer->end(); ++it){
-        for(std::vector<Rule>::iterator vit = it->second.begin(); vit != it->second.end(); ++vit){
-            vit->print();
-        }
-    }
-
     // Clean
     free_PassManager(&passManager);
     return 0;
