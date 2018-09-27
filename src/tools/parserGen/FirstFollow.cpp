@@ -46,8 +46,23 @@ FirstFollowMap::iterator FirstFollow::find(const std::string target){
     FirstFollowMap* firstfollowMap = (FirstFollowMap*)buffer.data;
     return firstfollowMap->find(target);
 }
-void FirstFollow::addElement(const std::string target, const std::string element){
+bool FirstFollow::addElement(const std::string target, const std::string element){
     FirstFollowMap* firstfollowMap = (FirstFollowMap*)buffer.data;
-    (*firstfollowMap)[target].push_back(element);
-    (*firstfollowMap)[target].unique();
+    std::list<std::string>& elements = (*firstfollowMap)[target];
+    for(std::list<std::string>::iterator it = elements.begin(); it != elements.end(); ++it){
+        if(*it == element){
+            return false;
+        }
+    }
+    elements.push_back(element);
+    return true;
+}
+void FirstFollow::print(){
+    for(FirstFollowMap::iterator mapIt = begin(); mapIt != end(); ++mapIt){
+        std::cout << mapIt->first << " :";
+        for(std::list<std::string>::iterator elemIt = mapIt->second.begin(); elemIt != mapIt->second.end(); ++elemIt){
+            std::cout << " " << ((*elemIt == "") ? "\\0" : *elemIt);
+        }
+        std::cout << std::endl;
+    }
 }

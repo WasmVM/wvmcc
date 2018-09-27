@@ -5,6 +5,8 @@
 #include <map>
 #include <string>
 #include <list>
+#include <iostream>
+#include <cstddef>
 
 #define restrict __restrict__
 #define _Bool bool
@@ -24,7 +26,8 @@ public:
     FirstFollowMap::iterator begin();
     FirstFollowMap::iterator end();
     FirstFollowMap::iterator find(const std::string target);
-    void addElement(const std::string target, const std::string element);
+    bool addElement(const std::string target, const std::string element); // return true if actually added
+    void print(); //TODO: unittest
 };
 
 #endif

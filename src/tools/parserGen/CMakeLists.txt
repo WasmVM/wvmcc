@@ -2,6 +2,7 @@ add_library(wvmcc-parsergen-objs OBJECT
     "RuleParser.cpp"
     "Rule.cpp"
     "FirstFollow.cpp"
+    "FirstFollowExtractor.cpp"
 )
 add_executable(wvmcc-parsergen
     "main.cpp"

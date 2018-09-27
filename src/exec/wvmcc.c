@@ -33,7 +33,7 @@ int main(int argc, const char *argv[])
         fprintf(stderr, "error: only one input file is allowed\n");
         exit(-1);
     }
-    // Prepare Passes
+    // PassManager
     PassManager* passManager = new_PassManager();
     // FileReader
     ByteBuffer* inputFileName = new_ByteBuffer(strlen(option->input_files[0]));

@@ -29,7 +29,7 @@ extern "C"{
 int main(int argc, char const *argv[])
 {
     // Check arguments
-    if(argc < 2){ //FIXME:
+    if(argc < 2){ //FIXME: output
         std::cout << "Usage:" << std::endl;
         std::cout << "\twvmcc-parsergen [Rule file] [output path]" << std::endl;
         return -1;
