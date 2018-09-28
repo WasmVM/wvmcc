@@ -22,7 +22,7 @@ class FirstFollowExtractor{
     FirstFollow *followSet;
     
 public:
-    FirstFollowExtractor(RuleBuffer& buffer);
+    FirstFollowExtractor(RuleBuffer* buffer);
     Pass* & getPass();
     FirstFollow* & getFirstSet();
     FirstFollow* & getFollowSet();

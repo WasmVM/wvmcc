@@ -95,10 +95,10 @@ static void free_FirstFollowExtractor(Pass** passPtr){
     *passPtr = NULL;
 }
 
-FirstFollowExtractor::FirstFollowExtractor(RuleBuffer& buffer):
+FirstFollowExtractor::FirstFollowExtractor(RuleBuffer* buffer):
     pass((Pass*)malloc(sizeof(Pass))), firstSet(new FirstFollow), followSet(new FirstFollow)
 {
-    pass->input = new Buffer* {buffer.getBuffer()};
+    pass->input = new Buffer* {buffer->getBuffer()};
     pass->input_count = 1;
     pass->output = new Buffer*[2]{(Buffer*)firstSet, (Buffer*)followSet};
     pass->output_count = 2;

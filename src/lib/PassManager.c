@@ -49,9 +49,6 @@ int run_PassManager(PassManager* passManager){
     while(passManager->passList->size > 0){
         Pass* pass = (Pass*)listRemove(passManager->passList, 0);
         int ret = pass->run(pass);
-        for(size_t i = 0; i < pass->input_count; ++i){
-            pass->input[i]->free(&(pass->input[i]));
-        }
         pass->free(&pass);
         if(ret){
             return ret;

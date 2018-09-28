@@ -22,7 +22,7 @@ SKYPAT_F(FirstFollowExtractor_unittest, create_delete)
     buffer.addRule(rule);
     
     // Test
-    FirstFollowExtractor extractor(buffer);
+    FirstFollowExtractor extractor(&buffer);
     EXPECT_EQ(extractor.getPass()->input_count, 1);
     EXPECT_EQ(extractor.getPass()->output_count, 2);
     EXPECT_EQ(extractor.getPass()->input[0], buffer.getBuffer());
@@ -54,7 +54,7 @@ SKYPAT_F(FirstFollowExtractor_unittest, first_set)
     buffer.addRule(rules[4]);
 
     // Test
-    FirstFollowExtractor extractor(buffer);
+    FirstFollowExtractor extractor(&buffer);
     FirstFollow* firstSet = extractor.getFirstSet();
     Pass* pass = extractor.getPass();
     pass->contextMap = mapNew((keyComp_t)strcmp, free, free);
@@ -101,7 +101,7 @@ SKYPAT_F(FirstFollowExtractor_unittest, follow_set)
     buffer.addRule(rules[4]);
 
     // Test
-    FirstFollowExtractor extractor(buffer);
+    FirstFollowExtractor extractor(&buffer);
     FirstFollow* followSet = extractor.getFollowSet();
     Pass* pass = extractor.getPass();
     pass->contextMap = mapNew((keyComp_t)strcmp, free, free);
