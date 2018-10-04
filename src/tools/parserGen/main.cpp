@@ -16,6 +16,7 @@
 #include <cstring>
 
 #include <parserGen/RuleParser.hpp>
+#include <parserGen/FirstFollowExtractor.hpp>
 
 #define restrict __restrict__
 #define _Bool bool
@@ -31,7 +32,7 @@ int main(int argc, char const *argv[])
     // Check arguments
     if(argc < 2){ //FIXME: output
         std::cout << "Usage:" << std::endl;
-        std::cout << "\twvmcc-parsergen [Rule file] [output path]" << std::endl;
+        std::cout << "\twvmcc-parsergen [rule_file] [output path] " << std::endl;
         return -1;
     }
     // Prepare Passes
@@ -45,8 +46,15 @@ int main(int argc, char const *argv[])
     // RuleParser
     RuleParser ruleParser(&inputRuleSrc, 1);
     passManager->addPass(passManager, ruleParser.getPass());
+    // FirstFollowExtractor
+    FirstFollowExtractor firstfollow(ruleParser.getRuleBuffer());
+    passManager->addPass(passManager, firstfollow.getPass());
     // Run pass
-    run_PassManager(passManager);
+    int result = run_PassManager(passManager);
+
+    // Print
+    firstfollow.getFirstSet()->print();
+
     // Clean
     free_PassManager(&passManager);
     return 0;
