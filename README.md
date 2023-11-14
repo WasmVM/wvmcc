@@ -1,23 +1,17 @@
 # WVMCC
 
-[![Build Status](https://travis-ci.org/LuisHsu/wvmcc.svg?branch=master)](https://travis-ci.org/LuisHsu/wvmcc)
+#### 為 [WasmVM](https://github.com/WasmVM/WasmVM) 打造的編譯器
 
-#### 為 [WasmVM](https://github.com/LuisHsu/WasmVM) 打造的編譯器
-
-A C compiler for [WasmVM](https://github.com/LuisHsu/WasmVM)
+A C compiler for [WasmVM](https://github.com/WasmVM/WasmVM)
 
 
 ## 先備條件 Prerequisite
 
-* CMake >= 2.6
+* CMake >= 3.16
 
-* 支援 C11 及標準函式庫的 C++ 編譯器
+* 支援 C11 和 C++20 的 C/C++ 編譯器
  
-  C compiler supporting c11 standard with Standard Library
-  
-### 以下為開發者模式需要 For Developer build
-  
-* SkyPat >= 3.1.1
+  C/C++ compiler supporting c11 and c++20 standard with Standard Library
 
 ## 注意事項 Notice
 
@@ -43,16 +37,6 @@ A C compiler for [WasmVM](https://github.com/LuisHsu/WasmVM)
 
 > make install
 
-### 開發者模式 Developer build
-
-1. 執行 CMake
-
-> mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Debug ..
-
-2. 執行 Make
-
-> make -j4
-
 ## 安裝 & 執行 Install & run
 
 1. 安裝
@@ -62,9 +46,3 @@ A C compiler for [WasmVM](https://github.com/LuisHsu/WasmVM)
 2. 執行
 
 > wvmcc
-
-## 測試 Tests
-
-* 單元測試 Unit tests
-
-> ctest
