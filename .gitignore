@@ -1,5 +1,5 @@
 .vscode/
-build/
+build-*/
 install/
 .devcontainer
 .DS_Store

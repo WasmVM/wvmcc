@@ -6,5 +6,13 @@ set(CMAKE_C_STANDARD_REQUIRED 11)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED 20)
 
-# src
+include_directories(${CMAKE_CURRENT_LIST_DIR}/src/include)
+
 add_subdirectory(src)
+
+set(BUILD_TESTS ON CACHE BOOL "Build tests")
+if(BUILD_TESTS)
+  include(CTest)
+  enable_testing()
+  add_subdirectory(test)
+endif(BUILD_TESTS)
