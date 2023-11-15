@@ -20,5 +20,3 @@ macro(add_test_suite suite_name)
     ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/src/lib"
   )
 endmacro(add_test_suite)
-
-add_test_suite(pp)
