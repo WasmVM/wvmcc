@@ -1,3 +1,0 @@
-[submodule "WasmVM"]
-	path = WasmVM
-	url = ../WasmVM
