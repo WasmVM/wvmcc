@@ -1,5 +1,5 @@
-#ifndef WVMCC_EXEC_CommandParser_DEF
-#define WVMCC_EXEC_CommandParser_DEF
+#ifndef WVMCC_CommandParser_DEF
+#define WVMCC_CommandParser_DEF
 
 #include <string>
 #include <vector>
@@ -34,8 +34,10 @@ struct CommandParser {
         std::string alias;
     };
 
+    using Opt = std::variant<Fixed, Optional, Repeated>;
+
     CommandParser(int argc, const char* argv[],
-        std::initializer_list<std::variant<Fixed, Optional>> options,
+        std::initializer_list<Opt> options,
         std::string desc = ""
     );
 

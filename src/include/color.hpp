@@ -1,5 +1,5 @@
-#ifndef WVMCC_EXEC_COLOR_DEF
-#define WVMCC_EXEC_COLOR_DEF
+#ifndef WVMCC_COLOR_DEF
+#define WVMCC_COLOR_DEF
 
 #ifdef CONSOLE_COLOR
     #define COLOR_Warning "\033[1;33mwarning\033[0m"
