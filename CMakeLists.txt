@@ -14,7 +14,7 @@ endif(CONSOLE_COLOR)
 
 find_package(WasmVM REQUIRED)
 include_directories(${WASMVM_INCLUDE_DIR})
-link_libraries(${WASMVM_LIBRARY})
+link_directories(${WASMVM_LIBRARY_DIR})
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/src/include)
 add_subdirectory(src)
