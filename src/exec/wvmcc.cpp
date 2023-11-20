@@ -18,10 +18,17 @@
 #include <fstream>
 #include <filesystem>
 #include <vector>
-#include <exception.hpp>
+#include <cstdio>
+#include <map>
+#include <set>
 
-#include "color.hpp"
-#include "CommandParser.hpp"
+#include <exception.hpp>
+#include <WasmVM.hpp>
+#include <structures/WasmModule.hpp>
+#include <color.hpp>
+#include <CommandParser.hpp>
+#include <Archive.hpp>
+#include <Linker.hpp>
 
 using namespace WasmVM;
 
@@ -29,11 +36,14 @@ int main(int argc, const char* argv[]){
 
     // Parse argv
     CommandParser args(argc, argv, {
-        CommandParser::Optional("--version", "Show version", "-v"),
-        CommandParser::Optional("--output", "Output file name, ", 1, "-o"),
+        CommandParser::Optional("--version", "Show version", 0/*, "-v"*/),
+        CommandParser::Optional("--output", "Output file name", 1, "-o"),
         CommandParser::Optional("--pp", "Preprocessor only", "-E"),
         CommandParser::Optional("--comp", "Compile only, do not assemble", "-S"),
         CommandParser::Optional("--as", "Compile and/or assemble, do not link", "-c"),
+        CommandParser::Repeated("--includes", "Add directory to header files search list", "-I"),
+        CommandParser::Repeated("--libraries", "Add directory to library files search list", "-L"),
+        CommandParser::Repeated("--prefix", "Add directory to header and library files search list", "-B"),
         CommandParser::Fixed("input_files", "C source files (.c), Wasm binary file (.wasm) or WasmVM static library (.a)", (unsigned int)-1)
     },
         "wvmcc : C compiler for WasmVM"
@@ -42,6 +52,7 @@ int main(int argc, const char* argv[]){
     Exception::Warning::regist([](std::string message){
         std::cerr << COLOR_Warning ": " << message << std::endl;
     });
+
     try{
         // Split source files & binary files
         if(!args["input_files"]){
@@ -49,7 +60,7 @@ int main(int argc, const char* argv[]){
         }
         std::vector<std::filesystem::path> source_files;
         std::vector<std::filesystem::path> wat_files;
-        std::vector<std::filesystem::path> binary_files;
+        std::vector<std::pair<std::filesystem::path, bool>> binary_files; // (path, is_archive)
         {
             std::vector<std::string> input_files = std::get<std::vector<std::string>>(args["input_files"].value());
             for(std::string input_file : input_files){
@@ -72,7 +83,7 @@ int main(int argc, const char* argv[]){
                 fin.read((char*)&magic, 4);
                 fin.close();
                 if(magic == 0x6d736100 || magic == 0x52414d56){
-                    binary_files.emplace_back(std::filesystem::canonical(input_path));
+                    binary_files.emplace_back(std::filesystem::canonical(input_path), magic == 0x52414d56);
                     continue;
                 }
                 // Unknown
@@ -91,6 +102,35 @@ int main(int argc, const char* argv[]){
         if((args["pp"] || args["comp"]) && (wat_files.size() > 0)){
             Exception::Warning("text assembly file will be ignored while '--pp (-E)' or '--comp (-S)' are specified");
         }
+
+        std::map<std::filesystem::path, WasmModule> modules;
+
+        // TODO: Compile
+
+        // Assemble
+        for(std::filesystem::path wat_path : wat_files){
+            std::ifstream fin(wat_path);
+            WasmModule module = module_parse(fin);
+            fin.close();
+            if(args["as"]){
+                if(args["output"]){
+                    std::ofstream fout(std::get<std::string>(args["output"].value()), std::ios::binary | std::ios::out);
+                    module_encode(module, fout);
+                    fout.close();
+                    return 0;
+                }else{
+                    std::ofstream fout(wat_path.replace_extension(".wasm"), std::ios::binary | std::ios::out);
+                    module_encode(module, fout);
+                    fout.close();
+                }
+            }else{
+                modules[wat_path] = module;
+            }
+        }
+
+        // Link
+        
+
     }catch(Exception::Exception &e){
         std::cerr << args.program.filename().string() << ": " COLOR_Error ": " << e.what() << std::endl;
         return -1;
