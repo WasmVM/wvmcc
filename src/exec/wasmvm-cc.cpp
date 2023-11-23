@@ -43,10 +43,10 @@ int main(int argc, const char* argv[]){
         CommandParser::Optional("--as", "Compile and/or assemble, do not link", "-c"),
         CommandParser::Repeated("--includes", "Add directory to header files search list", "-I"),
         CommandParser::Repeated("--libraries", "Add directory to library files search list", "-L"),
-        CommandParser::Repeated("--prefix", "Add directory to header and library files search list", "-B"),
+        CommandParser::Repeated("--library", "Add library", "-l"),
         CommandParser::Fixed("input_files", "C source files (.c), Wasm binary file (.wasm) or WasmVM static library (.a)", (unsigned int)-1)
     },
-        "wvmcc : C compiler for WasmVM"
+        "wasmvm-cc : C compiler for WasmVM"
     );
     // Warnings
     Exception::Warning::regist([](std::string message){
@@ -129,7 +129,21 @@ int main(int argc, const char* argv[]){
         }
 
         // Link
-        
+        Linker::Config linker_config;
+        if(args["libraries"]){
+            std::vector<std::string> libraries = std::get<std::vector<std::string>>(args["libraries"].value());
+            for(std::string library_path : libraries){
+                linker_config.library_paths.emplace_back(library_path);
+            }
+        }
+        linker_config.library_paths.emplace_back(DEFAULT_MODULE_PATH);
+        if(args["library"]){
+            std::vector<std::string> libraries = std::get<std::vector<std::string>>(args["library"].value());
+            for(std::string library : libraries){
+                linker_config.libraries.emplace_back(library);
+            }
+        }
+        Linker linker(linker_config);
 
     }catch(Exception::Exception &e){
         std::cerr << args.program.filename().string() << ": " COLOR_Error ": " << e.what() << std::endl;
