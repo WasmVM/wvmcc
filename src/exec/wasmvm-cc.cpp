@@ -29,6 +29,7 @@
 #include <CommandParser.hpp>
 #include <Archive.hpp>
 #include <Linker.hpp>
+#include <Compiler.hpp>
 
 using namespace WasmVM;
 
@@ -90,6 +91,7 @@ int main(int argc, const char* argv[]){
                 throw Exception::Exception(std::string("unknown file format of ") + input_file);
             }
         }
+
         // Check multiple files with output specified
         if(args["output"] && (args["pp"] || args["comp"] || args["as"])){
             if((source_files.size() + wat_files.size()) != 1){
@@ -105,7 +107,16 @@ int main(int argc, const char* argv[]){
 
         std::map<std::filesystem::path, WasmModule> modules;
 
-        // TODO: Compile
+        // Compile
+        std::vector<std::filesystem::path> include_paths;
+        if(args["includes"]){
+            std::vector<std::string> includes = std::get<std::vector<std::string>>(args["includes"].value());
+            include_paths.assign(includes.begin(), includes.end());
+        }
+        Compiler compiler(include_paths);
+        for(std::filesystem::path source_file : source_files){
+            modules[source_file] = compiler.compile(source_file);
+        }
 
         // Assemble
         for(std::filesystem::path wat_path : wat_files){

@@ -1,3 +1,8 @@
+add_library(cc
+  lib/Compiler.cpp
+  lib/SourceFile.cpp
+)
+
 add_executable(wasmvm-cc
   exec/wasmvm-cc.cpp
   lib/CommandParser.cpp
@@ -6,5 +11,6 @@ add_executable(wasmvm-cc
 )
 target_link_libraries(wasmvm-cc
   WasmVM
+  cc
 )
 target_compile_definitions(wasmvm-cc PUBLIC DEFAULT_MODULE_PATH="${DEFAULT_MODULE_PATH}")
