@@ -73,12 +73,72 @@ SourceBuf::int_type SourceBuf::uflow(){
         ch = buf.front();
         buf.pop_front();
     }
-    if(ch == '\n'){
+    if(ch == '?'){
+        // Check trigraph
+        int_type cur;
+        if(buf.empty()){
+            cur = fin.get();
+        }else{
+            cur = buf.front();
+            buf.pop_front();
+        }
+        if(cur == '?'){
+            if(buf.empty()){
+                cur = fin.get();
+            }else{
+                cur = buf.front();
+                buf.pop_front();
+            }
+            switch(cur){
+                case '=':
+                    pos.col() += 3;
+                    return '#';
+                break;
+                case ')':
+                    pos.col() += 3;
+                    return ']';
+                break;
+                case '!':
+                    pos.col() += 3;
+                    return '|';
+                break;
+                case '(':
+                    pos.col() += 3;
+                    return '[';
+                break;
+                case '\'':
+                    pos.col() += 3;
+                    return '^';
+                break;
+                case '>':
+                    pos.col() += 3;
+                    return '}';
+                break;
+                case '<':
+                    pos.col() += 3;
+                    return '{';
+                break;
+                case '/':
+                    pos.col() += 3;
+                    return '\\';
+                break;
+                case '-':
+                    pos.col() += 3;
+                    return '~';
+                break;
+                default:
+                    buf.push_front('?');
+                    buf.push_front(cur);
+            }
+        }else{
+            buf.push_front(cur);
+        }
+    }else if(ch == '\n'){
         pos.line() += 1;
         pos.col() = 0;
-    }else{
-        pos.col() += 1;
+        return ch;
     }
+    pos.col() += 1;
     return ch;
 }
 SourceBuf::int_type SourceBuf::underflow(){
