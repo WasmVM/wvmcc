@@ -133,6 +133,21 @@ SourceBuf::int_type SourceBuf::uflow(){
         }else{
             buf.push_front(cur);
         }
+    }else if(ch == '\\'){
+        int_type next;
+        if(buf.empty()){
+            next = fin.get();
+        }else{
+            next = buf.front();
+            buf.pop_front();
+        }
+        if(next == '\n'){
+            pos.line() += 1;
+            pos.col() = 0;
+            return '\0';
+        }else{
+            buf.push_front(next);
+        }
     }else if(ch == '\n'){
         pos.line() += 1;
         pos.col() = 0;
