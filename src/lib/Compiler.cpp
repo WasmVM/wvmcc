@@ -29,7 +29,7 @@ WasmModule Compiler::compile(std::filesystem::path source_path){
     SourceFile source(source_path);
     // TODO:
     for(int ch = source.get(); ch != SourceFile::traits_type::eof(); ch = source.get()){
-        std::cout << (char)ch;
+        std::cout << "'" << (char)ch << "' " << source.position() << std::endl;
     }
     return WasmModule(); // FIXME:
 }

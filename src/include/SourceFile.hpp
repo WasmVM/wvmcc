@@ -1,14 +1,24 @@
 #ifndef WVMCC_SourceFile_DEF
 #define WVMCC_SourceFile_DEF
 
+#include <iostream>
 #include <fstream>
 #include <deque>
+#include <stack>
+#include <utility>
 
 namespace WasmVM {
+
+struct SourcePos : public std::pair<size_t, size_t> {
+    SourcePos(size_t l = 1, size_t c = 0) : std::pair<size_t, size_t>(l, c){}
+    inline size_t& line() {return first;}
+    inline size_t& col() {return second;}
+};
 
 class SourceBuf : public std::filebuf {
     std::deque<int_type> buf;
     std::ifstream fin;
+    SourcePos pos;
 
     SourceBuf(const std::filesystem::path filename);
     ~SourceBuf();
@@ -26,10 +36,13 @@ class SourceBuf : public std::filebuf {
 
 struct SourceFile : public std::ifstream {
     SourceFile(const std::filesystem::path filename);
+    SourcePos& position();
 private:
     SourceBuf buffer;
 };
 
 }
+
+std::ostream& operator<<(std::ostream&, WasmVM::SourcePos&);
 
 #endif

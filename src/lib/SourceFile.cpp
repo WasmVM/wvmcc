@@ -19,9 +19,8 @@
 
 using namespace WasmVM;
 
-SourceFile::SourceFile(const std::filesystem::path filename) : buffer(filename)
-{
-    set_rdbuf(&buffer);
+std::ostream& operator<<(std::ostream& os, SourcePos& pos){
+    return os << pos.line() << ":" << pos.col();
 }
 
 SourceBuf::SourceBuf(const std::filesystem::path filename) : fin(filename)
@@ -55,20 +54,32 @@ SourceBuf::int_type SourceBuf::pbackfail(int_type c){
     if(c == traits_type::eof()){
         fin.seekg(-(off_type)(buf.size() + 1), std::ios::cur);
         buf.clear();
-        buf.push_back(fin.get());
-    }else{
-        buf.push_front(c);
+        c = fin.get();
+        
     }
+    if(c == '\n' && pos.line() != 1){
+        pos.line() -= 1;
+    }else if(pos.col() != 1){
+        pos.col() -= 1;
+    }
+    buf.push_front(c);
     return 0;
 }
 SourceBuf::int_type SourceBuf::uflow(){
+    int_type ch;
     if(buf.empty()){
-        return fin.get();
+        ch = fin.get();
     }else{
-        int_type ch = buf.front();
+        ch = buf.front();
         buf.pop_front();
-        return ch;
     }
+    if(ch == '\n'){
+        pos.line() += 1;
+        pos.col() = 0;
+    }else{
+        pos.col() += 1;
+    }
+    return ch;
 }
 SourceBuf::int_type SourceBuf::underflow(){
     if(buf.empty()){
@@ -83,4 +94,12 @@ std::streamsize SourceBuf::showmanyc(){
     std::streamsize result = (fin.tellg() - pos) + buf.size();
     fin.seekg(pos);
     return result;
+}
+
+SourceFile::SourceFile(const std::filesystem::path filename) : buffer(filename)
+{
+    set_rdbuf(&buffer);
+}
+SourcePos& SourceFile::position(){
+    return buffer.pos;
 }
