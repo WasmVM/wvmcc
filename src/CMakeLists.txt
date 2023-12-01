@@ -1,6 +1,7 @@
 add_library(cc
   lib/Compiler.cpp
   lib/SourceFile.cpp
+  lib/PreProcessor.cpp
 )
 
 add_executable(wasmvm-cc

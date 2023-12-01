@@ -37,6 +37,7 @@ class SourceBuf : public std::filebuf {
 struct SourceFile : public std::ifstream {
     SourceFile(const std::filesystem::path filename);
     SourcePos& position();
+    std::filesystem::path path;
 private:
     SourceBuf buffer;
 };

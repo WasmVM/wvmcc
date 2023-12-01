@@ -171,7 +171,8 @@ std::streamsize SourceBuf::showmanyc(){
     return result;
 }
 
-SourceFile::SourceFile(const std::filesystem::path filename) : buffer(filename)
+SourceFile::SourceFile(const std::filesystem::path filename) :
+    path(filename), buffer(filename)
 {
     set_rdbuf(&buffer);
 }
