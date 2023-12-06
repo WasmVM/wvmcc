@@ -131,4 +131,12 @@ Suite preprocessor {
         pp.get();
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::DoubleHash);
     })
+    Test("newline", {
+        PreProcessor pp("newline.txt");
+        std::optional<Token> token;
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::NewLine>(token.value()));
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 0);
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::NewLine>(token.value()));
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 0);
+    })
 };

@@ -32,6 +32,8 @@ struct Token : public TokenType::Base {
     Token(T t, SourcePos p = SourcePos()) : TokenType::Base(t), pos(p){}
 
     inline operator TokenType::Punctuator(){return std::get<TokenType::Punctuator>(*this);}
+    inline operator TokenType::NewLine(){return std::get<TokenType::NewLine>(*this);}
+    inline operator TokenType::Lparen(){return std::get<TokenType::Lparen>(*this);}
     SourcePos pos;
 };
 
