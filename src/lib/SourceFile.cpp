@@ -144,7 +144,7 @@ SourceBuf::int_type SourceBuf::uflow(){
         if(next == '\n'){
             pos.line() += 1;
             pos.col() = 0;
-            return '\0';
+            return uflow();
         }else{
             buf.push_front(next);
         }
