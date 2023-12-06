@@ -172,7 +172,7 @@ std::ostream& operator<<(std::ostream& os, Token& token){
             os << std::endl;
         },
         [&](TokenType::Lparen&){
-            os << '(';
+            os << "l(";
         }
     }, token);
     return os;

@@ -34,6 +34,21 @@ PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
 std::optional<Token> PreProcessor::TokenStream::get(){
     auto ch = source.get();
     switch(ch){
+        case ' ' :
+        case '\t' :
+        case '\v' :
+        case '\f' :{
+            auto wh = source.get();
+            while(wh == ' ' || wh == '\t' || wh == '\v' || wh == '\f'){
+                wh = source.get();
+            }
+            if(wh == '('){
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L), source.position());
+            }else{
+                source.unget();
+                return get();
+            }
+        }break;
         case '[' :
             return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), source.position());
         break;
@@ -41,7 +56,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_R), source.position());
         break;
         case '(' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L), source.position());
+            return Token(TokenType::Lparen(), source.position());
         break;
         case ')' :
             return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R), source.position());
