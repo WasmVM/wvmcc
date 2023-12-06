@@ -8,6 +8,7 @@ macro(add_test_suite suite_name)
   target_link_libraries(${suite_name}_target
     harness
     WasmVM
+    cc
   )
   set_target_properties(${suite_name}_target
     PROPERTIES OUTPUT_NAME ${suite_name}/${suite_name}
@@ -20,3 +21,5 @@ macro(add_test_suite suite_name)
     ENVIRONMENT "LD_LIBRARY_PATH=${CMAKE_BINARY_DIR}/src/lib"
   )
 endmacro(add_test_suite)
+
+add_test_suite(SourceFile)
