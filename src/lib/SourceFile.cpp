@@ -55,7 +55,6 @@ SourceBuf::int_type SourceBuf::pbackfail(int_type c){
         fin.seekg(-(off_type)(buf.size() + 1), std::ios::cur);
         buf.clear();
         c = fin.get();
-        
     }
     if(c == '\n' && pos.line() != 1){
         pos.line() -= 1;
