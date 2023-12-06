@@ -15,8 +15,8 @@
 
 #include <Compiler.hpp>
 
+#include <PreProcessor.hpp>
 #include <iostream> // FIXME:
-#include <SourceFile.hpp>
 
 using namespace WasmVM;
 
@@ -26,10 +26,11 @@ Compiler::Compiler(std::vector<std::filesystem::path> include_paths) :
 }
 
 WasmModule Compiler::compile(std::filesystem::path source_path){
-    SourceFile source(source_path);
+    PreProcessor pp(source_path);
     // TODO:
-    for(int ch = source.get(); ch != SourceFile::traits_type::eof(); ch = source.get()){
-        std::cout << "'" << (char)ch << "' " << source.position() << std::endl;
+    for(auto tok = pp.get(); tok.has_value(); tok = pp.get()){
+        Token token = tok.value();
+        std::cout << token.pos << " " << token << std::endl;
     }
     return WasmModule(); // FIXME:
 }

@@ -3,6 +3,8 @@
 
 #include <filesystem>
 #include <stack>
+#include <optional>
+#include <Token.hpp>
 #include <SourceFile.hpp>
 
 namespace WasmVM {
@@ -10,12 +12,20 @@ namespace WasmVM {
 struct PreProcessor {
 
     PreProcessor(std::filesystem::path path);
-    ~PreProcessor();
+
+    struct TokenStream {
+        TokenStream(std::filesystem::path path);
+        std::optional<Token> get();
+    private:
+        SourceFile source;
+    };
+
+    std::optional<Token> get();
 
 private:
-    std::stack<SourceFile*> sources;
+    std::stack<TokenStream> streams;
 };
 
-}
+} // namespace WasmVM
 
 #endif
