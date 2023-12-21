@@ -15,6 +15,10 @@
 
 #include <PreProcessor.hpp>
 
+#include <cctype>
+#include <string>
+#include <Error.hpp>
+
 using namespace WasmVM;
 
 PreProcessor::PreProcessor(std::filesystem::path path){
@@ -42,12 +46,8 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             while(wh == ' ' || wh == '\t' || wh == '\v' || wh == '\f'){
                 wh = source.get();
             }
-            if(wh == '('){
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L), source.position());
-            }else{
-                source.unget();
-                return get();
-            }
+            source.unget();
+            return Token(TokenType::WhiteSpace(), source.position());
         }break;
         case '[' :
             return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), source.position());
@@ -56,7 +56,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_R), source.position());
         break;
         case '(' :
-            return Token(TokenType::Lparen(), source.position());
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L), source.position());
         break;
         case ')' :
             return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R), source.position());
@@ -273,6 +273,41 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         break;
         default:
         break;
+    }
+    if(std::isdigit(ch)){
+        // pp-number
+        int base = 10;
+        std::string sequence;
+        if(ch == '0'){
+            auto next = source.peek();
+            if(next == 'x' || next == 'X'){
+                // Base 16
+                source.get();
+                base = 16;
+            }else{
+                base = 8;
+            }
+        }
+        while(std::isxdigit(ch = source.get())){
+            sequence += ch;
+        }
+        if(sequence.empty() && ch != '.'){
+            throw Exception::Error(source.position(), "expected digits in pp-number");
+        }
+        if(ch == '.'){
+            sequence += ch;
+            while(std::isxdigit(ch = source.get())){
+                sequence += ch;
+            }
+        }
+        if((base == 10 && (ch == 'e' || ch == 'E'))){
+            sequence += ch;
+            while(std::isxdigit(ch = source.get())){
+                sequence += ch;
+            }
+        }
+    }else if(std::isalpha(ch) || ch == '_'){
+        // TODO: identifier
     }
     return std::nullopt;
 }

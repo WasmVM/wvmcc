@@ -171,8 +171,8 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         [&](TokenType::NewLine&){
             os << std::endl;
         },
-        [&](TokenType::Lparen&){
-            os << "l(";
+        [&](TokenType::WhiteSpace&){
+            os << " ";
         }
     }, token);
     return os;

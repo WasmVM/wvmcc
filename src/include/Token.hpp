@@ -19,9 +19,9 @@ struct Punctuator {
 };
 
 struct NewLine {};
-struct Lparen {};
+struct WhiteSpace {};
 
-using Base = std::variant<Punctuator, NewLine, Lparen>;
+using Base = std::variant<Punctuator, NewLine, WhiteSpace>;
 
 } // namespace Token
 
@@ -33,7 +33,7 @@ struct Token : public TokenType::Base {
 
     inline operator TokenType::Punctuator(){return std::get<TokenType::Punctuator>(*this);}
     inline operator TokenType::NewLine(){return std::get<TokenType::NewLine>(*this);}
-    inline operator TokenType::Lparen(){return std::get<TokenType::Lparen>(*this);}
+    inline operator TokenType::WhiteSpace(){return std::get<TokenType::WhiteSpace>(*this);}
     SourcePos pos;
 };
 

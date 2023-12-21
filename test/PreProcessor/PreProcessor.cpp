@@ -31,7 +31,7 @@ Suite preprocessor {
         pp.get();
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Bracket_R);
         pp.get();
-        Expect((token = pp.get()) && std::holds_alternative<TokenType::Lparen>(token.value()));
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_L);
         pp.get();
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_R);
         pp.get();
@@ -142,17 +142,22 @@ Suite preprocessor {
     Test("white_space", {
         PreProcessor pp("whitespace.txt");
         std::optional<Token> token;
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_L);
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 2);
         pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_R);
         Expect(token.value().pos.line() == 2 && token.value().pos.col() == 9);
         pp.get();
-        Expect((token = pp.get()) && std::holds_alternative<TokenType::Lparen>(token.value()));
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_L);
         Expect(token.value().pos.line() == 3 && token.value().pos.col() == 1);
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_R);
         Expect(token.value().pos.line() == 3 && token.value().pos.col() == 3);
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
         pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Semi);
         Expect(token.value().pos.line() == 4 && token.value().pos.col() == 3);
     })
