@@ -15,6 +15,8 @@
 
 #include <Token.hpp>
 #include <Util.hpp>
+#include <Error.hpp>
+#include <regex>
 
 using namespace WasmVM;
 
@@ -173,7 +175,21 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         },
         [&](TokenType::WhiteSpace&){
             os << " ";
+        },
+        [&](TokenType::PPNumber& tok){
+            os << tok.sequence;
         }
     }, token);
     return os;
+}
+
+template<>
+intmax_t TokenType::PPNumber::get<intmax_t>(){
+    int base = 10;
+    if(sequence.starts_with("0x") || sequence.starts_with("0X")){
+        base = 16;
+    }else if(sequence.starts_with("0")){
+        base = 8;
+    }
+    return std::stoll(sequence, nullptr, base);
 }

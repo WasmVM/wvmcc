@@ -3,6 +3,7 @@
 
 #include <iostream>
 #include <variant>
+#include <string>
 #include <SourceFile.hpp>
 
 namespace WasmVM {
@@ -17,11 +18,16 @@ struct Punctuator {
     Punctuator(Type t) : type(t){}
     Type type;
 };
-
 struct NewLine {};
 struct WhiteSpace {};
+struct PPNumber {
+    PPNumber(std::string s) : sequence(s){};
+    template<typename T>
+    T get();
+    std::string sequence;
+};
 
-using Base = std::variant<Punctuator, NewLine, WhiteSpace>;
+using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber>;
 
 } // namespace Token
 
@@ -34,6 +40,7 @@ struct Token : public TokenType::Base {
     inline operator TokenType::Punctuator(){return std::get<TokenType::Punctuator>(*this);}
     inline operator TokenType::NewLine(){return std::get<TokenType::NewLine>(*this);}
     inline operator TokenType::WhiteSpace(){return std::get<TokenType::WhiteSpace>(*this);}
+    inline operator TokenType::PPNumber(){return std::get<TokenType::PPNumber>(*this);}
     SourcePos pos;
 };
 

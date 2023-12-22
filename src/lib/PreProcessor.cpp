@@ -17,6 +17,7 @@
 
 #include <cctype>
 #include <string>
+#include <regex>
 #include <Error.hpp>
 
 using namespace WasmVM;
@@ -34,6 +35,14 @@ std::optional<Token> PreProcessor::get(){
 PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
     source(path)
 {}
+
+#define hex_prefix_re "0[xX]"
+#define hex_digit_re "[0-9a-fA-F]"
+#define digit_re "[0-9]"
+#define nonzero_digit_re "[1-9]"
+#define bin_exp_re "[pP][\\+\\-]?[0-9]+"
+#define exp_re "[eE][\\+\\-]?[0-9]+"
+#define octal_re "0[0-7]*"
 
 std::optional<Token> PreProcessor::TokenStream::get(){
     auto ch = source.get();
@@ -275,37 +284,108 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         break;
     }
     if(std::isdigit(ch)){
+        auto pos = source.position();
         // pp-number
         int base = 10;
         std::string sequence;
+        // digits
         if(ch == '0'){
+            sequence += ch;
             auto next = source.peek();
             if(next == 'x' || next == 'X'){
                 // Base 16
-                source.get();
+                sequence += source.get();
                 base = 16;
             }else{
+                // Base 8
                 base = 8;
             }
         }
-        while(std::isxdigit(ch = source.get())){
+        while(std::isxdigit(ch)){
             sequence += ch;
+            ch = source.get();
         }
         if(sequence.empty() && ch != '.'){
             throw Exception::Error(source.position(), "expected digits in pp-number");
         }
+        // fraction
         if(ch == '.'){
             sequence += ch;
             while(std::isxdigit(ch = source.get())){
                 sequence += ch;
             }
         }
-        if((base == 10 && (ch == 'e' || ch == 'E'))){
+        // exponent
+        if((base == 10 && (ch == 'e' || ch == 'E'))
+            || (base == 16 && (ch == 'p' || ch == 'P'))
+        ){
             sequence += ch;
-            while(std::isxdigit(ch = source.get())){
+            auto sign = source.peek();
+            if(sign == '-' || sign == '+'){
+                sequence += source.get();
+            }
+            while(std::isdigit(ch = source.get())){
                 sequence += ch;
             }
         }
+        // suffix
+        switch(ch){
+            case 'u':
+            case 'U':
+                sequence += ch;
+                ch = source.peek();
+                if(ch == 'l' || ch == 'L'){
+                    sequence += source.get();
+                    ch = source.peek();
+                    if(ch == 'l' || ch == 'L'){
+                        sequence += source.get();
+                    }
+                }
+            break;
+            case 'f':
+            case 'F':
+                sequence += ch;
+            break;
+            case 'l':
+            case 'L':
+                sequence += ch;
+                ch = source.peek();
+                if(ch == 'l' || ch == 'L'){
+                    sequence += source.get();
+                    ch = source.peek();
+                }
+                if(ch == 'u' || ch == 'U'){
+                    sequence += source.get();
+                }
+            break;
+            default:
+                source.unget();
+            break;
+        }
+        static const std::regex int_re(
+            "(" "(" hex_prefix_re hex_digit_re "+" ")" "|" "(" octal_re  ")" "|" "(" nonzero_digit_re digit_re "*" ")" ")"
+            "(" "([uU]((ll?)|(LL?))?)" "|" "(((ll?)|(LL?))[uU]?)" ")?"
+        );
+        static const std::regex float_re(
+            "(" "(" hex_prefix_re 
+                    "(" "(" hex_digit_re "*" "\\." hex_digit_re "+" ")" "|" "(" hex_digit_re "+" "\\." ")" ")"
+                    "(" bin_exp_re ")?"
+                ")" "|" 
+                "(" hex_digit_re "+" bin_exp_re ")"
+            ")" "|"
+            "(" "(" 
+                    "(" "(" digit_re "*" "\\." digit_re "+" ")" "|" "(" digit_re "+" "\\." ")" ")"
+                    "(" exp_re ")?"
+                ")" "|"
+                "(" digit_re "+" exp_re ")"
+            ")"
+            "[fFlL]?"
+        );
+        std::smatch m;
+        if(!std::regex_match(sequence, m, int_re) && !std::regex_match(sequence, m, float_re)){
+            throw Exception::Error(pos, "pp-number must be integer or floating-point constant");
+        }
+        return Token(TokenType::PPNumber(sequence), pos);
     }else if(std::isalpha(ch) || ch == '_'){
         // TODO: identifier
     }
