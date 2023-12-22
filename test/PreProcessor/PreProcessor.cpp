@@ -304,4 +304,23 @@ Suite preprocessor {
         Expect(((TokenType::PPNumber)token.value()).get<double>() == 0x.1a3P-2);
         pp.get();
     })
+    Test("identifier", {
+        PreProcessor pp("identifier.txt");
+        std::optional<Token> token;
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 1);
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 5 && token.value().pos.col() == 1);
+        pp.get();
+    })
 };

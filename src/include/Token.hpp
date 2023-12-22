@@ -26,8 +26,12 @@ struct PPNumber {
     T get();
     std::string sequence;
 };
+struct Identifier {
+    Identifier(std::string s) : sequence(s){};
+    std::string sequence;
+};
 
-using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber>;
+using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber, Identifier>;
 
 } // namespace Token
 

@@ -399,7 +399,15 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         }
         return Token(TokenType::PPNumber(sequence), pos);
     }else if(std::isalpha(ch) || ch == '_'){
-        // TODO: identifier
+        // identifier
+        auto pos = source.position();
+        std::string sequence;
+        while(std::isalnum(ch) || ch == '_'){
+            sequence += ch;
+            ch = source.get();
+        }
+        source.unget();
+        return Token(TokenType::Identifier(sequence), pos);
     }
     return std::nullopt;
 }

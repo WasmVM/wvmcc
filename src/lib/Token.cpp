@@ -178,6 +178,9 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         },
         [&](TokenType::PPNumber& tok){
             os << tok.sequence;
+        },
+        [&](TokenType::Identifier& tok){
+            os << tok.sequence;
         }
     }, token);
     return os;
