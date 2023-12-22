@@ -193,3 +193,8 @@ intmax_t TokenType::PPNumber::get<intmax_t>(){
     }
     return std::stoll(sequence, nullptr, base);
 }
+
+template<>
+double TokenType::PPNumber::get<double>(){
+    return std::stod(sequence);
+}

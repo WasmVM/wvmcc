@@ -98,6 +98,9 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             }
         break;
         case '.':{
+            if(std::isdigit(source.peek())){
+                break;
+            }
             auto pos = source.position();
             auto next = source.get();
             if(next == '.' && source.peek() == '.'){
@@ -283,7 +286,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         default:
         break;
     }
-    if(std::isdigit(ch)){
+    if(std::isdigit(ch) || ch == '.'){
         auto pos = source.position();
         // pp-number
         int base = 10;
@@ -296,14 +299,19 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 // Base 16
                 sequence += source.get();
                 base = 16;
-            }else{
-                // Base 8
-                base = 8;
             }
-        }
-        while(std::isxdigit(ch)){
-            sequence += ch;
             ch = source.get();
+        }
+        if(base == 16) {
+            while(std::isxdigit(ch)){
+                sequence += ch;
+                ch = source.get();
+            }
+        }else{
+            while(std::isdigit(ch)){
+                sequence += ch;
+                ch = source.get();
+            }
         }
         if(sequence.empty() && ch != '.'){
             throw Exception::Error(source.position(), "expected digits in pp-number");
@@ -311,12 +319,18 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         // fraction
         if(ch == '.'){
             sequence += ch;
-            while(std::isxdigit(ch = source.get())){
-                sequence += ch;
+            if(base == 16) {
+                while(std::isxdigit(ch = source.get())){
+                    sequence += ch;
+                }
+            }else{
+                while(std::isdigit(ch = source.get())){
+                    sequence += ch;
+                }
             }
         }
         // exponent
-        if((base == 10 && (ch == 'e' || ch == 'E'))
+        if((ch == 'e' || ch == 'E')
             || (base == 16 && (ch == 'p' || ch == 'P'))
         ){
             sequence += ch;
@@ -367,11 +381,9 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             "(" "([uU]((ll?)|(LL?))?)" "|" "(((ll?)|(LL?))[uU]?)" ")?"
         );
         static const std::regex float_re(
-            "(" "(" hex_prefix_re 
-                    "(" "(" hex_digit_re "*" "\\." hex_digit_re "+" ")" "|" "(" hex_digit_re "+" "\\." ")" ")"
-                    "(" bin_exp_re ")?"
-                ")" "|" 
-                "(" hex_digit_re "+" bin_exp_re ")"
+            "(" hex_prefix_re
+                "(" "(" hex_digit_re "*" "\\." hex_digit_re "+" ")" "|" "(" hex_digit_re "+" "\\.?" ")" ")" 
+                bin_exp_re
             ")" "|"
             "(" "(" 
                     "(" "(" digit_re "*" "\\." digit_re "+" ")" "|" "(" digit_re "+" "\\." ")" ")"
