@@ -21,7 +21,7 @@ using namespace Testing;
 
 Suite source_file {
     Test("normal", {
-        SourceFile source("normal.txt");
+        SourceFile source(std::filesystem::path("normal.txt"));
         Expect(source.get() == 't');
         Expect(source.position().line() == 1 && source.position().col() == 1);
         Expect(source.get() == 'e');
@@ -32,7 +32,7 @@ Suite source_file {
         Expect(source.position().line() == 1 && source.position().col() == 4);
     })
     Test("newline", {
-        SourceFile source("newline.txt");
+        SourceFile source(std::filesystem::path("newline.txt"));
         Expect(source.get() == 't');
         Expect(source.position().line() == 1 && source.position().col() == 1);
         Expect(source.get() == 'e');
@@ -48,7 +48,7 @@ Suite source_file {
         Expect(source.position().line() == 4 && source.position().col() == 1);
     })
     Test("concat", {
-        SourceFile source("concat.txt");
+        SourceFile source(std::filesystem::path("concat.txt"));
         Expect(source.get() == 't');
         Expect(source.position().line() == 1 && source.position().col() == 1);
         Expect(source.get() == 'e');
@@ -59,7 +59,7 @@ Suite source_file {
         Expect(source.position().line() == 2 && source.position().col() == 2);
     })
     Test("trigraph", {
-        SourceFile source("trigraph.txt");
+        SourceFile source(std::filesystem::path("trigraph.txt"));
         Expect(source.get() == '#');
         Expect(source.position().line() == 1 && source.position().col() == 3);
         Expect(source.get() == '[');

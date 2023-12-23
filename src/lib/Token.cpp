@@ -256,7 +256,7 @@ TokenType::CharacterConstant::CharacterConstant(std::string sequence) : sequence
                     ++seq_it;
                     for(int c = 0; (c < CHAR_BIT / 4) && std::isxdigit(*seq_it); ++c, ++seq_it){
                         int lower = std::tolower(*seq_it);
-                        char_val = (char_val << 4) + (std::isdigit(lower) ? (*seq_it - '0') : (*seq_it - 'a' + 10));
+                        char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
                     }
                 }break;
                 case '\'':
@@ -303,12 +303,35 @@ TokenType::CharacterConstant::CharacterConstant(std::string sequence) : sequence
                     char_val = '\v';
                     ++seq_it;
                 break;
+                // universal character names
+                case 'u':
+                    for(int i = 0; i < 4; ++i){
+                        ++seq_it;
+                        if(std::isxdigit(*seq_it)){
+                            int lower = std::tolower(*seq_it);
+                            char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
+                        }else{
+                            throw Exception::Exception("invalid universal character name");
+                        }
+                    }
+                break;
+                case 'U':
+                    for(int i = 0; i < 8; ++i){
+                        ++seq_it;
+                        if(std::isxdigit(*seq_it)){
+                            int lower = std::tolower(*seq_it);
+                            char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
+                        }else{
+                            throw Exception::Exception("invalid universal character name");
+                        }
+                    }
+                break;
             }
         }else{
             char_val = *seq_it;
             ++seq_it;
         }
-        val = (val << (w * CHAR_BIT)) + (char_val & ((1 << CHAR_BIT) - 1));
+        val = (val << CHAR_BIT) + (char_val & ((1 << CHAR_BIT) - 1));
     }
     if(*seq_it != '\''){
         Exception::Warning("charecters exceed charecter constant range are discarded");

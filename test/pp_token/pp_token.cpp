@@ -19,9 +19,9 @@
 using namespace WasmVM;
 using namespace Testing;
 
-Suite preprocessor {
+Suite pp_token {
     Test("punctuator", {
-        PreProcessor pp("punctuator.txt");
+        PreProcessor pp(std::filesystem::path("punctuator.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Bracket_L);
         pp.get();
@@ -159,7 +159,7 @@ Suite preprocessor {
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Colon);
     })
     Test("newline", {
-        PreProcessor pp("newline.txt");
+        PreProcessor pp(std::filesystem::path("newline.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && std::holds_alternative<TokenType::NewLine>(token.value()));
         Expect(token.value().pos.line() == 2 && token.value().pos.col() == 0);
@@ -167,7 +167,7 @@ Suite preprocessor {
         Expect(token.value().pos.line() == 4 && token.value().pos.col() == 0);
     })
     Test("white_space", {
-        PreProcessor pp("whitespace.txt");
+        PreProcessor pp(std::filesystem::path("whitespace.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_L);
@@ -189,7 +189,7 @@ Suite preprocessor {
         Expect(token.value().pos.line() == 4 && token.value().pos.col() == 3);
     })
     Test("pp_number_int", {
-        PreProcessor pp("pp_number_int.txt");
+        PreProcessor pp(std::filesystem::path("pp_number_int.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && std::holds_alternative<TokenType::PPNumber>(token.value()));
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
@@ -264,7 +264,7 @@ Suite preprocessor {
         Expect(((TokenType::PPNumber)token.value()).get<intmax_t>() == 3456);
     })
     Test("pp_number_float", {
-        PreProcessor pp("pp_number_float.txt");
+        PreProcessor pp(std::filesystem::path("pp_number_float.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && std::holds_alternative<TokenType::PPNumber>(token.value()));
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
@@ -332,26 +332,43 @@ Suite preprocessor {
         pp.get();
     })
     Test("identifier", {
-        PreProcessor pp("identifier.txt");
+        PreProcessor pp(std::filesystem::path("identifier.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "ident");
         pp.get();
         Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
         Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "iden01");
         pp.get();
         Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
         Expect(token.value().pos.line() == 3 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "_iden");
         pp.get();
         Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
         Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "iden_");
         pp.get();
         Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
         Expect(token.value().pos.line() == 5 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "iden_8");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "hello");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 7 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "big");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::Identifier>(token.value()));
+        Expect(token.value().pos.line() == 8 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "zip");
         pp.get();
     })
     Test("character", {
-        PreProcessor pp("character.txt");
+        PreProcessor pp(std::filesystem::path("character.txt"));
         std::optional<Token> token;
         Expect((token = pp.get()) && std::holds_alternative<TokenType::CharacterConstant>(token.value()));
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
@@ -421,5 +438,12 @@ Suite preprocessor {
         Expect(token.value().pos.line() == 17 && token.value().pos.col() == 1);
         Expect(std::get<int>(((TokenType::CharacterConstant)token.value()).value) == '\n');
         pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::CharacterConstant>(token.value()));
+        Expect(token.value().pos.line() == 18 && token.value().pos.col() == 1);
+        Expect(std::get<int>(((TokenType::CharacterConstant)token.value()).value) == '\u0068');
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::CharacterConstant>(token.value()));
+        Expect(token.value().pos.line() == 19 && token.value().pos.col() == 1);
+        Expect(std::get<int>(((TokenType::CharacterConstant)token.value()).value) == '\U00000030');
     })
 };

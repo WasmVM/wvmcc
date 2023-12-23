@@ -44,9 +44,80 @@ PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
 #define exp_re "[eE][\\+\\-]?[0-9]+"
 #define octal_re "0[0-7]*"
 
+static void escape_sequence(SourceFile::int_type& ch, SourceFile& source, std::string& sequence, SourcePos& pos){
+    // escape
+    ch = source.get();
+    switch(ch){
+        case '\'':
+        case '"':
+        case '?':
+        case '\\':
+        case 'a':
+        case 'b':
+        case 'f':
+        case 'n':
+        case 't':
+        case 'v':
+        case 'r':
+            sequence += ch;
+            ch = source.get();
+        break;
+        case 'x':
+            // hexadecimal
+            sequence += ch;
+            while(std::isxdigit(ch = source.get())){
+                sequence += ch;
+            }
+        break;
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+            // octal
+            for(int i = 0; (i < 3) && (ch >= '0') && (ch <= '7'); ++i){
+                sequence += ch;
+                ch = source.get();
+            }
+        break;
+        case 'u':
+            // universal character name
+            sequence += ch;
+            ch = source.get();
+            for(int i = 0; i < 4; ++i){
+                if(!std::isxdigit(ch)){
+                    throw Exception::Error(pos, std::string("invalid universal character name"));
+                }
+                sequence += ch;
+                ch = source.get();
+            }
+        break;
+        case 'U':
+            // universal character name
+            sequence += ch;
+            ch = source.get();
+            for(int i = 0; i < 8; ++i){
+                if(!std::isxdigit(ch)){
+                    throw Exception::Error(pos, std::string("invalid universal character name"));
+                }
+                sequence += ch;
+                ch = source.get();
+            }
+        break;
+        default:
+            throw Exception::Error(pos, std::string("unknown escape sequence '\\") + (char)(ch) + "'");
+        break;
+    }
+}
+
 std::optional<Token> PreProcessor::TokenStream::get(){
     auto ch = source.get();
     auto pos = source.position();
+    // TODO: header name
+    // TODO: string literal
     // Character constant
     if((ch == '\'') || ((ch == 'L' || ch == 'u' || ch == 'U') && (source.peek() == '\''))){
         state = LineState::normal;
@@ -60,48 +131,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         while(ch != '\''){
             sequence += ch;
             if(ch == '\\'){
-                // escape
-                ch = source.get();
-                switch(ch){
-                    case '\'':
-                    case '"':
-                    case '?':
-                    case '\\':
-                    case 'a':
-                    case 'b':
-                    case 'f':
-                    case 'n':
-                    case 't':
-                    case 'v':
-                    case 'r':
-                        sequence += ch;
-                        ch = source.get();
-                    break;
-                    case 'x':
-                        // hexadecimal
-                        sequence += ch;
-                        while(std::isxdigit(ch = source.get())){
-                            sequence += ch;
-                        }
-                    break;
-                    case '0':
-                    case '1':
-                    case '2':
-                    case '3':
-                    case '4':
-                    case '5':
-                    case '6':
-                    case '7':
-                        // octal
-                        for(int i = 0; (i < 3) && (ch >= '0') && (ch <= '7'); ++i){
-                            sequence += ch;
-                            ch = source.get();
-                        }
-                    break;
-                    default:
-                        throw Exception::Error(pos, std::string("unknown escape sequence '\\") + (char)(ch) + "'");
-                    break;
-                }
+                escape_sequence(ch, source, sequence, pos);
             }else{
                 ch = source.get();
             }
@@ -502,10 +532,29 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             throw Exception::Error(pos, "pp-number must be integer or floating-point constant");
         }
         return Token(TokenType::PPNumber(sequence), pos);
-    }else if(std::isalpha(ch) || ch == '_'){ // identifier
+    }else if(std::isalpha(ch) || ch == '_' || ch == '\\'){ // identifier
         std::string sequence;
-        while(std::isalnum(ch) || ch == '_'){
-            sequence += ch;
+        while(std::isalnum(ch) || ch == '_' || ch == '\\'){
+            if(ch == '\\'){
+                ch = source.get();
+                if(ch == 'u' || ch == 'U'){
+                    const int width = (ch == 'u') ? 4 : 8;
+                    int val = 0;
+                    for(int i = 0; i < width; ++i){
+                        ch = source.get();
+                        if(!std::isxdigit(ch)){
+                            throw Exception::Error(pos, std::string("invalid universal character name"));
+                        }
+                        int lower = std::tolower(ch);
+                        val = (val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
+                    }
+                    sequence += val;
+                }else{
+                    throw Exception::Error(pos, std::string("unexpected escape sequence in identifier"));
+                }
+            }else{
+                sequence += ch;
+            }
             ch = source.get();
         }
         source.unget();

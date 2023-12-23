@@ -23,4 +23,4 @@ macro(add_test_suite suite_name)
 endmacro(add_test_suite)
 
 add_test_suite(SourceFile)
-add_test_suite(PreProcessor)
+add_test_suite(pp_token)
