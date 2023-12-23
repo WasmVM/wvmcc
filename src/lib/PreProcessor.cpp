@@ -46,6 +46,71 @@ PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
 
 std::optional<Token> PreProcessor::TokenStream::get(){
     auto ch = source.get();
+    if((ch == '\'') || ((ch == 'L' || ch == 'u' || ch == 'U') && (source.peek() == '\''))){
+        // Character constant
+        auto pos = source.position();
+        std::string sequence;
+        sequence += ch;
+        if(ch != '\''){
+            ch = source.get();
+            sequence += ch;
+        }
+        ch = source.get();
+        while(ch != '\''){
+            sequence += ch;
+            if(ch == '\\'){
+                // escape
+                ch = source.get();
+                switch(ch){
+                    case '\'':
+                    case '"':
+                    case '?':
+                    case '\\':
+                    case 'a':
+                    case 'b':
+                    case 'f':
+                    case 'n':
+                    case 't':
+                    case 'v':
+                    case 'r':
+                        sequence += ch;
+                        ch = source.get();
+                    break;
+                    case 'x':
+                        // hexadecimal
+                        sequence += ch;
+                        while(std::isxdigit(ch = source.get())){
+                            sequence += ch;
+                        }
+                    break;
+                    case '0':
+                    case '1':
+                    case '2':
+                    case '3':
+                    case '4':
+                    case '5':
+                    case '6':
+                    case '7':
+                        // octal
+                        for(int i = 0; (i < 3) && (ch >= '0') && (ch <= '7'); ++i){
+                            sequence += ch;
+                            ch = source.get();
+                        }
+                    break;
+                    default:
+                        throw Exception::Error(pos, std::string("unknown escape sequence '\\") + (char)(ch) + "'");
+                    break;
+                }
+            }else{
+                ch = source.get();
+            }
+            if(ch == SourceFile::traits_type::eof()){
+                throw Exception::Error(pos, "unclosed character constant");
+            }
+        }
+        sequence += ch;
+        return Token(TokenType::CharacterConstant(sequence), pos);
+    }
     switch(ch){
         case ' ' :
         case '\t' :

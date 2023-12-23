@@ -4,6 +4,8 @@
 #include <iostream>
 #include <variant>
 #include <string>
+#include <cstddef>
+#include <cuchar>
 #include <SourceFile.hpp>
 
 namespace WasmVM {
@@ -30,8 +32,13 @@ struct Identifier {
     Identifier(std::string s) : sequence(s){};
     std::string sequence;
 };
+struct CharacterConstant {
+    CharacterConstant(std::string sequence);
+    std::variant<int, wchar_t, char16_t, char32_t> value;
+    std::string sequence;
+};
 
-using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber, Identifier>;
+using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber, Identifier, CharacterConstant>;
 
 } // namespace Token
 
@@ -45,6 +52,8 @@ struct Token : public TokenType::Base {
     inline operator TokenType::NewLine(){return std::get<TokenType::NewLine>(*this);}
     inline operator TokenType::WhiteSpace(){return std::get<TokenType::WhiteSpace>(*this);}
     inline operator TokenType::PPNumber(){return std::get<TokenType::PPNumber>(*this);}
+    inline operator TokenType::Identifier(){return std::get<TokenType::Identifier>(*this);}
+    inline operator TokenType::CharacterConstant(){return std::get<TokenType::CharacterConstant>(*this);}
     SourcePos pos;
 };
 
