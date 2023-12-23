@@ -33,7 +33,7 @@ std::optional<Token> PreProcessor::get(){
 }
 
 PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
-    source(path)
+    source(path), state(LineState::unknown)
 {}
 
 #define hex_prefix_re "0[xX]"
@@ -46,9 +46,10 @@ PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
 
 std::optional<Token> PreProcessor::TokenStream::get(){
     auto ch = source.get();
+    auto pos = source.position();
+    // Character constant
     if((ch == '\'') || ((ch == 'L' || ch == 'u' || ch == 'U') && (source.peek() == '\''))){
-        // Character constant
-        auto pos = source.position();
+        state = LineState::normal;
         std::string sequence;
         sequence += ch;
         if(ch != '\''){
@@ -111,6 +112,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         sequence += ch;
         return Token(TokenType::CharacterConstant(sequence), pos);
     }
+    // Punctuator, whitespace, newline
     switch(ch){
         case ' ' :
         case '\t' :
@@ -121,117 +123,135 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 wh = source.get();
             }
             source.unget();
-            return Token(TokenType::WhiteSpace(), source.position());
+            return Token(TokenType::WhiteSpace(), pos);
         }break;
         case '[' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), pos);
         break;
         case ']' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_R), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_R), pos);
         break;
         case '(' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L), pos);
         break;
         case ')' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R), pos);
         break;
         case '{' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_L), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_L), pos);
         break;
         case '}' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_R), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_R), pos);
         break;
         case ';' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Semi), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Semi), pos);
         break;
         case '~' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Tlide), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Tlide), pos);
         break;
         case '?' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Query), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Query), pos);
         break;
         case ',' :
-            return Token(TokenType::Punctuator(TokenType::Punctuator::Comma), source.position());
+            state = LineState::normal;
+            return Token(TokenType::Punctuator(TokenType::Punctuator::Comma), pos);
         break;
         case '#':
             if(source.peek() == '#'){
-                auto pos = source.position();
+                state = LineState::normal;
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::DoubleHash), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Hash), source.position());
+                if(state == LineState::unknown){
+                    state = LineState::hashed;
+                }else{
+                    state = LineState::normal;
+                }
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Hash), pos);
             }
         break;
         case '.':{
+            state = LineState::normal;
             if(std::isdigit(source.peek())){
                 break;
             }
-            auto pos = source.position();
             auto next = source.get();
             if(next == '.' && source.peek() == '.'){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Ellipsis), pos);
             }else{
                 source.unget();
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Dot), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Dot), pos);
             }
         }break;
         case '*':
+            state = LineState::normal;
             if(source.peek() == '='){
-                auto pos = source.position();
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::AsterEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Aster), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Aster), pos);
             }
         break;
         case '^':
+            state = LineState::normal;
             if(source.peek() == '='){
-                auto pos = source.position();
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::CaretEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Caret), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Caret), pos);
             }
         break;
         case '!':
+            state = LineState::normal;
             if(source.peek() == '='){
-                auto pos = source.position();
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::ExclamEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Exclam), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Exclam), pos);
             }
         break;
         case '=':
+            state = LineState::normal;
             if(source.peek() == '='){
-                auto pos = source.position();
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::DoubleEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Equal), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Equal), pos);
             }
         break;
         case '/':
+            state = LineState::normal;
             if(source.peek() == '='){
-                auto pos = source.position();
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::SlashEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Slash), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Slash), pos);
             }
         break;
         case ':':
-            if(source.peek() == '>'){
-                auto pos = source.position();
+            if((state != LineState::hashed) && (source.peek() == '>')){
+                state = LineState::normal;
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_R), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Colon), source.position());
+                if((state != LineState::hashed) || (source.peek() != '%')){
+                    state = LineState::normal;
+                }
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Colon), pos);
             }
         break;
         case '+':{
-            auto pos = source.position();
+            state = LineState::normal;
             if(source.peek() == '+'){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::DoublePlus), pos);
@@ -239,11 +259,11 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::PlusEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Plus), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Plus), pos);
             }
         }break;
         case '&':{
-            auto pos = source.position();
+            state = LineState::normal;
             if(source.peek() == '&'){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::DoubleAmp), pos);
@@ -251,11 +271,11 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::AmpEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Amp), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Amp), pos);
             }
         }break;
         case '|':{
-            auto pos = source.position();
+            state = LineState::normal;
             if(source.peek() == '|'){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::DoubleBar), pos);
@@ -263,11 +283,11 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::BarEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Bar), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Bar), pos);
             }
         }break;
         case '-':{
-            auto pos = source.position();
+            state = LineState::normal;
             if(source.peek() == '-'){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::DoubleMinus), pos);
@@ -278,11 +298,11 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Arrow), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Minus), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Minus), pos);
             }
         }break;
         case '>':{
-            auto pos = source.position();
+            state = LineState::normal;
             if(source.peek() == '>'){
                 source.get();
                 if(source.peek() == '='){
@@ -295,12 +315,12 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::GreatEqual), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Great), source.position());
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Great), pos);
             }
         }break;
         case '<':{
-            auto pos = source.position();
             if(source.peek() == '<'){
+                state = LineState::normal;
                 source.get();
                 if(source.peek() == '='){
                     source.get();
@@ -309,51 +329,70 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                     return Token(TokenType::Punctuator(TokenType::Punctuator::Shift_L), pos);
                 }
             }else if(source.peek() == '='){
+                state = LineState::normal;
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::LessEqual), pos);
-            }else if(source.peek() == ':'){
+            }else if((state != LineState::hashed) && (source.peek() == ':')){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), pos);
-            }else if(source.peek() == '%'){
+            }else if((state != LineState::hashed) && (source.peek() == '%')){
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_L), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Less), source.position());
+                state = LineState::normal;
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Less), pos);
             }
         }break;
         case '%':{
-            auto pos = source.position();
-            if(source.peek() == ':'){
+            if((state != LineState::hashed) && (source.peek() == ':')){
                 source.get();
                 if(source.peek() == '%'){
                     source.get();
                     if(source.peek() == ':'){
+                        state = LineState::normal;
                         source.get();
                         return Token(TokenType::Punctuator(TokenType::Punctuator::DoubleHash), pos);
                     }else{
                         source.unget();
                     }
                 }
+                if(state == LineState::unknown){
+                    state = LineState::hashed;
+                }else{
+                    state = LineState::normal;
+                }
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Hash), pos);
             }else if(source.peek() == '='){
+                state = LineState::normal;
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::PerceEqual), pos);
-            }else if(source.peek() == '>'){
+            }else if((state != LineState::hashed) && (source.peek() == '>')){
+                state = LineState::normal;
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_R), pos);
             }else{
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Perce), source.position());
+                if((state != LineState::hashed) || (source.peek() != ':')){
+                    state = LineState::normal;
+                }
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Perce), pos);
             }
         }break;
+        case '\r':
+            if(source.peek() != '\n'){
+                // not CRLF
+                break;
+            }else{
+                source.get();
+            }
         case '\n':
-            return Token(TokenType::NewLine(),source.position());
+            state = LineState::unknown;
+            return Token(TokenType::NewLine(), pos);
         break;
         default:
         break;
     }
-    if(std::isdigit(ch) || ch == '.'){
-        auto pos = source.position();
-        // pp-number
+    if(std::isdigit(ch) || ch == '.'){ // pp-number
+        state = LineState::normal;
         int base = 10;
         std::string sequence;
         // digits
@@ -463,16 +502,22 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             throw Exception::Error(pos, "pp-number must be integer or floating-point constant");
         }
         return Token(TokenType::PPNumber(sequence), pos);
-    }else if(std::isalpha(ch) || ch == '_'){
-        // identifier
-        auto pos = source.position();
+    }else if(std::isalpha(ch) || ch == '_'){ // identifier
         std::string sequence;
         while(std::isalnum(ch) || ch == '_'){
             sequence += ch;
             ch = source.get();
         }
         source.unget();
+        if((state == LineState::hashed) && (sequence == "include")){
+            state = LineState::include;
+        }else{
+            state = LineState::normal;
+        }
         return Token(TokenType::Identifier(sequence), pos);
+    }else if(ch == SourceFile::traits_type::eof()){
+        return std::nullopt;
+    }else{
+        throw Exception::Error(pos, std::string("invalid source character ") + (char)ch);
     }
-    return std::nullopt;
 }

@@ -18,6 +18,12 @@ struct PreProcessor {
         std::optional<Token> get();
     private:
         SourceFile source;
+        enum class LineState : int{
+            unknown = 0,
+            normal = 1,
+            hashed = 2,
+            include = 3,
+        } state;
     };
 
     std::optional<Token> get();

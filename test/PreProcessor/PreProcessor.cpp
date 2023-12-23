@@ -130,6 +130,33 @@ Suite preprocessor {
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::DoubleHash);
         pp.get();
         Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::DoubleHash);
+        pp.get();
+        // stringized digraph
+        pp.get(); pp.get();
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Less);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Colon);
+        pp.get();
+        pp.get(); pp.get();
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Colon);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Great);
+        pp.get();
+        pp.get(); pp.get();
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Less);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Perce);
+        pp.get();
+        pp.get(); pp.get();
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Perce);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Great);
+        pp.get();
+        pp.get(); pp.get();
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Perce);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Colon);
+        pp.get();
+        pp.get(); pp.get();
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Perce);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Colon);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Perce);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Colon);
     })
     Test("newline", {
         PreProcessor pp("newline.txt");
