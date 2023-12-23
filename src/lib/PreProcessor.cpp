@@ -113,10 +113,111 @@ static void escape_sequence(SourceFile::int_type& ch, SourceFile& source, std::s
     }
 }
 
+static bool is_source_character(SourceFile::int_type& ch){
+    if(std::isalnum(ch)){
+        return true;
+    }
+    switch(ch){
+        case '!':
+        case '"':
+        case '#':
+        case '%':
+        case '&':
+        case '\'':
+        case '(':    
+        case ')':
+        case '*':
+        case '+':
+        case ',':
+        case '-':
+        case '.':
+        case '/':
+        case ':':
+        case ';':
+        case '<':
+        case '=':
+        case '>':
+        case '?':
+        case '[':
+        case '\\':
+        case ']':
+        case '^':
+        case '_':
+        case '{':
+        case '|':
+        case '}':
+        case '~':
+        case ' ':
+        case '\t':
+        case '\v':
+        case '\f':
+        case '\n':
+        case SourceFile::traits_type::eof():
+            return true;
+        break;
+        default:
+            return false;
+        break;
+    }
+}
+
 std::optional<Token> PreProcessor::TokenStream::get(){
     auto ch = source.get();
     auto pos = source.position();
-    // TODO: header name
+    // whitespace
+    if(ch == ' ' || ch == '\t' || ch == 'v' || ch == 'f'){
+        auto wh = source.get();
+        while(wh == ' ' || wh == '\t' || wh == '\v' || wh == '\f'){
+            wh = source.get();
+        }
+        source.unget();
+        return Token(TokenType::WhiteSpace(), pos);
+    }
+    // newline
+    if(ch == '\r'){
+        if(source.peek() != '\n'){
+            throw Exception::Error(pos, std::string("invalid source character \\r"));
+        }else{
+            ch = source.get();
+        }
+    }
+    if(ch == '\n'){
+        state = LineState::unknown;
+        return Token(TokenType::NewLine(), pos);
+    }
+    // header name
+    if(state == LineState::include){
+        state = LineState::normal;
+        if(ch == '\"'){
+            std::string sequence;
+            sequence += ch;
+            ch = source.get();
+            while(ch != '\"' && ch != '\n' && ch != SourceFile::traits_type::eof() && is_source_character(ch)){
+                sequence += ch;
+                ch = source.get();
+            }
+            if(ch != '\"'){
+                throw Exception::Error(pos, "unclosed header name");
+            }else{
+                sequence += ch;
+            }
+            return Token(TokenType::HeaderName(sequence), pos);
+        }else if(ch == '<'){
+            std::string sequence;
+            sequence += ch;
+            ch = source.get();
+            while(ch != '>' && ch != '\n' && ch != SourceFile::traits_type::eof() && is_source_character(ch)){
+                sequence += ch;
+                ch = source.get();
+            }
+            if(ch != '>'){
+                throw Exception::Error(pos, "unclosed header name");
+            }else{
+                sequence += ch;
+            }
+            return Token(TokenType::HeaderName(sequence), pos);
+        }
+    }
     // TODO: string literal
     // Character constant
     if((ch == '\'') || ((ch == 'L' || ch == 'u' || ch == 'U') && (source.peek() == '\''))){
@@ -142,19 +243,8 @@ std::optional<Token> PreProcessor::TokenStream::get(){
         sequence += ch;
         return Token(TokenType::CharacterConstant(sequence), pos);
     }
-    // Punctuator, whitespace, newline
+    // Punctuator
     switch(ch){
-        case ' ' :
-        case '\t' :
-        case '\v' :
-        case '\f' :{
-            auto wh = source.get();
-            while(wh == ' ' || wh == '\t' || wh == '\v' || wh == '\f'){
-                wh = source.get();
-            }
-            source.unget();
-            return Token(TokenType::WhiteSpace(), pos);
-        }break;
         case '[' :
             state = LineState::normal;
             return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), pos);
@@ -349,8 +439,15 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             }
         }break;
         case '<':{
+            if((state != LineState::hashed) && (source.peek() == ':')){
+                source.get();
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), pos);
+            }else if((state != LineState::hashed) && (source.peek() == '%')){
+                source.get();
+                return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_L), pos);
+            }
+            state = LineState::normal;
             if(source.peek() == '<'){
-                state = LineState::normal;
                 source.get();
                 if(source.peek() == '='){
                     source.get();
@@ -359,17 +456,9 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                     return Token(TokenType::Punctuator(TokenType::Punctuator::Shift_L), pos);
                 }
             }else if(source.peek() == '='){
-                state = LineState::normal;
                 source.get();
                 return Token(TokenType::Punctuator(TokenType::Punctuator::LessEqual), pos);
-            }else if((state != LineState::hashed) && (source.peek() == ':')){
-                source.get();
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Bracket_L), pos);
-            }else if((state != LineState::hashed) && (source.peek() == '%')){
-                source.get();
-                return Token(TokenType::Punctuator(TokenType::Punctuator::Brace_L), pos);
             }else{
-                state = LineState::normal;
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Less), pos);
             }
         }break;
@@ -407,17 +496,6 @@ std::optional<Token> PreProcessor::TokenStream::get(){
                 return Token(TokenType::Punctuator(TokenType::Punctuator::Perce), pos);
             }
         }break;
-        case '\r':
-            if(source.peek() != '\n'){
-                // not CRLF
-                break;
-            }else{
-                source.get();
-            }
-        case '\n':
-            state = LineState::unknown;
-            return Token(TokenType::NewLine(), pos);
-        break;
         default:
         break;
     }
@@ -564,7 +642,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             state = LineState::normal;
         }
         return Token(TokenType::Identifier(sequence), pos);
-    }else if(ch == SourceFile::traits_type::eof()){
+    }else if(ch == SourceFile::traits_type::eof()){ // EOF
         return std::nullopt;
     }else{
         throw Exception::Error(pos, std::string("invalid source character ") + (char)ch);

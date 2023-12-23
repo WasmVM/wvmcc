@@ -185,7 +185,10 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         },
         [&](TokenType::CharacterConstant& tok){
             os << tok.sequence;
-        }
+        },
+        [&](TokenType::HeaderName& tok){
+            os << tok.sequence;
+        },
     }, token);
     return os;
 }

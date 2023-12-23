@@ -37,8 +37,12 @@ struct CharacterConstant {
     std::variant<int, wchar_t, char16_t, char32_t> value;
     std::string sequence;
 };
+struct HeaderName {
+    HeaderName(std::string s) : sequence(s){};
+    std::string sequence;
+};
 
-using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber, Identifier, CharacterConstant>;
+using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber, Identifier, CharacterConstant, HeaderName>;
 
 } // namespace Token
 
@@ -54,6 +58,8 @@ struct Token : public TokenType::Base {
     inline operator TokenType::PPNumber(){return std::get<TokenType::PPNumber>(*this);}
     inline operator TokenType::Identifier(){return std::get<TokenType::Identifier>(*this);}
     inline operator TokenType::CharacterConstant(){return std::get<TokenType::CharacterConstant>(*this);}
+    inline operator TokenType::HeaderName(){return std::get<TokenType::HeaderName>(*this);}
+
     SourcePos pos;
 };
 
