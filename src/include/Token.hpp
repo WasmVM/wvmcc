@@ -35,7 +35,10 @@ struct Identifier {
 struct CharacterConstant {
     CharacterConstant(std::string sequence);
     std::variant<int, wchar_t, char16_t, char32_t> value;
-    std::string sequence;
+};
+struct StringLiteral {
+    StringLiteral(std::string sequence);
+    std::variant<std::string, wchar_t, char16_t, char32_t> value;
 };
 struct HeaderName {
     HeaderName(std::string s) : sequence(s){};

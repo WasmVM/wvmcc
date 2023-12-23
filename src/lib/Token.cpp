@@ -18,8 +18,53 @@
 #include <Error.hpp>
 #include <regex>
 #include <sstream>
+#include <cctype>
 
 using namespace WasmVM;
+
+static std::ostream& print_char(std::ostream& os, int ch, int width = sizeof(char)){
+    if(ch == '\\'){
+        return os << "\\\\";
+    }else if(std::isprint(ch)){
+        return os << (char)ch;
+    }else{
+        switch(ch){
+            case '\t':
+                return os << "\\t";
+            break;
+            case '\n':
+                return os << "\\n";
+            break;
+            case '\v':
+                return os << "\\v";
+            break;
+            case '\f':
+                return os << "\\f";
+            break;
+            case '\r':
+                return os << "\\r";
+            break;
+            default:
+                os << "\\x";
+                bool non_zero = false;
+                for(int i = width * (CHAR_BIT / 4) - 1; i >= 0; --i){
+                    unsigned int c = (ch >> (4 * i)) & 0xf;
+                    if(c > 0){
+                        non_zero = true;
+                        if(c >= 10){
+                            os << (char)('a' + (c - 10));
+                        }else{
+                            os << c;
+                        }
+                    }else if(non_zero || (i == 0)){
+                        os << "0";
+                    }
+                }
+                return os;
+            break;
+        }
+    }
+}
 
 std::ostream& operator<<(std::ostream& os, Token& token){
     std::visit(overloaded {
@@ -184,7 +229,25 @@ std::ostream& operator<<(std::ostream& os, Token& token){
             os << tok.sequence;
         },
         [&](TokenType::CharacterConstant& tok){
-            os << tok.sequence;
+            std::visit(overloaded {
+                [&](int val){
+                    os << "'";
+                    print_char(os, val);
+                },
+                [&](wchar_t val){
+                    os << "L'";
+                    print_char(os, val, sizeof(wchar_t));
+                },
+                [&](char16_t val){
+                    os << "u'";
+                    print_char(os, val, sizeof(char16_t));
+                },
+                [&](char32_t val){
+                    os << "U'";
+                    print_char(os, val, sizeof(char32_t));
+                }
+            }, tok.value);
+            os << "'";
         },
         [&](TokenType::HeaderName& tok){
             os << tok.sequence;
@@ -209,7 +272,7 @@ double TokenType::PPNumber::get<double>(){
     return std::stod(sequence);
 }
 
-TokenType::CharacterConstant::CharacterConstant(std::string sequence) : sequence(sequence){
+TokenType::CharacterConstant::CharacterConstant(std::string sequence){
     auto seq_it = sequence.begin();
     int width = sizeof(char);
     if(*seq_it != '\''){
@@ -249,7 +312,7 @@ TokenType::CharacterConstant::CharacterConstant(std::string sequence) : sequence
                 case '5':
                 case '6':
                 case '7':{
-                    uint8_t oc = 0;
+                    unsigned char oc = 0;
                     for(int c = 0; (c < 3) && (*seq_it >= '0') && (*seq_it <= '7'); ++c, ++seq_it){
                         oc = (oc << 3) + (*seq_it - '0');
                     }
