@@ -548,4 +548,33 @@ Suite pp_token {
         Expect(token.value().pos.line() == 7 && token.value().pos.col() == 1);
         Expect(std::get<std::u16string>(((TokenType::StringLiteral)token.value()).value) == u"\1a   \2b");
     })
+    Test("comment", {
+        PreProcessor pp(std::filesystem::path("comment.txt"));
+        std::optional<Token> token;
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        // Single line
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 7);
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        // Quoted
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 7);
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 19);
+        pp.get();
+        // Multiple lines
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 1);
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::PPNumber>(token.value()));
+        Expect(token.value().pos.line() == 5 && token.value().pos.col() == 3);
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::WhiteSpace>(token.value()));
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 1);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Aster);
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 20);
+        Expect((token = pp.get()) && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Slash);
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 21);
+    })
 };

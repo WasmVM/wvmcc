@@ -26,12 +26,6 @@ PreProcessor::PreProcessor(std::filesystem::path path){
     streams.emplace(path);
 }
 
-std::optional<Token> PreProcessor::get(){
-    std::optional<Token> token = streams.top().get();
-    // TODO:
-    return token;
-}
-
 PreProcessor::TokenStream::TokenStream(std::filesystem::path path) :
     source(path), state(LineState::unknown)
 {}
@@ -171,6 +165,22 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             wh = source.get();
         }
         source.unget();
+        return Token(TokenType::WhiteSpace(), pos);
+    }
+    // single line comment
+    if(ch == '/' && source.peek() == '/'){
+        while(ch != '\n'){
+            ch = source.get();
+        }
+        source.unget();
+        return Token(TokenType::WhiteSpace(), pos);
+    }
+    // multiple lines comment
+    if(ch == '/' && source.peek() == '*'){
+        while(!(ch == '*' && source.peek() == '/')){
+            ch = source.get();
+        }
+        source.get();
         return Token(TokenType::WhiteSpace(), pos);
     }
     // newline
@@ -676,4 +686,10 @@ std::optional<Token> PreProcessor::TokenStream::get(){
     }else{
         throw Exception::Error(pos, std::string("invalid source character ") + (char)ch);
     }
+}
+
+std::optional<Token> PreProcessor::get(){
+    std::optional<Token> token = streams.top().get();
+    // TODO:
+    return token;
 }

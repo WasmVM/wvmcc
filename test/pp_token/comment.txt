@@ -1,0 +1,6 @@
+"abcd"// single line
+"defg"/* quoted */"hijk"
+/*
+multiline
+*/123
+/* /* not nested */*/
