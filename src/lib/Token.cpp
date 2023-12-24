@@ -16,6 +16,7 @@
 #include <Token.hpp>
 #include <Util.hpp>
 #include <Error.hpp>
+#include <string>
 #include <regex>
 #include <sstream>
 #include <cctype>
@@ -23,28 +24,23 @@
 using namespace WasmVM;
 
 static std::ostream& print_char(std::ostream& os, int ch, int width = sizeof(char)){
-    if(ch == '\\'){
-        return os << "\\\\";
-    }else if(std::isprint(ch)){
-        return os << (char)ch;
-    }else{
-        switch(ch){
-            case '\t':
-                return os << "\\t";
-            break;
-            case '\n':
-                return os << "\\n";
-            break;
-            case '\v':
-                return os << "\\v";
-            break;
-            case '\f':
-                return os << "\\f";
-            break;
-            case '\r':
-                return os << "\\r";
-            break;
-            default:
+    switch(ch){
+        case '\\':
+            return os << "\\\\";
+        case '\t':
+            return os << "\\t";
+        case '\n':
+            return os << "\\n";
+        case '\v':
+            return os << "\\v";
+        case '\f':
+            return os << "\\f";
+        case '\r':
+            return os << "\\r";
+        default:
+            if(std::isprint(ch)){
+                return os << (char)ch;
+            }else{
                 os << "\\x";
                 bool non_zero = false;
                 for(int i = width * (CHAR_BIT / 4) - 1; i >= 0; --i){
@@ -59,11 +55,114 @@ static std::ostream& print_char(std::ostream& os, int ch, int width = sizeof(cha
                     }else if(non_zero || (i == 0)){
                         os << "0";
                     }
+
                 }
                 return os;
+            }
+    }
+}
+
+static uintmax_t retrieve_char(std::string::iterator& seq_it){
+    uintmax_t char_val = 0;
+    if(*seq_it == '\\'){
+        // escape
+        ++seq_it;
+        switch(*seq_it){
+            // Octal
+            case '0':
+            case '1':
+            case '2':
+            case '3':
+            case '4':
+            case '5':
+            case '6':
+            case '7':{
+                unsigned char oc = 0;
+                for(int c = 0; (c < 3) && (*seq_it >= '0') && (*seq_it <= '7'); ++c, ++seq_it){
+                    oc = (oc << 3) + (*seq_it - '0');
+                }
+                char_val = oc;
+            }break;
+            case 'x':{
+                ++seq_it;
+                for(int c = 0; (c < CHAR_BIT / 4) && std::isxdigit(*seq_it); ++c, ++seq_it){
+                    int lower = std::tolower(*seq_it);
+                    char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
+                }
+            }break;
+            case '\'':
+                char_val = '\'';
+                ++seq_it;
+            break;
+            case '\"':
+                char_val = '\"';
+                ++seq_it;
+            break;
+            case '\?':
+                char_val = '\?';
+                ++seq_it;
+            break;
+            case '\\':
+                char_val = '\\';
+                ++seq_it;
+            break;
+            case 'a':
+                char_val = '\a';
+                ++seq_it;
+            break;
+            case 'b':
+                char_val = '\b';
+                ++seq_it;
+            break;
+            case 'f':
+                char_val = '\f';
+                ++seq_it;
+            break;
+            case 'n':
+                char_val = '\n';
+                ++seq_it;
+            break;
+            case 'r':
+                char_val = '\r';
+                ++seq_it;
+            break;
+            case 't':
+                char_val = '\t';
+                ++seq_it;
+            break;
+            case 'v':
+                char_val = '\v';
+                ++seq_it;
+            break;
+            // universal character names
+            case 'u':
+                for(int i = 0; i < 4; ++i){
+                    ++seq_it;
+                    if(std::isxdigit(*seq_it)){
+                        int lower = std::tolower(*seq_it);
+                        char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
+                    }else{
+                        throw Exception::Exception("invalid universal character name");
+                    }
+                }
+            break;
+            case 'U':
+                for(int i = 0; i < 8; ++i){
+                    ++seq_it;
+                    if(std::isxdigit(*seq_it)){
+                        int lower = std::tolower(*seq_it);
+                        char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
+                    }else{
+                        throw Exception::Exception("invalid universal character name");
+                    }
+                }
             break;
         }
+    }else{
+        char_val = *seq_it;
+        ++seq_it;
     }
+    return char_val;
 }
 
 std::ostream& operator<<(std::ostream& os, Token& token){
@@ -252,6 +351,41 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         [&](TokenType::HeaderName& tok){
             os << tok.sequence;
         },
+        [&](TokenType::StringLiteral& tok){
+            std::visit(overloaded {
+                [&](std::string str){
+                    os << "\"";
+                    for(char ch : str){
+                        print_char(os, ch, sizeof(char));
+                    }
+                },
+                [&](std::u8string str){
+                    os << "u8\"";
+                    for(char8_t ch : str){
+                        print_char(os, ch, sizeof(char8_t));
+                    }
+                },
+                [&](std::wstring str){
+                    os << "L\"";
+                    for(wchar_t ch : str){
+                        print_char(os, ch, sizeof(wchar_t));
+                    }
+                },
+                [&](std::u16string str){
+                    os << "u\"";
+                    for(wchar_t ch : str){
+                        print_char(os, ch, sizeof(char16_t));
+                    }
+                },
+                [&](std::u32string str){
+                    os << "U\"";
+                    for(wchar_t ch : str){
+                        print_char(os, ch, sizeof(char32_t));
+                    }
+                }
+            }, tok.value);
+            os << "\"";
+        },
     }, token);
     return os;
 }
@@ -298,106 +432,7 @@ TokenType::CharacterConstant::CharacterConstant(std::string sequence){
     }
     uintmax_t val = 0;
     for(int w = 0; w < width && *seq_it != '\''; ++w){
-        uintmax_t char_val = 0;
-        if(*seq_it == '\\'){
-            // escape
-            ++seq_it;
-            switch(*seq_it){
-                // Octal
-                case '0':
-                case '1':
-                case '2':
-                case '3':
-                case '4':
-                case '5':
-                case '6':
-                case '7':{
-                    unsigned char oc = 0;
-                    for(int c = 0; (c < 3) && (*seq_it >= '0') && (*seq_it <= '7'); ++c, ++seq_it){
-                        oc = (oc << 3) + (*seq_it - '0');
-                    }
-                    char_val = oc;
-                }break;
-                case 'x':{
-                    ++seq_it;
-                    for(int c = 0; (c < CHAR_BIT / 4) && std::isxdigit(*seq_it); ++c, ++seq_it){
-                        int lower = std::tolower(*seq_it);
-                        char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
-                    }
-                }break;
-                case '\'':
-                    char_val = '\'';
-                    ++seq_it;
-                break;
-                case '\"':
-                    char_val = '\"';
-                    ++seq_it;
-                break;
-                case '\?':
-                    char_val = '\?';
-                    ++seq_it;
-                break;
-                case '\\':
-                    char_val = '\\';
-                    ++seq_it;
-                break;
-                case 'a':
-                    char_val = '\a';
-                    ++seq_it;
-                break;
-                case 'b':
-                    char_val = '\b';
-                    ++seq_it;
-                break;
-                case 'f':
-                    char_val = '\f';
-                    ++seq_it;
-                break;
-                case 'n':
-                    char_val = '\n';
-                    ++seq_it;
-                break;
-                case 'r':
-                    char_val = '\r';
-                    ++seq_it;
-                break;
-                case 't':
-                    char_val = '\t';
-                    ++seq_it;
-                break;
-                case 'v':
-                    char_val = '\v';
-                    ++seq_it;
-                break;
-                // universal character names
-                case 'u':
-                    for(int i = 0; i < 4; ++i){
-                        ++seq_it;
-                        if(std::isxdigit(*seq_it)){
-                            int lower = std::tolower(*seq_it);
-                            char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
-                        }else{
-                            throw Exception::Exception("invalid universal character name");
-                        }
-                    }
-                break;
-                case 'U':
-                    for(int i = 0; i < 8; ++i){
-                        ++seq_it;
-                        if(std::isxdigit(*seq_it)){
-                            int lower = std::tolower(*seq_it);
-                            char_val = (char_val << 4) + (std::isdigit(lower) ? (lower - '0') : (lower - 'a' + 10));
-                        }else{
-                            throw Exception::Exception("invalid universal character name");
-                        }
-                    }
-                break;
-            }
-        }else{
-            char_val = *seq_it;
-            ++seq_it;
-        }
-        val = (val << CHAR_BIT) + (char_val & ((1 << CHAR_BIT) - 1));
+        val = (val << CHAR_BIT) + (retrieve_char(seq_it) & ((1 << CHAR_BIT) - 1));
     }
     if(*seq_it != '\''){
         Exception::Warning("charecters exceed charecter constant range are discarded");
@@ -415,5 +450,62 @@ TokenType::CharacterConstant::CharacterConstant(std::string sequence){
         default:
             value.emplace<int>(val);
         break;
+    }
+}
+
+enum class StringPrefix {
+    none, L, u, u8, U
+};
+
+TokenType::StringLiteral::StringLiteral(std::string sequence){
+    auto seq_it = sequence.begin();
+    int width = sizeof(char);
+    if(*seq_it != '\"'){
+        switch(*seq_it){
+            case 'L':
+                width = sizeof(wchar_t);
+                value.emplace<std::wstring>();
+            break;
+            case 'u':
+                if(seq_it[1] == '8'){
+                    width = sizeof(char8_t);
+                    value.emplace<std::u8string>();
+                    ++seq_it;
+                }else{
+                    width = sizeof(char16_t);
+                    value.emplace<std::u16string>();
+                }
+            break;
+            case 'U':
+                width = sizeof(char32_t);
+                value.emplace<std::u32string>();
+            break;
+            default:
+                throw Exception::Exception("unknown string literal prefix");
+            break;
+        }
+        ++seq_it;
+    }else{
+        value.emplace<std::string>();
+    }
+    ++seq_it;
+    while(*seq_it != '\"'){
+        std::visit(overloaded {
+            [&](std::string& str){
+                str += (char)retrieve_char(seq_it);
+            },
+            [&](std::wstring& str){
+                str += (wchar_t)retrieve_char(seq_it);
+            },
+            [&](std::u8string& str){
+                str += (char8_t)retrieve_char(seq_it);
+            },
+            [&](std::u16string& str){
+                str += (char16_t)retrieve_char(seq_it);
+            },            
+            [&](std::u32string& str){
+                str += (char32_t)retrieve_char(seq_it);
+            }
+        }, value);
     }
 }

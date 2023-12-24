@@ -499,6 +499,14 @@ Suite pp_token {
         Expect((token = pp.get()) && std::holds_alternative<TokenType::CharacterConstant>(token.value()));
         Expect(token.value().pos.line() == 19 && token.value().pos.col() == 1);
         Expect(std::get<int>(((TokenType::CharacterConstant)token.value()).value) == '\U00000030');
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::CharacterConstant>(token.value()));
+        Expect(token.value().pos.line() == 20 && token.value().pos.col() == 1);
+        Expect(std::get<int>(((TokenType::CharacterConstant)token.value()).value) == '\033');
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::CharacterConstant>(token.value()));
+        Expect(token.value().pos.line() == 21 && token.value().pos.col() == 1);
+        Expect(std::get<int>(((TokenType::CharacterConstant)token.value()).value) == '\x1a');
     })
     Test("header_name", {
         PreProcessor pp(std::filesystem::path("header_name.txt"));
@@ -508,5 +516,36 @@ Suite pp_token {
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 10);
         Expect(((TokenType::HeaderName)token.value()).sequence == "\"test.h\"");
         pp.get();
+    })
+    Test("string_literal", {
+        PreProcessor pp(std::filesystem::path("string_literal.txt"));
+        std::optional<Token> token;
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
+        Expect(std::get<std::string>(((TokenType::StringLiteral)token.value()).value) == "abcd");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        Expect(std::get<std::string>(((TokenType::StringLiteral)token.value()).value) == "a\\b\tc\nd");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 1);
+        Expect(std::get<std::u8string>(((TokenType::StringLiteral)token.value()).value) == u8"qwer");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
+        Expect(std::get<std::u16string>(((TokenType::StringLiteral)token.value()).value) == u"\01a\01b");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 5 && token.value().pos.col() == 1);
+        Expect(std::get<std::wstring>(((TokenType::StringLiteral)token.value()).value) == L"\1a\2b");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 1);
+        Expect(std::get<std::u32string>(((TokenType::StringLiteral)token.value()).value) == U"\1a\2b");
+        pp.get();
+        Expect((token = pp.get()) && std::holds_alternative<TokenType::StringLiteral>(token.value()));
+        Expect(token.value().pos.line() == 7 && token.value().pos.col() == 1);
+        Expect(std::get<std::u16string>(((TokenType::StringLiteral)token.value()).value) == u"\1a   \2b");
     })
 };

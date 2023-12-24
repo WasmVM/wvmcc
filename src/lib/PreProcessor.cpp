@@ -218,7 +218,36 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             return Token(TokenType::HeaderName(sequence), pos);
         }
     }
-    // TODO: string literal
+    // string literal
+    if((ch == '\"') ||
+        ((ch == 'L' || ch == 'U') && (source.peek() == '\"')) ||
+        (ch == 'u' && (source.peek() == '\"' || source.peek() == '8'))
+    ){
+        state = LineState::normal;
+        std::string sequence;
+        sequence += ch;
+        if(ch != '\"'){
+            if(ch == 'u' && source.peek() == '8'){
+                sequence += source.get();
+            }
+            ch = source.get();
+            sequence += ch;
+        }
+        ch = source.get();
+        while(ch != '\"'){
+            sequence += ch;
+            if(ch == '\\'){
+                escape_sequence(ch, source, sequence, pos);
+            }else{
+                ch = source.get();
+            }
+            if(ch == SourceFile::traits_type::eof() || ch == '\n'){
+                throw Exception::Error(pos, "unclosed string literal");
+            }
+        }
+        sequence += ch;
+        return Token(TokenType::StringLiteral(sequence), pos);
+    }
     // Character constant
     if((ch == '\'') || ((ch == 'L' || ch == 'u' || ch == 'U') && (source.peek() == '\''))){
         state = LineState::normal;
@@ -236,7 +265,7 @@ std::optional<Token> PreProcessor::TokenStream::get(){
             }else{
                 ch = source.get();
             }
-            if(ch == SourceFile::traits_type::eof()){
+            if(ch == SourceFile::traits_type::eof() || ch == '\n'){
                 throw Exception::Error(pos, "unclosed character constant");
             }
         }
