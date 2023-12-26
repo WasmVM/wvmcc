@@ -17,6 +17,7 @@
 
 #include <cctype>
 #include <string>
+#include <sstream>
 #include <regex>
 #include <Error.hpp>
 
@@ -152,6 +153,12 @@ static bool is_source_character(SourceFile::int_type& ch){
         default:
             return false;
         break;
+    }
+}
+
+void PreProcessor::skip_whitespace(std::optional<Token>& token){
+    while(token && std::holds_alternative<TokenType::WhiteSpace>(token.value())){
+        token = streams.top().get();
     }
 }
 
@@ -688,8 +695,77 @@ std::optional<Token> PreProcessor::TokenStream::get(){
     }
 }
 
+void PreProcessor::error_directive(std::optional<Token>& token){
+    auto pos = token.value().pos;
+    token = streams.top().get();
+    skip_whitespace(token);
+    if(token && std::holds_alternative<TokenType::StringLiteral>(token.value())
+        && std::holds_alternative<std::string>(((TokenType::StringLiteral)token.value()).value)){
+        throw Exception::Error(pos, std::get<std::string>(((TokenType::StringLiteral)token.value()).value));
+    }else{
+        throw Exception::Error(pos, "");
+    }
+}
+
 std::optional<Token> PreProcessor::get(){
-    std::optional<Token> token = streams.top().get();
-    // TODO:
-    return token;
+    while(!streams.empty()){
+        std::optional<Token> token = streams.top().get();
+        do{
+            skip_whitespace(token);
+            if(token){
+                // newline
+                if(std::holds_alternative<TokenType::NewLine>(token.value())){
+                    is_text = false;
+                    token = streams.top().get();
+                }else if(is_text){
+                    // text line
+                    return token;
+                }else{
+                    if(std::holds_alternative<TokenType::Punctuator>(token.value()) &&
+                        ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Hash
+                    ){
+                        token = streams.top().get();
+                        if(std::holds_alternative<TokenType::NewLine>(token.value())){
+                            // Empty directive
+                            is_text = false;
+                            token = streams.top().get();
+                        }else if(std::holds_alternative<TokenType::Identifier>(token.value())){
+                            // Directive
+                            TokenType::Identifier& identifier = std::get<TokenType::Identifier>(token.value());
+                            if(identifier.sequence == "if"){
+                                
+                            }else if(identifier.sequence == "ifdef"){
+                                
+                            }else if(identifier.sequence == "ifndef"){
+                                
+                            }else if(identifier.sequence == "elif"){
+                                
+                            }else if(identifier.sequence == "else"){
+                                
+                            }else if(identifier.sequence == "endif"){
+                                
+                            }else if(identifier.sequence == "define"){
+                                
+                            }else if(identifier.sequence == "undef"){
+                                
+                            }else if(identifier.sequence == "line"){
+                                
+                            }else if(identifier.sequence == "error"){
+                                error_directive(token);
+                            }else if(identifier.sequence == "pragma"){
+                                
+                            }
+                        }else{
+                            throw Exception::Error(token.value().pos, "Invalid preprocessor directive");
+                        }
+                    }else{
+                        is_text = true;
+                        return token;
+                    }
+                }
+            }
+        }while(token);
+        streams.pop();
+    }
+    return std::nullopt;
 }

@@ -48,7 +48,7 @@ struct HeaderName {
 using Base = std::variant<
     Punctuator, NewLine, WhiteSpace, PPNumber, Identifier, CharacterConstant, HeaderName, StringLiteral>;
 
-} // namespace Token
+} // namespace TokenType
 
 
 struct Token : public TokenType::Base {

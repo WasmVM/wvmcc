@@ -27,9 +27,13 @@ struct PreProcessor {
     };
 
     std::optional<Token> get();
+    bool is_text = false;
 
 private:
     std::stack<TokenStream> streams;
+    void skip_whitespace(std::optional<Token>& token);
+    void if_directive(std::optional<Token>& token);
+    void error_directive(std::optional<Token>& token);
 };
 
 } // namespace WasmVM
