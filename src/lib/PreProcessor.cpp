@@ -19,6 +19,8 @@
 #include <string>
 #include <sstream>
 #include <regex>
+#include <set>
+#include <list>
 #include <Error.hpp>
 
 using namespace WasmVM;
@@ -163,10 +165,15 @@ void PreProcessor::skip_whitespace(std::optional<Token>& token){
 }
 
 std::optional<Token> PreProcessor::TokenStream::get(){
+    if(!buffer.empty()){
+        Token token = buffer.front();
+        buffer.pop_front();
+        return token;
+    }
     auto ch = source.get();
     auto pos = source.position();
     // whitespace
-    if(ch == ' ' || ch == '\t' || ch == 'v' || ch == 'f'){
+    if(ch == ' ' || ch == '\t' || ch == '\v' || ch == '\f'){
         auto wh = source.get();
         while(wh == ' ' || wh == '\t' || wh == '\v' || wh == '\f'){
             wh = source.get();
@@ -707,6 +714,50 @@ void PreProcessor::error_directive(std::optional<Token>& token){
     }
 }
 
+void PreProcessor::define_directive(std::optional<Token>& token){
+    auto pos = token.value().pos;
+    // name
+    token = streams.top().get();
+    skip_whitespace(token);
+    if(!(token && std::holds_alternative<TokenType::Identifier>(token.value()))){
+        throw Exception::Error(pos, "expected identifier for macro name");
+    }
+    Macro& macro = macros.emplace_back();
+    macro.name = ((TokenType::Identifier)token.value()).sequence;
+    // parameters
+    token = streams.top().get();
+    if(token && std::holds_alternative<TokenType::Punctuator>(token.value())
+        && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_L
+    ){
+        token = streams.top().get();
+        while(token && std::holds_alternative<TokenType::Identifier>(token.value())){
+            macro.params.emplace_back(((TokenType::Identifier)token.value()).sequence);
+            token = streams.top().get();
+            if(token){
+                if(std::holds_alternative<TokenType::Punctuator>(token.value())){
+                    TokenType::Punctuator::Type punc = ((TokenType::Punctuator)token.value()).type;
+                    if(punc == TokenType::Punctuator::Comma){
+                        continue;
+                    }else if(punc == TokenType::Punctuator::Paren_R){
+                        token = streams.top().get();
+                        break;
+                    }else{
+                        throw Exception::Error(pos, "unexpected token in macro parameter list");
+                    }
+                }
+            }else{
+                throw Exception::Error(pos, "unclosed parameter list in macro definition");
+            }
+        }
+    }
+    // replacements
+    skip_whitespace(token);
+    while(token && !std::holds_alternative<TokenType::NewLine>(token.value())){
+        macro.replacement.emplace_back(token.value());
+        token = streams.top().get();
+    }
+}
+
 std::optional<Token> PreProcessor::get(){
     while(!streams.empty()){
         std::optional<Token> token = streams.top().get();
@@ -718,8 +769,7 @@ std::optional<Token> PreProcessor::get(){
                     is_text = false;
                     token = streams.top().get();
                 }else if(is_text){
-                    // text line
-                    return token;
+                    return replace_macro(token, streams.top().buffer);
                 }else{
                     if(std::holds_alternative<TokenType::Punctuator>(token.value()) &&
                         ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Hash
@@ -745,7 +795,8 @@ std::optional<Token> PreProcessor::get(){
                             }else if(identifier.sequence == "endif"){
                                 
                             }else if(identifier.sequence == "define"){
-                                
+                                define_directive(token);
+                                token = streams.top().get();
                             }else if(identifier.sequence == "undef"){
                                 
                             }else if(identifier.sequence == "line"){
@@ -760,7 +811,7 @@ std::optional<Token> PreProcessor::get(){
                         }
                     }else{
                         is_text = true;
-                        return token;
+                        return replace_macro(token, streams.top().buffer);
                     }
                 }
             }
@@ -768,4 +819,43 @@ std::optional<Token> PreProcessor::get(){
         streams.pop();
     }
     return std::nullopt;
+}
+
+std::optional<Token>& PreProcessor::replace_macro(std::optional<Token>& token, std::deque<Token>& buffer){
+    if(token && std::holds_alternative<TokenType::Identifier>(token.value())){
+        std::set<std::string> expanded;
+        std::list<Token> line(1, token.value());
+        for(std::list<Token>::iterator cur = line.begin(); cur != line.end();){
+            bool is_expanded = false;
+            if(std::holds_alternative<TokenType::Identifier>(*cur)){
+                // Get identifier
+                TokenType::Identifier identifier = std::get<TokenType::Identifier>(*cur);
+                // Iterate through macro
+                for(Macro macro : macros){
+                    if(identifier.sequence == macro.name){
+                        is_expanded = true;
+                        if(macro.params.empty()){
+                            // Object like macro
+                            std::list<Token>::iterator saved = cur;
+                            cur = std::next(cur);
+                            line.erase(saved);
+                            cur = line.insert(cur, macro.replacement.begin(), macro.replacement.end());
+                            break;
+                        }else{
+                            // TODO: Function like macro
+                        }
+                    }
+                }
+            }
+            if(!is_expanded){
+                cur = std::next(cur);
+            }
+        }
+        token = line.front();
+        line.pop_front();
+        if(!line.empty()){
+            buffer.insert(buffer.end(), line.begin(), line.end());
+        }
+    }
+    return token;
 }
