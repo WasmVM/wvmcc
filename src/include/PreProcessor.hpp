@@ -5,6 +5,10 @@
 #include <stack>
 #include <string>
 #include <vector>
+#include <list>
+#include <type_traits>
+#include <functional>
+#include <unordered_set>
 #include <utility>
 #include <iterator>
 #include <optional>
@@ -15,11 +19,34 @@ namespace WasmVM {
 
 struct PreProcessor {
 
-    PreProcessor(std::filesystem::path path);
+    struct PPToken : public std::optional<Token> {
 
-    struct TokenStream {
+        PPToken(std::nullopt_t n = std::nullopt) : std::optional<Token>(){}
+        PPToken(Token&& token) : std::optional<Token>(token){}
+
+        template<typename T> requires TokenType::is_valid<T>::value
+        inline bool hold() {
+            return has_value() && std::holds_alternative<T>(value());
+        }
+    };
+
+    PreProcessor(std::filesystem::path path);
+    PPToken get();
+
+private:
+
+    struct PPStream {
+        virtual PPToken get() = 0;
+    };
+
+    struct LineStream : public PPStream {
+        PPToken get();
+        std::list<Token> buffer;
+    };
+
+    struct TokenStream : public PPStream {
         TokenStream(std::filesystem::path path);
-        std::optional<Token> get();
+        PPToken get();
         std::deque<Token> buffer;
     private:
         SourceFile source;
@@ -32,31 +59,46 @@ struct PreProcessor {
     };
 
     struct Macro {
+
         std::string name;
         std::vector<std::string> params;
         std::vector<Token> replacement;
+        inline operator std::string(){
+            return name;
+        }
+
+        bool operator==(const Macro& op) const;
+
+        struct Hash {
+            std::size_t operator()(const Macro& macro) const{
+                return std::hash<std::string>{}(macro.name);
+            }
+        };
+
+        struct NameEqual {
+            constexpr bool operator()(const Macro& lhs, const Macro& rhs) const{
+                return lhs.name == rhs.name;
+            }
+        };
     };
 
-    std::optional<Token> get();
-    std::vector<Macro> macros;
-
-private:
     bool is_text = false;
     std::stack<TokenStream> streams;
+    std::unordered_set<Macro, Macro::Hash, Macro::NameEqual> macros;
 
-    void skip_whitespace(std::optional<Token>& token);
-    std::optional<Token>& replace_macro(std::optional<Token>& token, std::deque<Token>& buffer);
+    void skip_whitespace(PPToken& token);
+    PPToken& replace_macro(PPToken& token, TokenStream& stream);
 
-    void if_directive(std::optional<Token>& token); // TODO:
-    void elif_directive(std::optional<Token>& token); // TODO:
-    void else_directive(std::optional<Token>& token); // TODO:
-    void endif_directive(std::optional<Token>& token); // TODO:
-    void define_directive(std::optional<Token>& token);
-    void undef_directive(std::optional<Token>& token); // TODO:
-    void pragma_directive(std::optional<Token>& token); // TODO:
-    void include_directive(std::optional<Token>& token); // TODO:
-    void line_directive(std::optional<Token>& token); // TODO:
-    void error_directive(std::optional<Token>& token);
+    void if_directive(PPToken& token); // TODO:
+    void elif_directive(PPToken& token); // TODO:
+    void else_directive(PPToken& token); // TODO:
+    void endif_directive(PPToken& token); // TODO:
+    void define_directive(PPToken& token);
+    void undef_directive(PPToken& token); // TODO:
+    void pragma_directive(PPToken& token); // TODO:
+    void include_directive(PPToken& token); // TODO:
+    void line_directive(PPToken& token); // TODO:
+    void error_directive(PPToken& token);
 };
 
 } // namespace WasmVM

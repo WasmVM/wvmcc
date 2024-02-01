@@ -158,13 +158,13 @@ static bool is_source_character(SourceFile::int_type& ch){
     }
 }
 
-void PreProcessor::skip_whitespace(std::optional<Token>& token){
-    while(token && std::holds_alternative<TokenType::WhiteSpace>(token.value())){
+void PreProcessor::skip_whitespace(PPToken& token){
+    while(token.hold<TokenType::WhiteSpace>()){
         token = streams.top().get();
     }
 }
 
-std::optional<Token> PreProcessor::TokenStream::get(){
+PreProcessor::PPToken PreProcessor::TokenStream::get(){
     if(!buffer.empty()){
         Token token = buffer.front();
         buffer.pop_front();
@@ -702,7 +702,29 @@ std::optional<Token> PreProcessor::TokenStream::get(){
     }
 }
 
-void PreProcessor::error_directive(std::optional<Token>& token){
+PreProcessor::PPToken PreProcessor::LineStream::get(){
+    // TODO:
+    return std::nullopt;
+}
+
+bool PreProcessor::Macro::operator==(const Macro& op) const {
+    if((op.name != name) || (op.params.size() != params.size()) || (op.replacement.size() != replacement.size())){
+        return false;
+    }
+    for(auto op_it = op.params.begin(), it = params.begin(); op_it != op.params.end(); op_it = std::next(op_it)){
+        if(*op_it != *it){
+            return false;
+        }
+    }
+    for(auto op_it = op.replacement.begin(), it = replacement.begin(); op_it != op.replacement.end(); op_it = std::next(op_it)){
+        if(*op_it != *it){
+            return false;
+        }
+    }
+    return true;
+}
+
+void PreProcessor::error_directive(PPToken& token){
     auto pos = token.value().pos;
     token = streams.top().get();
     skip_whitespace(token);
@@ -714,31 +736,28 @@ void PreProcessor::error_directive(std::optional<Token>& token){
     }
 }
 
-void PreProcessor::define_directive(std::optional<Token>& token){
+void PreProcessor::define_directive(PPToken& token){
     auto pos = token.value().pos;
+    Macro macro;
     // name
     token = streams.top().get();
     skip_whitespace(token);
     if(!(token && std::holds_alternative<TokenType::Identifier>(token.value()))){
         throw Exception::Error(pos, "expected identifier for macro name");
     }
-    Macro& macro = macros.emplace_back();
     macro.name = ((TokenType::Identifier)token.value()).sequence;
     // parameters
     token = streams.top().get();
-    if(token && std::holds_alternative<TokenType::Punctuator>(token.value())
-        && ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Paren_L
-    ){
+    if(token == Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L))){
         token = streams.top().get();
         while(token && std::holds_alternative<TokenType::Identifier>(token.value())){
             macro.params.emplace_back(((TokenType::Identifier)token.value()).sequence);
             token = streams.top().get();
             if(token){
                 if(std::holds_alternative<TokenType::Punctuator>(token.value())){
-                    TokenType::Punctuator::Type punc = ((TokenType::Punctuator)token.value()).type;
-                    if(punc == TokenType::Punctuator::Comma){
+                    if(token.value() == TokenType::Punctuator(TokenType::Punctuator::Comma)){
                         continue;
-                    }else if(punc == TokenType::Punctuator::Paren_R){
+                    }else if(token.value() == TokenType::Punctuator(TokenType::Punctuator::Paren_R)){
                         token = streams.top().get();
                         break;
                     }else{
@@ -756,11 +775,20 @@ void PreProcessor::define_directive(std::optional<Token>& token){
         macro.replacement.emplace_back(token.value());
         token = streams.top().get();
     }
+
+    // Check redifinition
+    auto find_it = macros.find(macro);
+    if((find_it != macros.end()) && (*find_it != macro)){
+        Exception::Warning("existing macro redefined");
+    }
+
+    // Insert macro
+    macros.emplace(macro);
 }
 
-std::optional<Token> PreProcessor::get(){
+PreProcessor::PPToken PreProcessor::get(){
     while(!streams.empty()){
-        std::optional<Token> token = streams.top().get();
+        PPToken token = streams.top().get();
         do{
             skip_whitespace(token);
             if(token){
@@ -769,7 +797,7 @@ std::optional<Token> PreProcessor::get(){
                     is_text = false;
                     token = streams.top().get();
                 }else if(is_text){
-                    return replace_macro(token, streams.top().buffer);
+                    return replace_macro(token, streams.top());
                 }else{
                     if(std::holds_alternative<TokenType::Punctuator>(token.value()) &&
                         ((TokenType::Punctuator)token.value()).type == TokenType::Punctuator::Hash
@@ -811,7 +839,7 @@ std::optional<Token> PreProcessor::get(){
                         }
                     }else{
                         is_text = true;
-                        return replace_macro(token, streams.top().buffer);
+                        return replace_macro(token, streams.top());
                     }
                 }
             }
@@ -821,41 +849,49 @@ std::optional<Token> PreProcessor::get(){
     return std::nullopt;
 }
 
-std::optional<Token>& PreProcessor::replace_macro(std::optional<Token>& token, std::deque<Token>& buffer){
-    if(token && std::holds_alternative<TokenType::Identifier>(token.value())){
-        std::set<std::string> expanded;
-        std::list<Token> line(1, token.value());
-        for(std::list<Token>::iterator cur = line.begin(); cur != line.end();){
-            bool is_expanded = false;
-            if(std::holds_alternative<TokenType::Identifier>(*cur)){
-                // Get identifier
-                TokenType::Identifier identifier = std::get<TokenType::Identifier>(*cur);
-                // Iterate through macro
-                for(Macro macro : macros){
-                    if(identifier.sequence == macro.name){
-                        is_expanded = true;
-                        if(macro.params.empty()){
-                            // Object like macro
-                            std::list<Token>::iterator saved = cur;
-                            cur = std::next(cur);
-                            line.erase(saved);
-                            cur = line.insert(cur, macro.replacement.begin(), macro.replacement.end());
-                            break;
-                        }else{
-                            // TODO: Function like macro
-                        }
-                    }
-                }
-            }
-            if(!is_expanded){
-                cur = std::next(cur);
+PreProcessor::PPToken& PreProcessor::replace_macro(PPToken& token, TokenStream& stream){
+    if(token.hold<TokenType::Identifier>()){
+        // Check if identifier is macro name
+        for(Macro macro : macros){
+            // Found macro
+            if(token.value() == TokenType::Identifier(macro.name)){
+                LineStream line;
+                line.buffer.emplace_back(token.value());
             }
         }
-        token = line.front();
-        line.pop_front();
-        if(!line.empty()){
-            buffer.insert(buffer.end(), line.begin(), line.end());
-        }
+        // Consume arguments
+        std::optional<Token> next = stream.get();
+        // for(std::list<Token>::iterator cur = line.begin(); cur != line.end();){
+        //     bool modified = false;
+        //     if(std::holds_alternative<TokenType::Identifier>(*cur)){
+        //         // Get identifier
+        //         TokenType::Identifier identifier = std::get<TokenType::Identifier>(*cur);
+        //         // Iterate through macro
+        //         for(Macro macro : macros){
+        //             if(identifier.sequence == macro.name){
+        //                 modified = true;
+        //                 std::list<Token>::iterator next_cur = std::next(cur);
+        //                 line.erase(cur);
+        //                 if(macro.params.empty()){
+        //                     /* Object like macro */
+        //                     cur = line.insert(next_cur, macro.replacement.begin(), macro.replacement.end());
+        //                     break;
+        //                 }else{
+        //                     /* Function like macro */ 
+        //                     // Consume arguments
+        //                     if(next_cur == )
+        //                 }
+        //             }
+        //         }
+        //     }
+        //     if(!modified){
+        //         cur = std::next(cur);
+        //     }
+        // }
+        // token = line.buffer.front();
+        // if(line.buffer.size() > 1){
+        //     stream.buffer.insert(stream.buffer.end(), std::next(line.buffer.begin()), line.buffer.end());
+        // }
     }
     return token;
 }

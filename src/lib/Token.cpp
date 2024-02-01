@@ -509,3 +509,25 @@ TokenType::StringLiteral::StringLiteral(std::string sequence){
         }, value);
     }
 }
+
+bool TokenType::operator==(const NewLine&, const NewLine&){
+    return true;
+}
+bool TokenType::operator==(const WhiteSpace&, const WhiteSpace&){
+    return true;
+}
+bool TokenType::operator==(const PPNumber& a, const PPNumber& b){
+    return a.sequence == b.sequence;
+}
+bool TokenType::operator==(const Identifier& a, const Identifier& b){
+    return a.sequence == b.sequence;
+}
+bool TokenType::operator==(const CharacterConstant& a, const CharacterConstant& b){
+    return a.value == b.value;
+}
+bool TokenType::operator==(const StringLiteral& a, const StringLiteral& b){
+    return a.value == b.value;
+}
+bool TokenType::operator==(const HeaderName& a, const HeaderName& b){
+    return a.sequence == b.sequence;
+}
