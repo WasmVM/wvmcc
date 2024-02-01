@@ -10,6 +10,7 @@ macro(add_test_suite suite_name)
     WasmVM
     cc
   )
+  target_compile_definitions(${suite_name}_target PUBLIC CCTEST)
   set_target_properties(${suite_name}_target
     PROPERTIES OUTPUT_NAME ${suite_name}/${suite_name}
   )
@@ -24,3 +25,4 @@ endmacro(add_test_suite)
 
 add_test_suite(SourceFile)
 add_test_suite(pp_token)
+add_test_suite(pp_directive)

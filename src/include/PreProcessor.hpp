@@ -31,9 +31,12 @@ struct PreProcessor {
     };
 
     PreProcessor(std::filesystem::path path);
+    PreProcessor(std::filesystem::path path, std::string text);
     PPToken get();
 
+#ifndef CCTEST
 private:
+#endif
 
     struct PPStream {
         virtual PPToken get() = 0;
@@ -46,6 +49,7 @@ private:
 
     struct TokenStream : public PPStream {
         TokenStream(std::filesystem::path path);
+        TokenStream(std::filesystem::path path, std::string text);
         PPToken get();
         std::deque<Token> buffer;
     private:
@@ -61,7 +65,7 @@ private:
     struct Macro {
 
         std::string name;
-        std::vector<std::string> params;
+        std::optional<std::vector<std::string>> params;
         std::vector<Token> replacement;
         inline operator std::string(){
             return name;
@@ -88,6 +92,7 @@ private:
 
     void skip_whitespace(PPToken& token);
     PPToken& replace_macro(PPToken& token, TokenStream& stream);
+    PPToken& replace_macro(PPToken& token, LineStream& stream, std::vector<std::list<Token>> args);
 
     void if_directive(PPToken& token); // TODO:
     void elif_directive(PPToken& token); // TODO:
