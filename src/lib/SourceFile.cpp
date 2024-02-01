@@ -23,13 +23,7 @@ std::ostream& operator<<(std::ostream& os, SourcePos& pos){
     return os << pos.line() << ":" << pos.col();
 }
 
-SourceBuf::SourceBuf(const std::filesystem::path filename) : fin(filename)
-{
-}
-
-SourceBuf::~SourceBuf(){
-    fin.close();
-}
+SourceBuf::SourceBuf(std::istream& stream) : stream(stream){}
 SourceBuf* SourceBuf::setbuf(char_type* s, std::streamsize n){
     std::string_view view(s, n);
     buf.assign(view.begin(), view.end());
@@ -37,24 +31,24 @@ SourceBuf* SourceBuf::setbuf(char_type* s, std::streamsize n){
 }
 SourceBuf::pos_type SourceBuf::seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode){
     buf.clear();
-    fin.seekg(off, dir);
-    return fin.tellg();
+    stream.seekg(off, dir);
+    return stream.tellg();
 }
 SourceBuf::pos_type SourceBuf::seekpos(pos_type pos, std::ios_base::openmode){
     buf.clear();
-    fin.seekg(pos);
-    return fin.tellg();
+    stream.seekg(pos);
+    return stream.tellg();
 }
 int SourceBuf::sync(){
-    fin.seekg(-(off_type)buf.size(), std::ios::cur);
+    stream.seekg(-(off_type)buf.size(), std::ios::cur);
     buf.clear();
     return 0;
 }
 SourceBuf::int_type SourceBuf::pbackfail(int_type c){
     if(c == traits_type::eof()){
-        fin.seekg(-(off_type)(buf.size() + 1), std::ios::cur);
+        stream.seekg(-(off_type)(buf.size() + 1), std::ios::cur);
         buf.clear();
-        c = fin.get();
+        c = stream.get();
     }
     if(c == '\n' && pos.line() != 1){
         pos.line() -= 1;
@@ -67,7 +61,7 @@ SourceBuf::int_type SourceBuf::pbackfail(int_type c){
 SourceBuf::int_type SourceBuf::uflow(){
     int_type ch;
     if(buf.empty()){
-        ch = fin.get();
+        ch = stream.get();
     }else{
         ch = buf.front();
         buf.pop_front();
@@ -76,14 +70,14 @@ SourceBuf::int_type SourceBuf::uflow(){
         // Check trigraph
         int_type cur;
         if(buf.empty()){
-            cur = fin.get();
+            cur = stream.get();
         }else{
             cur = buf.front();
             buf.pop_front();
         }
         if(cur == '?'){
             if(buf.empty()){
-                cur = fin.get();
+                cur = stream.get();
             }else{
                 cur = buf.front();
                 buf.pop_front();
@@ -135,7 +129,7 @@ SourceBuf::int_type SourceBuf::uflow(){
     }else if(ch == '\\'){
         int_type next;
         if(buf.empty()){
-            next = fin.get();
+            next = stream.get();
         }else{
             next = buf.front();
             buf.pop_front();
@@ -157,24 +151,38 @@ SourceBuf::int_type SourceBuf::uflow(){
 }
 SourceBuf::int_type SourceBuf::underflow(){
     if(buf.empty()){
-        return fin.peek();
+        return stream.peek();
     }else{
         return buf.front();
     }
 }
 std::streamsize SourceBuf::showmanyc(){
-    auto pos = fin.tellg();
-    fin.seekg(0, std::ios::end);
-    std::streamsize result = (fin.tellg() - pos) + buf.size();
-    fin.seekg(pos);
+    auto pos = stream.tellg();
+    stream.seekg(0, std::ios::end);
+    std::streamsize result = (stream.tellg() - pos) + buf.size();
+    stream.seekg(pos);
     return result;
 }
 
+SourceFileBuf::SourceFileBuf(const std::filesystem::path filename) : SourceBuf(fin), fin(filename)
+{}
+SourceFileBuf::~SourceFileBuf(){
+    fin.close();
+}
+
+SourceTextBuf::SourceTextBuf(std::string source) : SourceBuf(tin), tin(source)
+{}
+
 SourceFile::SourceFile(const std::filesystem::path filename) :
-    path(filename), buffer(filename)
+    path(filename), buffer(new SourceFileBuf(filename))
 {
-    set_rdbuf(&buffer);
+    set_rdbuf(buffer.get());
+}
+SourceFile::SourceFile(const std::filesystem::path filename, std::string source) : 
+    path(filename), buffer(new SourceTextBuf(source))
+{
+    set_rdbuf(buffer.get());
 }
 SourcePos& SourceFile::position(){
-    return buffer.pos;
+    return buffer->pos;
 }

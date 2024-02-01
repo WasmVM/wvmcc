@@ -3,9 +3,11 @@
 
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <deque>
 #include <stack>
 #include <utility>
+#include <memory>
 
 namespace WasmVM {
 
@@ -16,12 +18,12 @@ struct SourcePos : public std::pair<size_t, size_t> {
 };
 
 class SourceBuf : public std::filebuf {
+    std::istream& stream;
+protected:
     std::deque<int_type> buf;
-    std::ifstream fin;
     SourcePos pos;
-
-    SourceBuf(const std::filesystem::path filename);
-    ~SourceBuf();
+    
+    SourceBuf(std::istream& stream);
     SourceBuf* setbuf(char_type* s, std::streamsize n);
     pos_type seekoff(off_type off, std::ios_base::seekdir dir, std::ios_base::openmode which = std::ios_base::in);
     pos_type seekpos(pos_type pos, std::ios_base::openmode which = std::ios_base::in);
@@ -34,12 +36,30 @@ class SourceBuf : public std::filebuf {
     friend class SourceFile;
 };
 
+class SourceFileBuf : public SourceBuf {
+    std::ifstream fin;
+
+    SourceFileBuf(const std::filesystem::path filename);
+    ~SourceFileBuf();
+
+    friend class SourceFile;
+};
+
+class SourceTextBuf : public SourceBuf {
+    std::istringstream tin;
+
+    SourceTextBuf(std::string source);
+
+    friend class SourceFile;
+};
+
 struct SourceFile : public std::ifstream {
     SourceFile(const std::filesystem::path filename);
+    SourceFile(const std::filesystem::path filename, std::string source);
     SourcePos& position();
     std::filesystem::path path;
 private:
-    SourceBuf buffer;
+    std::unique_ptr<SourceBuf> buffer;
 };
 
 }

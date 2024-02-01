@@ -21,7 +21,7 @@ using namespace Testing;
 
 Suite source_file {
     Test("normal", {
-        SourceFile source(std::filesystem::path("normal.txt"));
+        SourceFile source(std::filesystem::path("normal.c"), "test");
         Expect(source.get() == 't');
         Expect(source.position().line() == 1 && source.position().col() == 1);
         Expect(source.get() == 'e');
@@ -32,7 +32,7 @@ Suite source_file {
         Expect(source.position().line() == 1 && source.position().col() == 4);
     })
     Test("newline", {
-        SourceFile source(std::filesystem::path("newline.txt"));
+        SourceFile source(std::filesystem::path("newline.c"), "te\nst\n\na");
         Expect(source.get() == 't');
         Expect(source.position().line() == 1 && source.position().col() == 1);
         Expect(source.get() == 'e');
@@ -48,7 +48,7 @@ Suite source_file {
         Expect(source.position().line() == 4 && source.position().col() == 1);
     })
     Test("concat", {
-        SourceFile source(std::filesystem::path("concat.txt"));
+        SourceFile source(std::filesystem::path("concat.c"), "te\\\nst");
         Expect(source.get() == 't');
         Expect(source.position().line() == 1 && source.position().col() == 1);
         Expect(source.get() == 'e');
