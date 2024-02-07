@@ -28,9 +28,16 @@ Compiler::Compiler(std::vector<std::filesystem::path> include_paths) :
 WasmModule Compiler::compile(std::filesystem::path source_path){
     PreProcessor pp(source_path);
     // TODO:
-    for(auto tok = pp.get(); tok.has_value(); tok = pp.get()){
-        Token token = tok.value();
-        std::cout << token.pos << " " << token << std::endl;
+    for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
+        std::cout << tok->pos << " " << tok.value();
+        if(!tok.expanded.empty()){
+            std::cout << " (expand from: ";
+            for(std::string exp_macro : tok.expanded){
+                std::cout << exp_macro << " ";
+            }
+            std::cout << ")";
+        }
+        std::cout << std::endl;
     }
     return WasmModule(); // FIXME:
 }

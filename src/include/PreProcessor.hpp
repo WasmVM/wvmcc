@@ -8,6 +8,7 @@
 #include <list>
 #include <type_traits>
 #include <functional>
+#include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <iterator>
@@ -23,11 +24,14 @@ struct PreProcessor {
 
         PPToken(std::nullopt_t n = std::nullopt) : std::optional<Token>(){}
         PPToken(Token&& token) : std::optional<Token>(token){}
+        PPToken(Token& token) : std::optional<Token>(token){}
 
         template<typename T> requires TokenType::is_valid<T>::value
         inline bool hold() {
             return has_value() && std::holds_alternative<T>(value());
         }
+
+        std::unordered_set<std::string> expanded;
     };
 
     PreProcessor(std::filesystem::path path);
@@ -40,18 +44,25 @@ private:
 
     struct PPStream {
         virtual PPToken get() = 0;
+        std::list<PPToken> buffer;
+        std::list<PPToken>::iterator cur = buffer.begin();
     };
 
     struct LineStream : public PPStream {
+        LineStream() = default;
+
+        template<std::input_iterator InputIt>
+        LineStream(InputIt begin, InputIt end){
+            cur = buffer.insert(buffer.begin(), begin, end);
+        }
+
         PPToken get();
-        std::list<Token> buffer;
     };
 
     struct TokenStream : public PPStream {
         TokenStream(std::filesystem::path path);
         TokenStream(std::filesystem::path path, std::string text);
         PPToken get();
-        std::deque<Token> buffer;
     private:
         SourceFile source;
         enum class LineState : int{
@@ -66,33 +77,20 @@ private:
 
         std::string name;
         std::optional<std::vector<std::string>> params;
-        std::vector<Token> replacement;
+        std::vector<PPToken> replacement;
         inline operator std::string(){
             return name;
         }
 
         bool operator==(const Macro& op) const;
-
-        struct Hash {
-            std::size_t operator()(const Macro& macro) const{
-                return std::hash<std::string>{}(macro.name);
-            }
-        };
-
-        struct NameEqual {
-            constexpr bool operator()(const Macro& lhs, const Macro& rhs) const{
-                return lhs.name == rhs.name;
-            }
-        };
     };
 
     bool is_text = false;
     std::stack<TokenStream> streams;
-    std::unordered_set<Macro, Macro::Hash, Macro::NameEqual> macros;
+    std::unordered_map<std::string, Macro> macros;
 
-    void skip_whitespace(PPToken& token);
-    PPToken& replace_macro(PPToken& token, TokenStream& stream);
-    PPToken& replace_macro(PPToken& token, LineStream& stream, std::vector<std::list<Token>> args);
+    static void skip_whitespace(PPToken& token, PPStream& stream);
+    static bool replace_macro(PPToken& token, PPStream& stream, std::unordered_map<std::string, Macro> macro_map);
 
     void if_directive(PPToken& token); // TODO:
     void elif_directive(PPToken& token); // TODO:
