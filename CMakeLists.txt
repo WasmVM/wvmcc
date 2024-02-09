@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(wvmcc)
+project(wvmcc VERSION 0.0.1)
 set(PROJECT_ROOT ${CMAKE_CURRENT_LIST_DIR})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED 11)

@@ -882,9 +882,9 @@ void PreProcessor::perform_replace(LineStream& line, std::unordered_map<std::str
     std::list<PPToken>::iterator head = line.buffer.begin();
     for(PPToken line_token = line.get(); line_token; line_token = line.get()){
         if(replace_macro(line_token, line, macro_map)){
-            arg_line.buffer.erase(head, arg_line.cur);
+            line.buffer.erase(head, line.cur);
         }
-        head = arg_line.cur;
+        head = line.cur;
     }
 }
 

@@ -32,13 +32,17 @@
 #include <Linker.hpp>
 #include <Compiler.hpp>
 
+#ifndef WVMCC_VERSION
+#define WVMCC_VERSION "dev"
+#endif
+
 using namespace WasmVM;
 
 int main(int argc, const char* argv[]){
 
     // Parse argv
     CommandParser args(argc, argv, {
-        CommandParser::Optional("--version", "Show version", 0/*, "-v"*/),
+        CommandParser::Optional("--version", "Show version", "-v"),
         CommandParser::Optional("--output", "Output file name", 1, "-o"),
         CommandParser::Optional("--pp", "Preprocessor only", "-E"),
         CommandParser::Optional("--comp", "Compile only, do not assemble", "-S"),
@@ -50,6 +54,13 @@ int main(int argc, const char* argv[]){
     },
         "wasmvm-cc : C compiler for WasmVM"
     );
+
+    // Show version only
+    if(args["version"]){
+        std::cout << "wasmvm-cc version " << WVMCC_VERSION << std::endl;
+        return 0;
+    }
+
     // Warnings
     Exception::Warning::regist([](std::string message){
         std::cerr << COLOR_Warning ": " << message << std::endl;
