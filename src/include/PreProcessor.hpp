@@ -92,6 +92,7 @@ private:
 
     static void skip_whitespace(PPToken& token, PPStream& stream);
     static bool replace_macro(PPToken& token, PPStream& stream, std::unordered_map<std::string, Macro> macro_map);
+    static void perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map);
 
     void if_directive(PPToken& token); // TODO:
     void elif_directive(PPToken& token); // TODO:

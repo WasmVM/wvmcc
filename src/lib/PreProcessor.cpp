@@ -878,6 +878,16 @@ PreProcessor::PPToken PreProcessor::get(){
     return std::nullopt;
 }
 
+void PreProcessor::perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map){
+    std::list<PPToken>::iterator head = line.buffer.begin();
+    for(PPToken line_token = line.get(); line_token; line_token = line.get()){
+        if(replace_macro(line_token, line, macro_map)){
+            arg_line.buffer.erase(head, arg_line.cur);
+        }
+        head = arg_line.cur;
+    }
+}
+
 bool PreProcessor::replace_macro(PPToken& token, PPStream& stream, std::unordered_map<std::string, Macro> macros){
     if(token.hold<TokenType::Identifier>()){
         TokenType::Identifier identifier = token.value();
@@ -914,13 +924,7 @@ bool PreProcessor::replace_macro(PPToken& token, PPStream& stream, std::unordere
                             }
                         }
                         arg_line.cur = arg_line.buffer.begin();
-                        std::list<PPToken>::iterator head = arg_line.buffer.begin();
-                        for(PPToken line_token = arg_line.get(); line_token; line_token = arg_line.get()){
-                            if(replace_macro(line_token, arg_line, macros)){
-                                arg_line.buffer.erase(head, arg_line.cur);
-                            }
-                            head = arg_line.cur;
-                        }
+                        perform_replace(arg_line, macros);
                         args[param].assign(arg_line.buffer.begin(), arg_line.buffer.end());
                     }
                 }
@@ -950,13 +954,7 @@ bool PreProcessor::replace_macro(PPToken& token, PPStream& stream, std::unordere
                 tok.expanded.insert(macro.name);
             }
             // Replace line
-            std::list<PPToken>::iterator head = line.buffer.begin();
-            for(PPToken line_token = line.get(); line_token; line_token = line.get()){
-                if(replace_macro(line_token, line, macros)){
-                    line.buffer.erase(head, line.cur);
-                }
-                head = line.cur;
-            }
+            perform_replace(line, macros);
             // Join line
             stream.cur = stream.buffer.insert(stream.cur, line.buffer.begin(), line.buffer.end());
             token = *stream.cur;

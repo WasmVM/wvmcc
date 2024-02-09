@@ -63,12 +63,58 @@ Suite pp_macro {
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 20);
         Expect(((TokenType::Identifier)token.value()).sequence == "a");
         token = pp.get();
+
         Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
-        // Expect(token.value().pos.line() == 3 && token.value().pos.col() == 20);
-        // Expect(((TokenType::Identifier)token.value()).sequence == "int");
-        // Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
-        // Expect(token.value().pos.line() == 4 && token.value().pos.col() == 6);
-        // Expect(((TokenType::Identifier)token.value()).sequence == "bb");
-        // token = pp.get();
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 20);
+        Expect(((TokenType::Identifier)token.value()).sequence == "int");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 6);
+        Expect(((TokenType::Identifier)token.value()).sequence == "NAME");
+        token = pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 6);
+        Expect(((TokenType::Identifier)token.value()).sequence == "float");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 13);
+        Expect(((TokenType::Identifier)token.value()).sequence == "cc");
+        token = pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 7 && token.value().pos.col() == 20);
+        Expect(((TokenType::Identifier)token.value()).sequence == "struct");
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 20);
+        Expect(((TokenType::Identifier)token.value()).sequence == "int");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 8 && token.value().pos.col() == 6);
+        Expect(((TokenType::Identifier)token.value()).sequence == "dd");
+        token = pp.get();
+        token = pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 10 && token.value().pos.col() == 6);
+        Expect(((TokenType::Identifier)token.value()).sequence == "char");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 10 && token.value().pos.col() == 12);
+        Expect(((TokenType::Identifier)token.value()).sequence == "ee");
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 10 && token.value().pos.col() == 16);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "3");
+        token = pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 20);
+        Expect(((TokenType::Identifier)token.value()).sequence == "int");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 12 && token.value().pos.col() == 11);
+        Expect(((TokenType::Identifier)token.value()).sequence == "ff");
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 12 && token.value().pos.col() == 16);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "4");
+        token = pp.get();
     })
 };
