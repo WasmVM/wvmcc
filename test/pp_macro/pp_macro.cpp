@@ -53,4 +53,22 @@ Suite pp_macro {
         Expect(token.value().pos.line() == 4 && token.value().pos.col() == 13);
         Expect(((TokenType::PPNumber)token.value()).sequence == "4");
     })
+    Test("function-like", {
+        PreProcessor pp(std::filesystem::path("function_like.c"));
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 16);
+        Expect(((TokenType::Identifier)token.value()).sequence == "int");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 20);
+        Expect(((TokenType::Identifier)token.value()).sequence == "a");
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        // Expect(token.value().pos.line() == 3 && token.value().pos.col() == 20);
+        // Expect(((TokenType::Identifier)token.value()).sequence == "int");
+        // Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        // Expect(token.value().pos.line() == 4 && token.value().pos.col() == 6);
+        // Expect(((TokenType::Identifier)token.value()).sequence == "bb");
+        // token = pp.get();
+    })
 };

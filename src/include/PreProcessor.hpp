@@ -32,6 +32,7 @@ struct PreProcessor {
         }
 
         std::unordered_set<std::string> expanded;
+        bool skipped = false;
     };
 
     PreProcessor(std::filesystem::path path);
