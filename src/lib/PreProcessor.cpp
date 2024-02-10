@@ -772,7 +772,13 @@ void PreProcessor::define_directive(PPToken& token){
         macro.params.emplace();
         while(token.hold<TokenType::Identifier>() || token.hold<TokenType::Punctuator>()){
             if(token.hold<TokenType::Identifier>()){
-                macro.params.value().emplace_back(((TokenType::Identifier)token.value()).sequence);
+                std::string seq = ((TokenType::Identifier)token.value()).sequence;
+                if(seq == "__VA_ARGS__"){
+                    throw Exception::Error(token.value().pos, "__VA_ARGS__ is reserved for variable arguments");
+                }else if(std::find(macro.params->begin(), macro.params->end(), seq) != macro.params->end()){
+                    throw Exception::Error(token.value().pos, "duplicated macro parameter name");
+                }
+                macro.params.value().emplace_back(seq);
             }else{
                 if(token.value() != TokenType::Punctuator(TokenType::Punctuator::Comma)){
                     if(token.value() == TokenType::Punctuator(TokenType::Punctuator::Ellipsis)){
@@ -903,28 +909,27 @@ bool PreProcessor::replace_macro(PPToken& token, PPStream& stream, std::unordere
                     throw Exception::Error(token.value().pos, "expect '(' for function-like macro");
                 }
                 for(std::string param : macro.params.value()){
-                    if(param == "..."){
-                        // TODO: variable arguments
-                        break;
-                    }else{
-                        LineStream arg_line;
-                        int nest_level = 0;
-                        for(PPToken cur = stream.get(); nest_level > 0 || (cur != Token(TokenType::Punctuator(TokenType::Punctuator::Comma)) && cur != Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R))); cur = stream.get()){
-                            skip_whitespace(cur, stream);
-                            if(cur.has_value()){
-                                if(cur == Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L))){
-                                    nest_level += 1;
-                                }else if(cur == Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R))){
-                                    nest_level -= 1;
-                                }
-                                cur.skipped = true;
-                                arg_line.buffer.emplace_back(cur);
-                            }else{
-                                throw Exception::Error(token.value().pos, "invalid argument of function-like macro");
+                    LineStream arg_line;
+                    int nest_level = 0;
+                    for(PPToken cur = stream.get(); (nest_level > 0) || (((param == "...") || (cur != Token(TokenType::Punctuator(TokenType::Punctuator::Comma)))) && (cur != Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R)))); cur = stream.get()){
+                        skip_whitespace(cur, stream);
+                        if(cur.has_value()){
+                            if(cur == Token(TokenType::Punctuator(TokenType::Punctuator::Paren_L))){
+                                nest_level += 1;
+                            }else if(cur == Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R))){
+                                nest_level -= 1;
                             }
+                            cur.skipped = true;
+                            arg_line.buffer.emplace_back(cur);
+                        }else{
+                            throw Exception::Error(token.value().pos, "invalid argument of function-like macro");
                         }
-                        arg_line.cur = arg_line.buffer.begin();
-                        perform_replace(arg_line, macros);
+                    }
+                    arg_line.cur = arg_line.buffer.begin();
+                    perform_replace(arg_line, macros);
+                    if(param == "..."){
+                        args["__VA_ARGS__"].assign(arg_line.buffer.begin(), arg_line.buffer.end());
+                    }else{
                         args[param].assign(arg_line.buffer.begin(), arg_line.buffer.end());
                     }
                 }

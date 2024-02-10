@@ -10,3 +10,7 @@ foo4(dd)
 foo5(char, ee, 3)
 #define foo6(DEF, VAL) DEF = VAL;
 foo6(foo2(ff), 4)
+#define foo7(...) foo3(__VA_ARGS__)
+foo7(unsigned, gg)
+#define foo8(SP, ...) SP foo5(__VA_ARGS__)
+foo8(const, char, hh, 5)

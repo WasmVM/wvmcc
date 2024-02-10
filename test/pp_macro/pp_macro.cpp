@@ -116,5 +116,28 @@ Suite pp_macro {
         Expect(token.value().pos.line() == 12 && token.value().pos.col() == 16);
         Expect(((TokenType::PPNumber)token.value()).sequence == "4");
         token = pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 14 && token.value().pos.col() == 6);
+        Expect(((TokenType::Identifier)token.value()).sequence == "unsigned");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 14 && token.value().pos.col() == 16);
+        Expect(((TokenType::Identifier)token.value()).sequence == "gg");
+        token = pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 16 && token.value().pos.col() == 6);
+        Expect(((TokenType::Identifier)token.value()).sequence == "const");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 16 && token.value().pos.col() == 13);
+        Expect(((TokenType::Identifier)token.value()).sequence == "char");
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 16 && token.value().pos.col() == 19);
+        Expect(((TokenType::Identifier)token.value()).sequence == "hh");
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 16 && token.value().pos.col() == 23);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "5");
+        token = pp.get();
     })
 };
