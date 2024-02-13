@@ -165,6 +165,12 @@ static bool is_source_character(SourceFile::int_type& ch){
     }
 }
 
+static std::string trim(std::string str){
+    str.erase(str.find_last_not_of(" \t\v\f") + 1);
+    str.erase(0, str.find_first_not_of(" \t\v\f"));
+    return str;
+}
+
 void PreProcessor::skip_whitespace(PPToken& token, PPStream& stream){
     while(token.hold<TokenType::WhiteSpace>()){
         token = stream.get();
@@ -950,6 +956,29 @@ bool PreProcessor::replace_macro(PPToken& token, PPStream& stream, std::unordere
                         cur = line.buffer.insert(cur, arg.begin(), arg.end());
                         line.buffer.erase(pos);
                         continue;
+                    }
+                }else if(cur->hold<TokenType::Punctuator>() && (cur->value() == TokenType::Punctuator(TokenType::Punctuator::Hash))){
+                    std::list<PPToken>::iterator next = std::next(cur);
+                    while(next->hold<TokenType::WhiteSpace>()){
+                        next = std::next(next);
+                    }
+                    if(next->hold<TokenType::Identifier>() && args.contains(((TokenType::Identifier)next->value()).sequence)){
+                        line.buffer.erase(cur);
+                        std::list<PPToken>& arg = args[((TokenType::Identifier)next->value()).sequence];
+                        std::list<PPToken>::iterator pos = next;
+                        std::stringstream ss;
+                        for(PPToken& tok : arg){
+                            if(!tok.hold<TokenType::WhiteSpace>() && !tok.hold<TokenType::NewLine>()){
+                                ss << tok.value() << " ";
+                            }
+                        }
+                        std::string literal = std::regex_replace(trim(ss.str()), std::regex("\\\\"), "\\");
+                        literal = std::regex_replace(literal, std::regex("\""), "\\\"");
+                        cur = line.buffer.insert(pos, Token(TokenType::StringLiteral("\"" + literal + "\""), next->value().pos));
+                        line.buffer.erase(pos);
+                        continue;
+                    }else{
+                        throw Exception::Error(cur->value().pos, "'#' operator shall be followed by a parameter");
                     }
                 }
                 cur = std::next(cur);

@@ -331,18 +331,30 @@ std::ostream& operator<<(std::ostream& os, Token& token){
             std::visit(overloaded {
                 [&](int val){
                     os << "'";
+                    if(val == '\''){
+                        os << "\\";
+                    }
                     print_char(os, val);
                 },
                 [&](wchar_t val){
                     os << "L'";
+                    if(val == L'\''){
+                        os << "\\";
+                    }
                     print_char(os, val, sizeof(wchar_t));
                 },
                 [&](char16_t val){
                     os << "u'";
+                    if(val == u'\''){
+                        os << "\\";
+                    }
                     print_char(os, val, sizeof(char16_t));
                 },
                 [&](char32_t val){
                     os << "U'";
+                    if(val == U'\''){
+                        os << "\\";
+                    }
                     print_char(os, val, sizeof(char32_t));
                 }
             }, tok.value);
@@ -356,30 +368,45 @@ std::ostream& operator<<(std::ostream& os, Token& token){
                 [&](std::string str){
                     os << "\"";
                     for(char ch : str){
+                        if(ch == '\"'){
+                            os << "\\";
+                        }
                         print_char(os, ch, sizeof(char));
                     }
                 },
                 [&](std::u8string str){
                     os << "u8\"";
                     for(char8_t ch : str){
+                        if(ch == '\"'){
+                            os << "\\";
+                        }
                         print_char(os, ch, sizeof(char8_t));
                     }
                 },
                 [&](std::wstring str){
                     os << "L\"";
                     for(wchar_t ch : str){
+                        if(ch == L'\"'){
+                            os << "\\";
+                        }
                         print_char(os, ch, sizeof(wchar_t));
                     }
                 },
                 [&](std::u16string str){
                     os << "u\"";
-                    for(wchar_t ch : str){
+                    for(char16_t ch : str){
+                        if(ch == u'\"'){
+                            os << "\\";
+                        }
                         print_char(os, ch, sizeof(char16_t));
                     }
                 },
                 [&](std::u32string str){
                     os << "U\"";
-                    for(wchar_t ch : str){
+                    for(char32_t ch : str){
+                        if(ch == U'\"'){
+                            os << "\\";
+                        }
                         print_char(os, ch, sizeof(char32_t));
                     }
                 }
