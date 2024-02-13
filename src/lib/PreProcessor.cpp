@@ -974,7 +974,7 @@ bool PreProcessor::replace_macro(PPToken& token, PPStream& stream, std::unordere
                         }
                         std::string literal = std::regex_replace(trim(ss.str()), std::regex("\\\\"), "\\");
                         literal = std::regex_replace(literal, std::regex("\""), "\\\"");
-                        cur = line.buffer.insert(pos, Token(TokenType::StringLiteral("\"" + literal + "\""), next->value().pos));
+                        cur = line.buffer.insert(pos, Token(TokenType::StringLiteral("\"" + literal + "\""), arg.front()->pos));
                         line.buffer.erase(pos);
                         continue;
                     }else{

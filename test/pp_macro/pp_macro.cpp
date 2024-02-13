@@ -140,4 +140,43 @@ Suite pp_macro {
         Expect(((TokenType::PPNumber)token.value()).sequence == "5");
         token = pp.get();
     })
+    Test("hash-operators", {
+        PreProcessor pp(std::filesystem::path("hash_operator.c"));
+        PreProcessor::PPToken token;
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 5);
+        Expect(std::get<std::string>(((TokenType::StringLiteral)token.value()).value) == "str");
+        token = pp.get();
+
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 5);
+        Expect(std::get<std::string>(((TokenType::StringLiteral)token.value()).value) == "str \"s\"");
+        token = pp.get();
+
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 5);
+        Expect(std::get<std::string>(((TokenType::StringLiteral)token.value()).value) == "str \"\\s\"");
+        token = pp.get();
+
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        token = pp.get();
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 6);
+        Expect(std::get<std::string>(((TokenType::StringLiteral)token.value()).value) == "str , s");
+        token = pp.get();
+    })
 };
