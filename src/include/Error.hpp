@@ -2,7 +2,7 @@
 #define WVMCC_Error_DEF
 
 #include <exception.hpp>
-#include <SourceFile.hpp>
+#include <SourceStream.hpp>
 
 namespace WasmVM {
 namespace Exception {

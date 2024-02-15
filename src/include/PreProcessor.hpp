@@ -14,7 +14,7 @@
 #include <iterator>
 #include <optional>
 #include <Token.hpp>
-#include <SourceFile.hpp>
+#include <SourceStream.hpp>
 
 namespace WasmVM {
 
@@ -23,7 +23,6 @@ struct PreProcessor {
     struct PPToken : public std::optional<Token> {
 
         PPToken(std::nullopt_t n = std::nullopt) : std::optional<Token>(){}
-        PPToken(Token&& token) : std::optional<Token>(token){}
         PPToken(Token& token) : std::optional<Token>(token){}
 
         template<typename T> requires TokenType::is_valid<T>::value
@@ -43,13 +42,8 @@ struct PreProcessor {
 private:
 #endif
 
-    struct PPStream {
-        virtual PPToken get() = 0;
-        std::list<PPToken> buffer;
-        std::list<PPToken>::iterator cur = buffer.begin();
-    };
 
-    struct LineStream : public PPStream {
+    struct Line {
         LineStream() = default;
 
         template<std::input_iterator InputIt>
@@ -60,9 +54,9 @@ private:
         PPToken get();
     };
 
-    struct TokenStream : public PPStream {
-        TokenStream(std::filesystem::path path);
-        TokenStream(std::filesystem::path path, std::string text);
+    struct Scanner : public PPStream {
+        Scanner(std::filesystem::path path);
+        Scanner(std::filesystem::path path, std::string text);
         PPToken get();
     private:
         SourceFile source;

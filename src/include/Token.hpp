@@ -7,7 +7,7 @@
 #include <string>
 #include <cstddef>
 #include <cuchar>
-#include <SourceFile.hpp>
+#include <SourceStream.hpp>
 
 namespace WasmVM {
 
