@@ -15,6 +15,7 @@
 
 #include <harness.hpp>
 #include <sstream>
+#include <fstream>
 #include <SourceStream.hpp>
 
 using namespace WasmVM;
@@ -22,7 +23,7 @@ using namespace Testing;
 
 Suite source_stream {
     Test("normal", {
-        SourceTextStream source("test", std::filesystem::path("normal.c"));
+        SourceStream<std::istringstream> source(std::filesystem::path("normal.c"), "test");
         Expect(source.get() == 't');
         Expect(source.pos.line() == 1 && source.pos.col() == 1);
         Expect(source.get() == 'e');
@@ -33,7 +34,7 @@ Suite source_stream {
         Expect(source.pos.line() == 1 && source.pos.col() == 4);
     })
     Test("newline", {
-        SourceTextStream source("te\nst\n\na", std::filesystem::path("newline.c") );
+        SourceStream<std::istringstream> source(std::filesystem::path("newline.c"), "te\nst\n\na");
         Expect(source.get() == 't');
         Expect(source.pos.line() == 1 && source.pos.col() == 1);
         Expect(source.get() == 'e');
@@ -49,7 +50,7 @@ Suite source_stream {
         Expect(source.pos.line() == 4 && source.pos.col() == 1);
     })
     Test("concat", {
-        SourceTextStream source("te\\\nst", std::filesystem::path("concat.c"));
+        SourceStream<std::istringstream> source(std::filesystem::path("concat.c"), "te\\\nst");
         Expect(source.get() == 't');
         Expect(source.pos.line() == 1 && source.pos.col() == 1);
         Expect(source.get() == 'e');
@@ -60,7 +61,7 @@ Suite source_stream {
         Expect(source.pos.line() == 2 && source.pos.col() == 2);
     })
     Test("trigraph", {
-        SourceFileStream source(std::filesystem::path("trigraph.txt"));
+        SourceStream<std::ifstream> source(std::filesystem::path("trigraph.txt"), std::filesystem::path("trigraph.txt"));
         Expect(source.get() == '#');
         Expect(source.pos.line() == 1 && source.pos.col() == 3);
         Expect(source.get() == '[');
