@@ -20,5 +20,5 @@
 using namespace WasmVM;
 
 std::ostream& operator<<(std::ostream& os, SourcePos& pos){
-    return os << pos.line() << ":" << pos.col();
+    return os << pos.path.filename().string() << ":" << pos.line() << ":" << pos.col();
 }
