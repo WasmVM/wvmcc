@@ -179,7 +179,7 @@ PreProcessor::Line::iterator PreProcessor::skip_whitespace(PreProcessor::Line::i
 bool PreProcessor::readline(){
     // Reset line
     line.clear();
-    line.type = Line::Text;
+    line.type = Line::None;
     // Get line tokens
     if(streams.empty()){
         return false;
@@ -207,6 +207,8 @@ bool PreProcessor::readline(){
         return false;
     }else if(line.front().hold<TokenType::Punctuator>() && line.front().value() == TokenType::Punctuator(TokenType::Punctuator::Hash)){
         line.type = Line::Directive;
+    }else{
+        line.type = Line::Text;
     }
     return true;
 }
@@ -744,15 +746,6 @@ PreProcessor::PPToken PreProcessor::Scanner::get(){
     }
 }
 
-// PreProcessor::PPToken PreProcessor::LineStream::get(){
-//     if(cur == buffer.end()){
-//         return std::nullopt;
-//     }
-//     PPToken res = *cur;
-//     cur = std::next(cur);
-//     return res;
-// }
-
 // bool PreProcessor::Macro::operator==(const Macro& op) const {
 //     if((op.name != name) || (op.params.has_value() != params.has_value()) || (op.replacement.size() != replacement.size())){
 //         return false;
@@ -861,7 +854,13 @@ PreProcessor::PPToken PreProcessor::Scanner::get(){
 PreProcessor::PPToken PreProcessor::get(){
     // Fill line
     if(line.empty()){
-        if(!readline()){
+        while(readline() && line.type == Line::Directive){
+            Line::iterator cur = skip_whitespace(std::next(line.begin()), line.end());
+            if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+                
+            }
+        }
+        if(line.type == Line::None){
             return std::nullopt;
         }
     }

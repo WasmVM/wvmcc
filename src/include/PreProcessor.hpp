@@ -47,7 +47,7 @@ private:
 #endif
 
     struct Line : public std::list<PPToken> {
-        enum {Text, Directive} type;
+        enum {None, Text, Directive} type;
     };
 
     struct Scanner {
