@@ -100,7 +100,9 @@ struct SourceStream : public T, SourceStreamBase<typename T::int_type, typename 
             base_type::pos.col() = 0;
             return ch;
         }
-        base_type::pos.col() += 1;
+        if(ch != std::char_traits<char_type>::eof()){
+            base_type::pos.col() += 1;
+        }
         return ch;
     }
     virtual int_type peek(){
@@ -115,7 +117,12 @@ struct SourceStream : public T, SourceStreamBase<typename T::int_type, typename 
         return T::putback(ch);
     }
     virtual std::basic_istream<char_type>& unget(){
-        return T::unget();
+        if(T::rdbuf()->sungetc() == '\n'&& base_type::pos.line() != 1){
+            base_type::pos.line() -= 1;
+        }else if(base_type::pos.col() != 1){
+            base_type::pos.col() -= 1;
+        }
+        return *this;
     }
     
 };

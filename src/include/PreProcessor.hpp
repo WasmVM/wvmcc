@@ -20,9 +20,13 @@ namespace WasmVM {
 
 struct PreProcessor {
 
+    using StreamType = std::istream;
+    using Stream = SourceStreamBase<StreamType::int_type, StreamType::char_type>;
+
     struct PPToken : public std::optional<Token> {
 
         PPToken(std::nullopt_t n = std::nullopt) : std::optional<Token>(){}
+        PPToken(Token&& token) : std::optional<Token>(token){}
         PPToken(Token& token) : std::optional<Token>(token){}
 
         template<typename T> requires TokenType::is_valid<T>::value
@@ -35,31 +39,22 @@ struct PreProcessor {
     };
 
     PreProcessor(std::filesystem::path path);
-    PreProcessor(std::filesystem::path path, std::string text);
+    PreProcessor(std::filesystem::path path, std::string source);
     PPToken get();
 
 #ifndef CCTEST
 private:
 #endif
 
-
-    struct Line {
-        LineStream() = default;
-
-        template<std::input_iterator InputIt>
-        LineStream(InputIt begin, InputIt end){
-            cur = buffer.insert(buffer.begin(), begin, end);
-        }
-
-        PPToken get();
+    struct Line : public std::list<PPToken> {
+        enum {Text, Directive} type;
     };
 
-    struct Scanner : public PPStream {
-        Scanner(std::filesystem::path path);
-        Scanner(std::filesystem::path path, std::string text);
+    struct Scanner {
+        Scanner(Stream* stream);
         PPToken get();
     private:
-        SourceFile source;
+        Stream* stream;
         enum class LineState : int{
             unknown = 0,
             normal = 1,
@@ -68,36 +63,39 @@ private:
         } state;
     };
 
-    struct Macro {
 
-        std::string name;
-        std::optional<std::vector<std::string>> params;
-        std::vector<PPToken> replacement;
-        inline operator std::string(){
-            return name;
-        }
+    // struct Macro {
 
-        bool operator==(const Macro& op) const;
-    };
+    //     std::string name;
+    //     std::optional<std::vector<std::string>> params;
+    //     std::vector<PPToken> replacement;
+    //     inline operator std::string(){
+    //         return name;
+    //     }
 
-    bool is_text = false;
-    std::stack<TokenStream> streams;
-    std::unordered_map<std::string, Macro> macros;
+    //     bool operator==(const Macro& op) const;
+    // };
 
-    static void skip_whitespace(PPToken& token, PPStream& stream);
-    static bool replace_macro(PPToken& token, PPStream& stream, std::unordered_map<std::string, Macro> macro_map);
-    static void perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map);
+    // bool is_text = false;
+    std::stack<std::unique_ptr<Stream>> streams;
+    Line line;
+    // std::unordered_map<std::string, Macro> macros;
 
-    void if_directive(PPToken& token); // TODO:
-    void elif_directive(PPToken& token); // TODO:
-    void else_directive(PPToken& token); // TODO:
-    void endif_directive(PPToken& token); // TODO:
-    void define_directive(PPToken& token);
-    void undef_directive(PPToken& token); // TODO:
-    void pragma_directive(PPToken& token); // TODO:
-    void include_directive(PPToken& token); // TODO:
-    void line_directive(PPToken& token); // TODO:
-    void error_directive(PPToken& token);
+    static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
+    // static bool replace_macro(PPToken& token, PPStream& stream, std::unordered_map<std::string, Macro> macro_map);
+    // static void perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map);
+
+    bool readline();
+    // void if_directive(PPToken& token); // TODO:
+    // void elif_directive(PPToken& token); // TODO:
+    // void else_directive(PPToken& token); // TODO:
+    // void endif_directive(PPToken& token); // TODO:
+    // void define_directive(PPToken& token);
+    // void undef_directive(PPToken& token); // TODO:
+    // void pragma_directive(PPToken& token); // TODO:
+    // void include_directive(PPToken& token); // TODO:
+    // void line_directive(PPToken& token); // TODO:
+    // void error_directive(PPToken& token);
 };
 
 } // namespace WasmVM
