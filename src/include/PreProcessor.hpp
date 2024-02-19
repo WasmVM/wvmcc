@@ -64,33 +64,27 @@ private:
     };
 
 
-    // struct Macro {
+    struct Macro {
+        std::string name;
+        std::optional<std::vector<std::string>> params;
+        std::vector<PPToken> replacement;
+        bool operator==(const Macro& op) const;
+    };
 
-    //     std::string name;
-    //     std::optional<std::vector<std::string>> params;
-    //     std::vector<PPToken> replacement;
-    //     inline operator std::string(){
-    //         return name;
-    //     }
-
-    //     bool operator==(const Macro& op) const;
-    // };
-
-    // bool is_text = false;
     std::stack<std::unique_ptr<Stream>> streams;
     Line line;
-    // std::unordered_map<std::string, Macro> macros;
+    std::unordered_map<std::string, Macro> macros = {};
 
     static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
-    // static bool replace_macro(PPToken& token, PPStream& stream, std::unordered_map<std::string, Macro> macro_map);
+    bool replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map = {});
     // static void perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map);
 
     bool readline();
+    void define_directive();
     // void if_directive(PPToken& token); // TODO:
     // void elif_directive(PPToken& token); // TODO:
     // void else_directive(PPToken& token); // TODO:
     // void endif_directive(PPToken& token); // TODO:
-    // void define_directive(PPToken& token);
     // void undef_directive(PPToken& token); // TODO:
     // void pragma_directive(PPToken& token); // TODO:
     // void include_directive(PPToken& token); // TODO:
