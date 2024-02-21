@@ -8,6 +8,7 @@
 #include <exception>
 #include <sstream>
 #include <regex>
+#include <exception.hpp>
 
 #include "harness.hpp"
 
@@ -71,6 +72,9 @@ struct Runner {
 };
 
 int main(void){
+
+    WasmVM::Exception::Warning::regist([](std::string message){});
+
     if(Suite::suite.has_value() == false){
         std::cerr << "=== " COLOR_Warning " Empty testsuite ===" << std::endl;
         return 0;

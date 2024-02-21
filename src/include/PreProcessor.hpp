@@ -76,7 +76,7 @@ private:
     std::unordered_map<std::string, Macro> macros = {};
 
     static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
-    bool replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map = {});
+    void replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map = {});
     // static void perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map);
 
     bool readline();
