@@ -920,8 +920,8 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
                                 auto arg_end = skip_whitespace(std::next(macro_next), line.end());
                                 macro_next = arg_end;
                                 while(arg_end != line.end()){
-                                    if((nest_level == 0) && (param != "...") && (
-                                        (arg_end->value() == Token(TokenType::Punctuator(TokenType::Punctuator::Comma))) ||
+                                    if((nest_level == 0) && (
+                                        ((param != "...") && (arg_end->value() == Token(TokenType::Punctuator(TokenType::Punctuator::Comma)))) ||
                                         (arg_end->value() == Token(TokenType::Punctuator(TokenType::Punctuator::Paren_R)))
                                     )){
                                         break;
