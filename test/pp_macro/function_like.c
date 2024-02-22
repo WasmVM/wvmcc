@@ -14,3 +14,6 @@ foo6(foo2(ff), 4)
 foo7(unsigned, gg)
 #define foo8(SP, ...) SP foo5(__VA_ARGS__)
 foo8(const, char, hh, 5)
+#define f(a) a*g
+#define g(a) f(a)
+f(2)(9)
