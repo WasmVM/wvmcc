@@ -30,6 +30,7 @@
 #include <CommandParser.hpp>
 #include <Archive.hpp>
 #include <Linker.hpp>
+#include <PreProcessor.hpp>
 #include <Compiler.hpp>
 
 #ifndef WVMCC_VERSION
@@ -119,12 +120,33 @@ int main(int argc, const char* argv[]){
 
         std::map<std::filesystem::path, WasmModule> modules;
 
-        // Compile
+        // Include path list
         std::vector<std::filesystem::path> include_paths;
         if(args["includes"]){
             std::vector<std::string> includes = std::get<std::vector<std::string>>(args["includes"].value());
             include_paths.assign(includes.begin(), includes.end());
         }
+
+        // Preprocess
+        if(args["pp"]){
+            for(std::filesystem::path source_path : source_files){
+                PreProcessor pp(source_path);
+                if(args["output"]){
+                    std::ofstream output_file(std::get<std::string>(args["output"].value()));
+                    for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
+                        output_file << tok.value();
+                    }
+                    output_file.close();
+                }else{
+                    for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
+                        std::cout << tok.value();
+                    }
+                }
+            }
+            return 0;
+        }
+
+        // Compile
         Compiler compiler(include_paths);
         for(std::filesystem::path source_file : source_files){
             modules[source_file] = compiler.compile(source_file);
