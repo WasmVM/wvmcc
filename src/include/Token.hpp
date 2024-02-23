@@ -46,12 +46,14 @@ bool operator==(const Identifier&, const Identifier&);
 
 struct CharacterConstant {
     CharacterConstant(std::string sequence);
+    std::string sequence;
     std::variant<int, wchar_t, char16_t, char32_t> value;
 };
 bool operator==(const CharacterConstant&, const CharacterConstant&);
 
 struct StringLiteral {
     StringLiteral(std::string sequence);
+    std::string sequence;
     std::variant<std::string, std::wstring, std::u8string, std::u16string, std::u32string> value;
 };
 bool operator==(const StringLiteral&, const StringLiteral&);
@@ -82,6 +84,8 @@ struct Token : public TokenType::Base {
     inline operator T(){
         return std::get<T>(*this);
     }
+
+    std::string str();
 
     SourcePos pos;
 };

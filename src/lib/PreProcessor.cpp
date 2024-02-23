@@ -839,6 +839,7 @@ void PreProcessor::define_directive(){
 PreProcessor::PPToken PreProcessor::get(){
     // Fill line
     if(line.empty()){
+        // PP Directives
         while(readline() && line.type == Line::Directive){
             Line::iterator cur = skip_whitespace(std::next(line.begin()), line.end());
             if(cur != line.end() && cur->hold<TokenType::Identifier>()){
@@ -872,8 +873,13 @@ PreProcessor::PPToken PreProcessor::get(){
         if(line.type == Line::None){
             return std::nullopt;
         }
+        // Replace macro
+        replace_macro(line, macros);
+        // Insert newline
+        Token newline(TokenType::NewLine(), line.back()->pos);
+        newline.pos.col() += 1;
+        line.emplace_back(newline);
     }
-    replace_macro(line, macros);
     // Result
     PreProcessor::PPToken token = line.front();
     line.pop_front();
@@ -960,13 +966,12 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
                             Line& arg = args[((TokenType::Identifier)param->value()).sequence];
                             std::string literal = "";
                             if(!arg.empty()){
-                                std::stringstream ss;
                                 for(PPToken& tok : arg){
                                     if(!tok.hold<TokenType::WhiteSpace>() && !tok.hold<TokenType::NewLine>()){
-                                        ss << tok.value() << " ";
+                                        literal += tok.value().str() + " ";
                                     }
                                 }
-                                literal = std::regex_replace(trim(ss.str()), std::regex("\\\\"), "\\");
+                                literal = std::regex_replace(trim(literal), std::regex("\\\\"), "\\");
                                 literal = std::regex_replace(literal, std::regex("\""), "\\\"");
                             }
                             auto new_cur = replaced_line.insert(replaced_cur, Token(TokenType::StringLiteral("\"" + literal + "\""), param->value().pos));
@@ -994,10 +999,10 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
                         if(prev->has_value() || next->has_value()){
                             SourceStream<std::stringstream> str_source(replaced_cur->value().pos.path);
                             if(prev->has_value()){
-                                str_source << prev->value();
+                                str_source << prev->value().str();
                             }
                             if(next->has_value()){
-                                str_source << next->value();
+                                str_source << next->value().str();
                             }
                             // Rescan token 
                             Scanner scanner(&str_source);
