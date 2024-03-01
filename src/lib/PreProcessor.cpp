@@ -965,7 +965,10 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
                         if((param != replaced_line.end()) && param->hold<TokenType::Identifier>() && args.contains(((TokenType::Identifier)param->value()).sequence)){
                             Line& arg = args[((TokenType::Identifier)param->value()).sequence];
                             std::string literal = "";
-                            if(!arg.empty()){
+                            SourcePos pos;
+                            if(arg.empty()){
+                                pos = replaced_cur->value().pos;
+                            }else{
                                 for(PPToken& tok : arg){
                                     if(!tok.hold<TokenType::WhiteSpace>() && !tok.hold<TokenType::NewLine>()){
                                         literal += tok.value().str() + " ";
@@ -973,8 +976,9 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
                                 }
                                 literal = std::regex_replace(trim(literal), std::regex("\\\\"), "\\");
                                 literal = std::regex_replace(literal, std::regex("\""), "\\\"");
+                                pos = arg.front()->pos;
                             }
-                            auto new_cur = replaced_line.insert(replaced_cur, Token(TokenType::StringLiteral("\"" + literal + "\""), param->value().pos));
+                            auto new_cur = replaced_line.insert(replaced_cur, Token(TokenType::StringLiteral("\"" + literal + "\""), pos));
                             replaced_line.erase(replaced_cur, std::next(param));
                             replaced_cur = new_cur;
                         }
