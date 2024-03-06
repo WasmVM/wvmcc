@@ -20,6 +20,7 @@
 #include <regex>
 #include <sstream>
 #include <cctype>
+#include <cinttypes>
 
 using namespace WasmVM;
 
@@ -555,7 +556,18 @@ intmax_t TokenType::PPNumber::get<intmax_t>(){
     }else if(sequence.starts_with("0")){
         base = 8;
     }
-    return std::stoll(sequence, nullptr, base);
+    return std::strtoimax(sequence.c_str(), nullptr, base);
+}
+
+template<>
+uintmax_t TokenType::PPNumber::get<uintmax_t>(){
+    int base = 10;
+    if(sequence.starts_with("0x") || sequence.starts_with("0X")){
+        base = 16;
+    }else if(sequence.starts_with("0")){
+        base = 8;
+    }
+    return std::strtoumax(sequence.c_str(), nullptr, base);
 }
 
 template<>

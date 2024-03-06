@@ -34,6 +34,7 @@ struct PPNumber {
     PPNumber(std::string s) : sequence(s){};
     template<typename T>
     T get();
+    enum {Float, Int} type;
     std::string sequence;
 };
 bool operator==(const PPNumber&, const PPNumber&);
