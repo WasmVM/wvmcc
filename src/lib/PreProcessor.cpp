@@ -25,6 +25,7 @@
 #include <cstdint>
 #include <variant>
 #include <cerrno>
+#include <limits>
 
 using namespace WasmVM;
 
@@ -788,8 +789,10 @@ bool PreProcessor::Macro::operator==(const Macro& op) const {
 // }
 
 void PreProcessor::if_directive(){
-    // TODO:
+    // TODO: defined operator
+    // TODO: replace identifier
     evaluate_condition();
+    // TODO: 
 }
 
 void PreProcessor::define_directive(){
@@ -1056,14 +1059,24 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
 
 PreProcessor::Expression::Expression(Line::iterator cur, Line::iterator end) : cur(cur), end(end){}
 
+bool PreProcessor::evaluate_condition(){
+    Expression expr(line.begin(), line.end());
+    return std::visit(overloaded {
+        [](auto val){
+            std::cout << val << std::endl; // TODO:
+            return val != 0;
+        }
+    }, expr.eval());
+}
+
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return primary(); // TODO:
+    return unary(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
     cur = skip_whitespace(cur, end);
     if(cur == end){
-        throw Exception::Exception("empty primary expression");
+        throw Exception::Exception("empty primary expression of preprocessor");
     }
     if(cur->hold<TokenType::Punctuator>() && (((TokenType::Punctuator)cur->value()).type == TokenType::Punctuator::Paren_L)){
         cur = skip_whitespace(std::next(cur), end);
@@ -1098,12 +1111,49 @@ PreProcessor::Expression::Result PreProcessor::Expression::primary(){
     throw Exception::Error(cur->value().pos, "invalid token in expression of preprocessor");
 }
 
-bool PreProcessor::evaluate_condition(){
-    Expression expr(line.begin(), line.end());
-    return std::visit(overloaded {
-        [](auto val){
-            std::cout << val << std::endl; // TODO:
-            return val != 0;
+PreProcessor::Expression::Result PreProcessor::Expression::unary(){
+    cur = skip_whitespace(cur, end);
+    if(cur == end){
+        throw Exception::Exception("empty unary expression of preprocessor");
+    }
+    if(cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        switch(punct.type){
+            case TokenType::Punctuator::Plus :
+                cur = std::next(cur);
+                return unary(); // FIXME:
+            case TokenType::Punctuator::Minus :
+                cur = std::next(cur);
+                return std::visit<Result>(overloaded {
+                    [](auto val){
+                        return -val;
+                    }
+                }, unary()); // FIXME:
+            case TokenType::Punctuator::Tlide :
+                cur = std::next(cur);
+                return std::visit<Result>(overloaded {
+                    [&](double val){
+                        throw Exception::Error(std::prev(cur)->value().pos, "operand of bitwise '~' should be integer");
+                        return std::numeric_limits<double>::quiet_NaN();
+                    },
+                    [](auto val){
+                        return ~val;
+                    }
+                }, unary()); // FIXME:
+            case TokenType::Punctuator::Exclam :
+                cur = std::next(cur);
+                return std::visit<intmax_t>(overloaded {
+                    [](double val){
+                        return (val == 0.0) ? 1 : 0;
+                    },
+                    [](auto val){
+                        return (val == 0) ? 1 : 0;
+                    }
+                }, unary()); // FIXME:
+            break;
+            default:
+            break;
         }
-    }, expr.eval());
+    }
+    return primary();
 }

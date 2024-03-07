@@ -79,6 +79,17 @@ private:
         Line::iterator cur;
         Line::iterator end;
         Result primary();
+        Result unary();
+        Result Multiplicative();
+        Result Additive();
+        Result shift();
+        Result relational();
+        Result equality();
+        Result bitwise_AND();
+        Result bitwise_exclusive_OR();
+        Result bitwise_inclusive_OR();
+        Result logical_AND();
+        Result conditional();
     };
 
     std::stack<std::unique_ptr<Stream>> streams;
