@@ -22,6 +22,9 @@
 #include <regex>
 #include <list>
 #include <Error.hpp>
+#include <cstdint>
+#include <variant>
+#include <cerrno>
 
 using namespace WasmVM;
 
@@ -701,11 +704,16 @@ PreProcessor::PPToken PreProcessor::Scanner::get(){
             ")"
             "[fFlL]?"
         );
+        TokenType::PPNumber num(sequence);
         std::smatch m;
-        if(!std::regex_match(sequence, m, int_re) && !std::regex_match(sequence, m, float_re)){
+        if(std::regex_match(sequence, m, int_re)){
+            num.type = TokenType::PPNumber::Int;
+        }else if(std::regex_match(sequence, m, float_re)){
+            num.type = TokenType::PPNumber::Float;
+        }else{
             throw Exception::Error(pos, "pp-number must be integer or floating-point constant");
         }
-        return Token(TokenType::PPNumber(sequence), pos);
+        return Token(num, pos);
     }else if(std::isalpha(ch) || ch == '_' || ch == '\\'){ // identifier
         std::string sequence;
         while(std::isalnum(ch) || ch == '_' || ch == '\\'){
@@ -779,6 +787,11 @@ bool PreProcessor::Macro::operator==(const Macro& op) const {
 //     }
 // }
 
+void PreProcessor::if_directive(){
+    // TODO:
+    evaluate_condition();
+}
+
 void PreProcessor::define_directive(){
     auto cur = skip_whitespace(line.begin(), line.end());
     auto pos = cur->value().pos;
@@ -846,7 +859,8 @@ PreProcessor::PPToken PreProcessor::get(){
                 std::string direcitve_name = ((TokenType::Identifier)cur->value()).sequence;
                 line.erase(line.begin(), std::next(cur));
                 if(direcitve_name == "if"){
-                    // TODO:
+                    replace_macro(line, macros);
+                    if_directive();
                 }else if(direcitve_name == "ifdef"){
                     // TODO:
                 }else if(direcitve_name == "ifndef"){
@@ -1038,4 +1052,58 @@ void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Mac
         }
         cur = std::next(cur);
     }
+}
+
+PreProcessor::Expression::Expression(Line::iterator cur, Line::iterator end) : cur(cur), end(end){}
+
+PreProcessor::Expression::Result PreProcessor::Expression::eval(){
+    return primary(); // TODO:
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::primary(){
+    cur = skip_whitespace(cur, end);
+    if(cur == end){
+        throw Exception::Exception("empty primary expression");
+    }
+    if(cur->hold<TokenType::Punctuator>() && (((TokenType::Punctuator)cur->value()).type == TokenType::Punctuator::Paren_L)){
+        cur = skip_whitespace(std::next(cur), end);
+        PreProcessor::Expression::Result result = eval();
+        if(cur == end || !cur->hold<TokenType::Punctuator>() || !(((TokenType::Punctuator)cur->value()).type == TokenType::Punctuator::Paren_R)){
+            throw Exception::Error(std::prev(cur)->value().pos, "expect ')' in proprocessor primary expression");
+        }
+        cur = std::next(cur);
+        return result;
+    }else if(cur->hold<TokenType::CharacterConstant>()){
+        TokenType::CharacterConstant ch = cur->value();
+        cur = std::next(cur);
+        return std::visit(overloaded{
+            [](auto val){
+                return (intmax_t) val;
+            }
+        }, ch.value);
+    }else if(cur->hold<TokenType::PPNumber>()){
+        TokenType::PPNumber num = cur->value();
+        cur = std::next(cur);
+        if(num.type == TokenType::PPNumber::Float){
+            return num.get<double>();
+        }else{
+            intmax_t res = num.get<intmax_t>();
+            if(errno == ERANGE){
+                return num.get<uintmax_t>();
+            }else{
+                return res;
+            }
+        }
+    }
+    throw Exception::Error(cur->value().pos, "invalid token in expression of preprocessor");
+}
+
+bool PreProcessor::evaluate_condition(){
+    Expression expr(line.begin(), line.end());
+    return std::visit(overloaded {
+        [](auto val){
+            std::cout << val << std::endl; // TODO:
+            return val != 0;
+        }
+    }, expr.eval());
 }

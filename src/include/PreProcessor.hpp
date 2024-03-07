@@ -71,17 +71,29 @@ private:
         bool operator==(const Macro& op) const;
     };
 
+    struct Expression {
+        Expression(Line::iterator cur, Line::iterator end);
+        using Result = std::variant<intmax_t, uintmax_t, double>;
+        Result eval();
+    private:
+        Line::iterator cur;
+        Line::iterator end;
+        Result primary();
+    };
+
     std::stack<std::unique_ptr<Stream>> streams;
     Line line;
     std::unordered_map<std::string, Macro> macros = {};
 
     static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
     void replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map = {});
-    // static void perform_replace(LineStream& line, std::unordered_map<std::string, Macro>& macro_map);
+    bool evaluate_condition();
 
     bool readline();
     void define_directive();
-    // void if_directive(PPToken& token); // TODO:
+    void if_directive();
+    // void ifdef_directive();
+    // void ifndef_directive();
     // void elif_directive(PPToken& token); // TODO:
     // void else_directive(PPToken& token); // TODO:
     // void endif_directive(PPToken& token); // TODO:
