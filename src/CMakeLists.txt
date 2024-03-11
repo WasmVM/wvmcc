@@ -1,7 +1,10 @@
 add_library(cc
   lib/Compiler.cpp
   lib/SourceStream.cpp
-  lib/PreProcessor.cpp
+  lib/PreProcessor/PreProcessor.cpp
+  lib/PreProcessor/Scanner.cpp
+  lib/PreProcessor/Macro.cpp
+  lib/PreProcessor/Expression.cpp
   lib/Token.cpp
 )
 

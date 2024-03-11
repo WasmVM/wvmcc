@@ -15,6 +15,7 @@
 #include <optional>
 #include <Token.hpp>
 #include <SourceStream.hpp>
+#include <Util.hpp>
 
 namespace WasmVM {
 
@@ -80,8 +81,8 @@ private:
         Line::iterator end;
         Result primary();
         Result unary();
-        Result Multiplicative();
-        Result Additive();
+        Result multiplicative();
+        Result additive();
         Result shift();
         Result relational();
         Result equality();
@@ -90,6 +91,17 @@ private:
         Result bitwise_inclusive_OR();
         Result logical_AND();
         Result conditional();
+
+        template<typename T>
+        static Result& cast_result(Result& res);
+
+        template<template<typename T> class Op, typename T = void>
+        static Result binary_op(Result&, Result&);
+        template<template<typename T> class Op, typename T = void>
+            requires std::is_same_v<Op<T>, std::modulus<T>>
+        static Result binary_op(Result&, Result&);
+
+        static void implicit_cast(Result&, Result&);
     };
 
     std::stack<std::unique_ptr<Stream>> streams;
