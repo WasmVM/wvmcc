@@ -110,10 +110,11 @@ private:
     ssize_t if_level = 0;
 
     static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
-    void replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map = {});
+    void replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map, bool keep_defined = false);
     bool evaluate_condition();
-
     bool readline();
+    void defined_operator();
+
     void define_directive();
     void if_directive();
     // void ifdef_directive();

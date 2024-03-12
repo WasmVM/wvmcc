@@ -75,6 +75,88 @@ bool PreProcessor::readline(){
     return true;
 }
 
+PreProcessor::PPToken PreProcessor::get(){
+    // Fill line
+    if(line.empty()){
+        // PP Directives
+        while(readline() && line.type != Line::Text){
+            Line::iterator cur = skip_whitespace(std::next(line.begin()), line.end());
+            if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+                SourcePos pos = cur->value().pos;
+                std::string direcitve_name = ((TokenType::Identifier)cur->value()).sequence;
+                line.erase(line.begin(), std::next(cur));
+                if(direcitve_name == "if"){
+                    replace_macro(line, macros, true);
+                    if_directive();
+                }else if(direcitve_name == "ifdef"){
+                    // TODO:
+                }else if(direcitve_name == "ifndef"){
+                    // TODO:
+                }else if(direcitve_name == "elif"){
+                    if_level -= 1;
+                    if(if_level < 0){
+                        throw Exception::Error(pos, "#elif without #if");
+                    }
+                    else_directive();
+                }else if(direcitve_name == "else"){
+                    if_level -= 1;
+                    if(if_level < 0){
+                        throw Exception::Error(pos, "#else without #if");
+                    }
+                    if(!line.empty()){
+                        Exception::Warning("extra tokens at end of #else directive");
+                    }
+                    else_directive();
+                }else if(direcitve_name == "endif"){
+                    if_level -= 1;
+                    if(if_level < 0){
+                        throw Exception::Error(pos, "#endif without #if");
+                    }
+                    if(!line.empty()){
+                        Exception::Warning("extra tokens at end of #endif directive");
+                    }
+                }else if(direcitve_name == "define"){
+                    define_directive();
+                }else if(direcitve_name == "undef"){
+                    // TODO:
+                }else if(direcitve_name == "line"){
+                    // TODO:
+                }else if(direcitve_name == "error"){
+                    // TODO:
+                }else if(direcitve_name == "pragma"){
+                    // TODO:
+                }
+            }
+        }
+        if(line.type != Line::Text){
+            if(if_level != 0){
+                throw Exception::Exception("unterminated conditional directive");
+            }
+            return std::nullopt;
+        }
+        // Replace macro
+        replace_macro(line, macros);
+        // Insert newline
+        Token newline(TokenType::NewLine(), line.back()->pos);
+        newline.pos.col() += 1;
+        line.emplace_back(newline);
+    }
+    // Result
+    PreProcessor::PPToken token = line.front();
+    line.pop_front();
+    return token;
+}
+
+bool PreProcessor::evaluate_condition(){
+    Expression expr(line.begin(), line.end());
+    return std::visit(overloaded {
+        [](auto val){
+            //std::cout << val << std::endl; // TODO:
+            return val != 0;
+        }
+    }, expr.eval());
+}
+
 // void PreProcessor::error_directive(PPToken& token){
 //     auto pos = token.value().pos;
 //     token = streams.top().get();
@@ -87,8 +169,41 @@ bool PreProcessor::readline(){
 //     }
 // }
 
+void PreProcessor::defined_operator(){
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    while(cur != line.end()){
+        if(cur->hold<TokenType::Identifier>() && (((TokenType::Identifier)cur->value()).sequence == "defined")){
+            Line::iterator start = cur;
+            cur = skip_whitespace(std::next(cur), line.end());
+            bool has_paren = false;
+            if(cur != line.end() && cur->hold<TokenType::Punctuator>() && ((TokenType::Punctuator)cur->value() == TokenType::Punctuator::Paren_L)){
+                has_paren = true;
+                cur = skip_whitespace(std::next(cur), line.end());
+            }
+            if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+                std::string macro_name = ((TokenType::Identifier)cur->value()).sequence;
+                line.emplace(start, Token(TokenType::PPNumber(macros.contains(macro_name) ? "1" : "0")));
+                cur = skip_whitespace(std::next(cur), line.end());
+            }else{
+                throw Exception::Error(start->value().pos, "missing identifier in 'defined' operator");
+            }
+            if(has_paren){
+                if(cur != line.end() && cur->hold<TokenType::Punctuator>() && ((TokenType::Punctuator)cur->value() == TokenType::Punctuator::Paren_R)){
+                    cur = skip_whitespace(std::next(cur), line.end());
+                }else{
+                    throw Exception::Error(start->value().pos, "unclosed 'defined' operator");
+                }
+            }
+            cur = line.erase(start, cur);
+        }else{
+            cur = std::next(cur);
+        }
+    }
+}
+
 void PreProcessor::if_directive(){
-    // TODO: defined operator
+    // defined operator
+    defined_operator();
     // TODO: replace identifier
     if(evaluate_condition()){
         if_level += 1;
@@ -157,83 +272,4 @@ void PreProcessor::else_directive(){
             }
         }
     }
-}
-
-PreProcessor::PPToken PreProcessor::get(){
-    // Fill line
-    if(line.empty()){
-        // PP Directives
-        while(readline() && line.type != Line::Text){
-            Line::iterator cur = skip_whitespace(std::next(line.begin()), line.end());
-            if(cur != line.end() && cur->hold<TokenType::Identifier>()){
-                SourcePos pos = cur->value().pos;
-                std::string direcitve_name = ((TokenType::Identifier)cur->value()).sequence;
-                line.erase(line.begin(), std::next(cur));
-                if(direcitve_name == "if"){
-                    replace_macro(line, macros);
-                    if_directive();
-                }else if(direcitve_name == "ifdef"){
-                    // TODO:
-                }else if(direcitve_name == "ifndef"){
-                    // TODO:
-                }else if(direcitve_name == "elif"){
-                    if_level -= 1;
-                    if(if_level < 0){
-                        throw Exception::Error(pos, "#elif without #if");
-                    }
-                    else_directive();
-                }else if(direcitve_name == "else"){
-                    if_level -= 1;
-                    if(if_level < 0){
-                        throw Exception::Error(pos, "#else without #if");
-                    }
-                    if(!line.empty()){
-                        Exception::Warning("extra tokens at end of #else directive");
-                    }
-                    else_directive();
-                }else if(direcitve_name == "endif"){
-                    if_level -= 1;
-                    if(if_level < 0){
-                        throw Exception::Error(pos, "#endif without #if");
-                    }
-                    if(!line.empty()){
-                        Exception::Warning("extra tokens at end of #endif directive");
-                    }
-                }else if(direcitve_name == "define"){
-                    define_directive();
-                }else if(direcitve_name == "undef"){
-                    // TODO:
-                }else if(direcitve_name == "line"){
-                    // TODO:
-                }else if(direcitve_name == "error"){
-                    // TODO:
-                }else if(direcitve_name == "pragma"){
-                    // TODO:
-                }
-            }
-        }
-        if(line.type != Line::Text){
-            return std::nullopt;
-        }
-        // Replace macro
-        replace_macro(line, macros);
-        // Insert newline
-        Token newline(TokenType::NewLine(), line.back()->pos);
-        newline.pos.col() += 1;
-        line.emplace_back(newline);
-    }
-    // Result
-    PreProcessor::PPToken token = line.front();
-    line.pop_front();
-    return token;
-}
-
-bool PreProcessor::evaluate_condition(){
-    Expression expr(line.begin(), line.end());
-    return std::visit(overloaded {
-        [](auto val){
-            //std::cout << val << std::endl; // TODO:
-            return val != 0;
-        }
-    }, expr.eval());
 }

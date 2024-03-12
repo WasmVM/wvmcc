@@ -110,12 +110,33 @@ void PreProcessor::define_directive(){
     macros[macro.name] = macro;
 }
 
-void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map){
+void PreProcessor::replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map, bool keep_defined){
     for(auto cur = line.begin(); cur != line.end();){
         if(cur->hold<TokenType::Identifier>()){
             TokenType::Identifier identifier = cur->value();
+            Line::iterator start = cur;
+            // Keep defined operator
+            if(keep_defined && (identifier.sequence == "defined")){
+                cur = skip_whitespace(std::next(cur), line.end());
+                bool has_paren = false;
+                if(cur != line.end() && cur->hold<TokenType::Punctuator>() && ((TokenType::Punctuator)cur->value() == TokenType::Punctuator::Paren_L)){
+                    cur = skip_whitespace(std::next(cur), line.end());
+                    has_paren = true;
+                }
+                if(cur == line.end() || !cur->hold<TokenType::Identifier>()){
+                    throw Exception::Error(start->value().pos, "missing identifier in 'defined' operator");
+                }
+                if(has_paren){
+                    cur = skip_whitespace(std::next(cur), line.end());
+                    if(cur == line.end() || !cur->hold<TokenType::Punctuator>() || ((TokenType::Punctuator)cur->value() != TokenType::Punctuator::Paren_R)){
+                        throw Exception::Error(start->value().pos, "unclosed 'defined' operator");
+                    }
+                }
+                cur = std::next(cur);
+                continue;
+            }
             // Find macro
-            if((!cur->expanded.contains(identifier.sequence)) && macro_map.contains(identifier.sequence)){
+            if(cur != line.end() && (!cur->expanded.contains(identifier.sequence)) && macro_map.contains(identifier.sequence)){
                 Macro& macro = macro_map[identifier.sequence];
                 auto macro_next = std::next(cur);
                 // Construct macro map & arg map
