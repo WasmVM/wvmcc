@@ -191,7 +191,7 @@ int main(int argc, const char* argv[]){
         Linker linker(linker_config);
 
     }catch(Exception::Error &e){
-        std::cerr << args.program.filename().string() << ":" << e.pos << ": " COLOR_Error ": " << e.what() << std::endl;
+        std::cerr << e.pos << ": " COLOR_Error ": " << e.what() << std::endl;
         return -1;
     }catch(Exception::Exception &e){
         std::cerr << args.program.filename().string() << ": " COLOR_Error ": " << e.what() << std::endl;

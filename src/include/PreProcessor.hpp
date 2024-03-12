@@ -82,15 +82,15 @@ private:
         Result primary();
         Result unary();
         Result multiplicative();
-        Result additive();
-        Result shift();
-        Result relational();
-        Result equality();
-        Result bitwise_AND();
-        Result bitwise_exclusive_OR();
-        Result bitwise_inclusive_OR();
-        Result logical_AND();
-        Result conditional();
+        Result additive(); // TODO:
+        Result shift(); // TODO:
+        Result relational(); // TODO:
+        Result equality(); // TODO:
+        Result bitwise_AND(); // TODO:
+        Result bitwise_exclusive_OR(); // TODO:
+        Result bitwise_inclusive_OR(); // TODO:
+        Result logical_AND(); // TODO:
+        Result conditional(); // TODO:
 
         template<typename T>
         static Result& cast_result(Result& res);
@@ -107,6 +107,7 @@ private:
     std::stack<std::unique_ptr<Stream>> streams;
     Line line;
     std::unordered_map<std::string, Macro> macros = {};
+    ssize_t if_level = 0;
 
     static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
     void replace_macro(Line& line, std::unordered_map<std::string, Macro> macro_map = {});
@@ -117,9 +118,7 @@ private:
     void if_directive();
     // void ifdef_directive();
     // void ifndef_directive();
-    // void elif_directive(PPToken& token); // TODO:
-    // void else_directive(PPToken& token); // TODO:
-    // void endif_directive(PPToken& token); // TODO:
+    void else_directive();
     // void undef_directive(PPToken& token); // TODO:
     // void pragma_directive(PPToken& token); // TODO:
     // void include_directive(PPToken& token); // TODO:
