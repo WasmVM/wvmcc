@@ -21,5 +21,73 @@ using namespace WasmVM;
 using namespace Testing;
 
 Suite pp_directive {
+    Test("if", {
+        PreProcessor pp(std::filesystem::path("if.c"));
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "2");
+        pp.get();
+        pp.get();
 
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 15 && token.value().pos.col() == 5);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "4");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 17 && token.value().pos.col() == 9);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "5");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 21 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "6");
+        pp.get();
+        pp.get();
+    })
+    Test("else", {
+        PreProcessor pp(std::filesystem::path("else.c"));
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "2");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 8 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "3");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 23 && token.value().pos.col() == 5);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "8");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 35 && token.value().pos.col() == 5);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "11");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 45 && token.value().pos.col() == 5);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "14");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 57 && token.value().pos.col() == 5);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "17");
+        pp.get();
+        pp.get();
+    })
+    Test("elif", {
+        
+    })
 };
