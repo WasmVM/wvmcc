@@ -88,6 +88,30 @@ Suite pp_directive {
         pp.get();
     })
     Test("elif", {
-        
+        PreProcessor pp(std::filesystem::path("elif.c"));
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "2");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 14 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "5");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 20 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "7");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 35 && token.value().pos.col() == 5);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "12");
+        pp.get();
+        pp.get();
     })
 };
