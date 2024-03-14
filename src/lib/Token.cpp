@@ -21,6 +21,7 @@
 #include <sstream>
 #include <cctype>
 #include <cinttypes>
+#include <climits>
 
 using namespace WasmVM;
 
@@ -523,6 +524,7 @@ std::string Token::str(){
                 case TokenType::Punctuator::LessEqual :
                     return"<=";
             }
+            return "";
         },
         [](TokenType::NewLine&){
             return "\n";
