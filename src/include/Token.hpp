@@ -6,7 +6,6 @@
 #include <type_traits>
 #include <string>
 #include <cstddef>
-#include <cuchar>
 #include <SourceStream.hpp>
 
 namespace WasmVM {
