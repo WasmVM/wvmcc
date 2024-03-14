@@ -12,10 +12,10 @@ macro(add_test_suite suite_name)
   )
   target_compile_definitions(${suite_name}_target PUBLIC CCTEST)
   set_target_properties(${suite_name}_target
-    PROPERTIES OUTPUT_NAME ${suite_name}/${suite_name}
+    PROPERTIES OUTPUT_NAME test_${suite_name}
   )
   add_test(NAME ${suite_name}
-    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/${suite_name}/${suite_name}
+    COMMAND ${CMAKE_CURRENT_BINARY_DIR}/test_${suite_name}
     WORKING_DIRECTORY ${CMAKE_CURRENT_LIST_DIR}/${suite_name}
   )
   set_property(TEST ${suite_name} PROPERTY 
