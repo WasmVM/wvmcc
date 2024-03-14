@@ -29,8 +29,8 @@ struct SourceStreamBase {
 template<class T> requires std::derived_from<T, std::basic_istream<typename T::char_type>>
 struct SourceStream : public T, SourceStreamBase<typename T::int_type, typename T::char_type> {
 
-    using int_type = T::int_type;
-    using char_type = T::char_type;
+    using int_type = typename T::int_type;
+    using char_type = typename T::char_type;
     using base_type = SourceStreamBase<int_type, char_type>;
 
     template<class... Args>
