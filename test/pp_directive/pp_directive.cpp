@@ -118,20 +118,26 @@ Suite pp_directive {
         PreProcessor pp(std::filesystem::path("defined.c"));
         PreProcessor::PPToken token;
         Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
-        Expect(token.value().pos.line() == 3 && token.value().pos.col() == 1);
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
         Expect(((TokenType::PPNumber)token.value()).sequence == "1");
         pp.get();
         pp.get();
 
         Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
-        Expect(token.value().pos.line() == 6 && token.value().pos.col() == 1);
+        Expect(token.value().pos.line() == 8 && token.value().pos.col() == 1);
         Expect(((TokenType::PPNumber)token.value()).sequence == "2");
         pp.get();
         pp.get();
 
         Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
-        Expect(token.value().pos.line() == 14 && token.value().pos.col() == 1);
-        Expect(((TokenType::PPNumber)token.value()).sequence == "5");
+        Expect(token.value().pos.line() == 22 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "6");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 24 && token.value().pos.col() == 1);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "7");
         pp.get();
         pp.get();
     })

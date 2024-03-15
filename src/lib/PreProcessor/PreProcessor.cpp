@@ -204,7 +204,12 @@ void PreProcessor::defined_operator(){
 void PreProcessor::if_directive(){
     // defined operator
     defined_operator();
-    // TODO: replace identifier
+    // replace identifier with 0
+    for(PPToken& token : line){
+        if(token.hold<TokenType::Identifier>()){
+            token.emplace(Token(TokenType::PPNumber("0")));
+        }
+    }
     if(evaluate_condition()){
         if_level += 1;
     }else{
@@ -221,8 +226,13 @@ void PreProcessor::if_directive(){
                     }else if((direcitve_name == "endif") || (direcitve_name == "else") || (direcitve_name == "elif")){
                         if(nest_level == 0){
                             if(direcitve_name == "elif"){
-                                // TODO: defined operator
-                                // TODO: replace identifier
+                                defined_operator();
+                                // replace identifier with 0
+                                for(PPToken& token : line){
+                                    if(token.hold<TokenType::Identifier>()){
+                                        token.emplace(Token(TokenType::PPNumber("0")));
+                                    }
+                                }
                                 if(evaluate_condition()){
                                     if_level += 1;
                                     return;
