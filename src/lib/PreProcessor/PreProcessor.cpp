@@ -89,9 +89,9 @@ PreProcessor::PPToken PreProcessor::get(){
                     replace_macro(line, macros, true);
                     if_directive();
                 }else if(direcitve_name == "ifdef"){
-                    // TODO:
+                    ifdef_ifndef_directive(true);
                 }else if(direcitve_name == "ifndef"){
-                    // TODO:
+                    ifdef_ifndef_directive(false);
                 }else if(direcitve_name == "elif"){
                     if_level -= 1;
                     if(if_level < 0){
@@ -201,6 +201,50 @@ void PreProcessor::defined_operator(){
     }
 }
 
+void PreProcessor::jump_else(){
+    size_t nest_level = 0;
+    while(readline()){
+        if(line.type == Line::Directive){
+            Line::iterator cur = skip_whitespace(std::next(line.begin()), line.end());
+            if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+                std::string direcitve_name = ((TokenType::Identifier)cur->value()).sequence;
+                line.erase(line.begin(), std::next(cur));
+                if(direcitve_name == "if"){
+                    nest_level += 1;
+                }else if((direcitve_name == "endif") || (direcitve_name == "else") || (direcitve_name == "elif")){
+                    if(nest_level == 0){
+                        if(direcitve_name == "elif"){
+                            defined_operator();
+                            // replace identifier with 0
+                            for(PPToken& token : line){
+                                if(token.hold<TokenType::Identifier>()){
+                                    token.emplace(Token(TokenType::PPNumber("0")));
+                                }
+                            }
+                            if(evaluate_condition()){
+                                if_level += 1;
+                                return;
+                            }else{
+                                continue;
+                            }
+                        }
+                        if(!line.empty()){
+                            Exception::Warning("extra tokens at end of #endif or #else directive");
+                        }
+                        if(direcitve_name == "else"){
+                            if_level += 1;
+                        }
+                        return;
+                    }
+                    if(direcitve_name == "endif"){
+                        nest_level -= 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
 void PreProcessor::if_directive(){
     // defined operator
     defined_operator();
@@ -213,48 +257,7 @@ void PreProcessor::if_directive(){
     if(evaluate_condition()){
         if_level += 1;
     }else{
-        // Jump to else or end
-        size_t nest_level = 0;
-        while(readline()){
-            if(line.type == Line::Directive){
-                Line::iterator cur = skip_whitespace(std::next(line.begin()), line.end());
-                if(cur != line.end() && cur->hold<TokenType::Identifier>()){
-                    std::string direcitve_name = ((TokenType::Identifier)cur->value()).sequence;
-                    line.erase(line.begin(), std::next(cur));
-                    if(direcitve_name == "if"){
-                        nest_level += 1;
-                    }else if((direcitve_name == "endif") || (direcitve_name == "else") || (direcitve_name == "elif")){
-                        if(nest_level == 0){
-                            if(direcitve_name == "elif"){
-                                defined_operator();
-                                // replace identifier with 0
-                                for(PPToken& token : line){
-                                    if(token.hold<TokenType::Identifier>()){
-                                        token.emplace(Token(TokenType::PPNumber("0")));
-                                    }
-                                }
-                                if(evaluate_condition()){
-                                    if_level += 1;
-                                    return;
-                                }else{
-                                    continue;
-                                }
-                            }
-                            if(!line.empty()){
-                                Exception::Warning("extra tokens at end of #endif or #else directive");
-                            }
-                            if(direcitve_name == "else"){
-                                if_level += 1;
-                            }
-                            return;
-                        }
-                        if(direcitve_name == "endif"){
-                            nest_level -= 1;
-                        }
-                    }
-                }
-            }
-        }
+        jump_else();
     }
 }
 
@@ -281,5 +284,19 @@ void PreProcessor::else_directive(){
                 }
             }
         }
+    }
+}
+
+void PreProcessor::ifdef_ifndef_directive(bool if_def){
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+        std::string macro_name = ((TokenType::Identifier)cur->value()).sequence;
+        if(macros.contains(macro_name) ^ if_def){
+            jump_else();
+        }else{
+            if_level += 1;
+        }
+    }else{
+        throw Exception::Exception("expected identifier in #ifdef or #ifndef");
     }
 }

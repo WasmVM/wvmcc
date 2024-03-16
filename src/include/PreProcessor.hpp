@@ -114,11 +114,11 @@ private:
     bool evaluate_condition();
     bool readline();
     void defined_operator();
+    void jump_else();
 
     void define_directive();
     void if_directive();
-    // void ifdef_directive();
-    // void ifndef_directive();
+    void ifdef_ifndef_directive(bool if_def = true);
     void else_directive();
     // void undef_directive(PPToken& token); // TODO:
     // void pragma_directive(PPToken& token); // TODO:
