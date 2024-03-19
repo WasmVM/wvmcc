@@ -82,7 +82,7 @@ private:
         Result primary();
         Result unary();
         Result multiplicative();
-        Result additive(); // TODO:
+        Result additive();
         Result shift(); // TODO:
         Result relational(); // TODO:
         Result equality(); // TODO:

@@ -83,7 +83,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::binary_op(PreProcesso
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return multiplicative(); // TODO:
+    return additive(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -92,7 +92,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::primary(){
         throw Exception::Exception("empty primary expression of preprocessor");
     }
     if(cur->hold<TokenType::Punctuator>() && (((TokenType::Punctuator)cur->value()).type == TokenType::Punctuator::Paren_L)){
-        cur = skip_whitespace(std::next(cur), end);
+        cur = std::next(cur);
         PreProcessor::Expression::Result result = eval();
         if(cur == end || !cur->hold<TokenType::Punctuator>() || !(((TokenType::Punctuator)cur->value()).type == TokenType::Punctuator::Paren_R)){
             throw Exception::Error(std::prev(cur)->value().pos, "expect ')' in proprocessor primary expression");
@@ -172,21 +172,18 @@ PreProcessor::Expression::Result PreProcessor::Expression::unary(){
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::multiplicative(){
-    Line::iterator head = cur;
     PreProcessor::Expression::Result res = unary();
-    cur = skip_whitespace(cur, end);
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
     if(cur != end && cur->hold<TokenType::Punctuator>()){
-        head = skip_whitespace(head, end);
         TokenType::Punctuator punct = cur->value();
-        cur = std::next(cur);
-        PreProcessor::Expression::Result operand = multiplicative();
-        implicit_cast(res, operand);
-        switch(punct.type){
-            case TokenType::Punctuator::Aster :
-                cur = std::next(cur);
+        if(punct.type == TokenType::Punctuator::Aster || punct.type == TokenType::Punctuator::Slash || punct.type == TokenType::Punctuator::Perce){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = multiplicative();
+            implicit_cast(res, operand);
+            if(punct.type == TokenType::Punctuator::Aster){
                 return binary_op<std::multiplies>(res, operand);
-            case TokenType::Punctuator::Slash :
-                cur = std::next(cur);
+            }else if(punct.type == TokenType::Punctuator::Slash){
                 std::visit(overloaded {
                     [&](auto val){
                         if(val == 0){
@@ -195,8 +192,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::multiplicative(){
                     }
                 }, operand);
                 return binary_op<std::divides>(res, operand);
-            case TokenType::Punctuator::Perce :
-                cur = std::next(cur);
+            }else{
                 if(std::holds_alternative<double>(res) || std::holds_alternative<double>(operand)){
                     throw Exception::Error(head->value().pos, "operands of '%' should be integral");
                 }
@@ -208,8 +204,27 @@ PreProcessor::Expression::Result PreProcessor::Expression::multiplicative(){
                     }
                 }, operand);
                 return binary_op<std::modulus>(res, operand);
-            default:
-            break;
+            }
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::additive(){
+    PreProcessor::Expression::Result res = multiplicative();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Plus || punct.type == TokenType::Punctuator::Minus){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = additive();
+            implicit_cast(res, operand);
+            if(punct.type == TokenType::Punctuator::Plus){
+                return binary_op<std::plus>(res, operand);
+            }else{
+                return binary_op<std::minus>(res, operand);
+            }
         }
     }
     return res;
