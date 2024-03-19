@@ -17,6 +17,7 @@
 
 #include <cerrno>
 #include <limits>
+#include <climits>
 #include <functional>
 #include <Error.hpp>
 
@@ -48,7 +49,9 @@ void PreProcessor::Expression::implicit_cast(PreProcessor::Expression::Result& o
 }
 
 template<template<typename T> class Op, typename T>
-    requires std::is_same_v<Op<T>, std::modulus<T>>
+    requires std::is_same_v<Op<T>, std::modulus<T>> 
+        || std::is_same_v<Op<T>, PreProcessor::Expression::lshift<T>>
+        || std::is_same_v<Op<T>, PreProcessor::Expression::rshift<T>>
 PreProcessor::Expression::Result PreProcessor::Expression::binary_op(PreProcessor::Expression::Result& op1, PreProcessor::Expression::Result& op2){
     return std::visit<Result>(overloaded {
         [&](uintmax_t op1){
@@ -83,7 +86,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::binary_op(PreProcesso
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return additive(); // TODO:
+    return shift(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -224,6 +227,42 @@ PreProcessor::Expression::Result PreProcessor::Expression::additive(){
                 return binary_op<std::plus>(res, operand);
             }else{
                 return binary_op<std::minus>(res, operand);
+            }
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::shift(){
+    PreProcessor::Expression::Result res = additive();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Shift_L || punct.type == TokenType::Punctuator::Shift_R){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = shift();
+            if(std::holds_alternative<double>(res) || std::holds_alternative<double>(operand)){
+                throw Exception::Error(head->value().pos, "operands of shift expressions should be integral");
+            }
+            implicit_cast(res, operand);
+            if(std::holds_alternative<intmax_t>(operand) && (std::get<intmax_t>(operand) < 0)){
+                throw Exception::Error(head->value().pos, "right operands of shift expressions should be positive");
+            }
+            std::visit(overloaded {
+                [&](auto val){
+                    if(val >= (sizeof(uintmax_t) * CHAR_BIT)){
+                        throw Exception::Error(head->value().pos, "right operands of shift expressions too large");
+                    }
+                }
+            }, operand);
+            if(punct.type == TokenType::Punctuator::Shift_L){
+                if(std::holds_alternative<intmax_t>(res) && (std::get<intmax_t>(res) < 0)){
+                    throw Exception::Error(head->value().pos, "left operands of left shift should be positive");
+                }
+                return binary_op<lshift>(res, operand);
+            }else{
+                return binary_op<rshift>(res, operand);
             }
         }
     }

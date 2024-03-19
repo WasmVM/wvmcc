@@ -83,7 +83,7 @@ private:
         Result unary();
         Result multiplicative();
         Result additive();
-        Result shift(); // TODO:
+        Result shift();
         Result relational(); // TODO:
         Result equality(); // TODO:
         Result bitwise_AND(); // TODO:
@@ -92,6 +92,21 @@ private:
         Result logical_AND(); // TODO:
         Result conditional(); // TODO:
 
+        template<typename T = void>
+        struct lshift {
+            template<typename U>
+            U operator()(U& lhs, U& rhs){
+                return lhs << rhs;
+            }
+        };
+        template<typename T = void>
+        struct rshift{
+            template<typename U>
+            U operator()(U& lhs, U& rhs){
+                return lhs >> rhs;
+            }
+        };
+
         template<typename T>
         static Result& cast_result(Result& res);
 
@@ -99,6 +114,8 @@ private:
         static Result binary_op(Result&, Result&);
         template<template<typename T> class Op, typename T = void>
             requires std::is_same_v<Op<T>, std::modulus<T>>
+                || std::is_same_v<Op<T>, lshift<T>>
+                || std::is_same_v<Op<T>, rshift<T>>
         static Result binary_op(Result&, Result&);
 
         static void implicit_cast(Result&, Result&);
