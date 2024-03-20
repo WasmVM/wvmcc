@@ -52,6 +52,9 @@ template<template<typename T> class Op, typename T>
     requires std::is_same_v<Op<T>, std::modulus<T>> 
         || std::is_same_v<Op<T>, PreProcessor::Expression::lshift<T>>
         || std::is_same_v<Op<T>, PreProcessor::Expression::rshift<T>>
+        || std::is_same_v<Op<T>, std::bit_and<T>>
+        || std::is_same_v<Op<T>, std::bit_or<T>>
+        || std::is_same_v<Op<T>, std::bit_xor<T>>
 PreProcessor::Expression::Result PreProcessor::Expression::binary_op(PreProcessor::Expression::Result& op1, PreProcessor::Expression::Result& op2){
     return std::visit<Result>(overloaded {
         [&](uintmax_t op1){
@@ -104,7 +107,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::relation_op(PreProces
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return equality(); // TODO:
+    return bitwise_inclusive_OR(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -326,6 +329,63 @@ PreProcessor::Expression::Result PreProcessor::Expression::equality(){
             }else{
                 return relation_op<std::not_equal_to>(res, operand);
             }
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::bitwise_AND(){
+    PreProcessor::Expression::Result res = equality();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Amp){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = bitwise_AND();
+            if(std::holds_alternative<double>(res) || std::holds_alternative<double>(operand)){
+                throw Exception::Error(head->value().pos, "operands of bitwise AND expressions should be integral");
+            }
+            implicit_cast(res, operand);
+            return binary_op<std::bit_and>(res, operand);
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::bitwise_exclusive_OR(){
+    PreProcessor::Expression::Result res = bitwise_AND();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Caret){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = bitwise_exclusive_OR();
+            if(std::holds_alternative<double>(res) || std::holds_alternative<double>(operand)){
+                throw Exception::Error(head->value().pos, "operands of bitwise XOR expressions should be integral");
+            }
+            implicit_cast(res, operand);
+            return binary_op<std::bit_xor>(res, operand);
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::bitwise_inclusive_OR(){
+    PreProcessor::Expression::Result res = bitwise_exclusive_OR();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Bar){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = bitwise_inclusive_OR();
+            if(std::holds_alternative<double>(res) || std::holds_alternative<double>(operand)){
+                throw Exception::Error(head->value().pos, "operands of bitwise OR expressions should be integral");
+            }
+            implicit_cast(res, operand);
+            return binary_op<std::bit_or>(res, operand);
         }
     }
     return res;

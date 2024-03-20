@@ -86,9 +86,9 @@ private:
         Result shift();
         Result relational();
         Result equality();
-        Result bitwise_AND(); // TODO:
-        Result bitwise_exclusive_OR(); // TODO:
-        Result bitwise_inclusive_OR(); // TODO:
+        Result bitwise_AND();
+        Result bitwise_exclusive_OR();
+        Result bitwise_inclusive_OR();
         Result logical_AND(); // TODO:
         Result logical_OR(); // TODO:
         Result conditional(); // TODO:
@@ -117,6 +117,9 @@ private:
             requires std::is_same_v<Op<T>, std::modulus<T>>
                 || std::is_same_v<Op<T>, lshift<T>>
                 || std::is_same_v<Op<T>, rshift<T>>
+                || std::is_same_v<Op<T>, std::bit_and<T>>
+                || std::is_same_v<Op<T>, std::bit_or<T>>
+                || std::is_same_v<Op<T>, std::bit_xor<T>>
         static Result binary_op(Result&, Result&);
         template<template<typename T> class Op, typename T = void>
         static Result relation_op(Result&, Result&);
