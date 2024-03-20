@@ -85,7 +85,7 @@ private:
         Result additive();
         Result shift();
         Result relational();
-        Result equality(); // TODO:
+        Result equality();
         Result bitwise_AND(); // TODO:
         Result bitwise_exclusive_OR(); // TODO:
         Result bitwise_inclusive_OR(); // TODO:

@@ -104,7 +104,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::relation_op(PreProces
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return relational(); // TODO:
+    return equality(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -305,6 +305,26 @@ PreProcessor::Expression::Result PreProcessor::Expression::relational(){
                 return relation_op<std::less>(res, operand);
             }else{
                 return relation_op<std::less_equal>(res, operand);
+            }
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::equality(){
+    PreProcessor::Expression::Result res = relational();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::DoubleEqual || punct.type == TokenType::Punctuator::ExclamEqual){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = equality();
+            implicit_cast(res, operand);
+            if(punct.type == TokenType::Punctuator::DoubleEqual){
+                return relation_op<std::equal_to>(res, operand);
+            }else{
+                return relation_op<std::not_equal_to>(res, operand);
             }
         }
     }
