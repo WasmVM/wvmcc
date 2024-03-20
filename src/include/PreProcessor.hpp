@@ -84,12 +84,13 @@ private:
         Result multiplicative();
         Result additive();
         Result shift();
-        Result relational(); // TODO:
+        Result relational();
         Result equality(); // TODO:
         Result bitwise_AND(); // TODO:
         Result bitwise_exclusive_OR(); // TODO:
         Result bitwise_inclusive_OR(); // TODO:
         Result logical_AND(); // TODO:
+        Result logical_OR(); // TODO:
         Result conditional(); // TODO:
 
         template<typename T = void>
@@ -117,6 +118,8 @@ private:
                 || std::is_same_v<Op<T>, lshift<T>>
                 || std::is_same_v<Op<T>, rshift<T>>
         static Result binary_op(Result&, Result&);
+        template<template<typename T> class Op, typename T = void>
+        static Result relation_op(Result&, Result&);
 
         static void implicit_cast(Result&, Result&);
     };

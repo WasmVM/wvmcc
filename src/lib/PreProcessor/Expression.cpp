@@ -85,8 +85,26 @@ PreProcessor::Expression::Result PreProcessor::Expression::binary_op(PreProcesso
     }, op1);
 }
 
+template<template<typename T> class Op, typename T>
+PreProcessor::Expression::Result PreProcessor::Expression::relation_op(PreProcessor::Expression::Result& op1, PreProcessor::Expression::Result& op2){
+    return std::visit<Result>(overloaded {
+        [&](double op1){
+            Op<double> op;
+            return op(op1, std::get<double>(op2)) ? (intmax_t)1 : (intmax_t)0;
+        },
+        [&](uintmax_t op1){
+            Op<uintmax_t> op;
+            return op(op1, std::get<uintmax_t>(op2)) ? (intmax_t)1 : (intmax_t)0;
+        },
+        [&](intmax_t op1){
+            Op<intmax_t> op;
+            return op(op1, std::get<intmax_t>(op2)) ? (intmax_t)1 : (intmax_t)0;
+        }
+    }, op1);
+}
+
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return shift(); // TODO:
+    return relational(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -263,6 +281,30 @@ PreProcessor::Expression::Result PreProcessor::Expression::shift(){
                 return binary_op<lshift>(res, operand);
             }else{
                 return binary_op<rshift>(res, operand);
+            }
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::relational(){
+    PreProcessor::Expression::Result res = shift();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Great || punct.type == TokenType::Punctuator::GreatEqual || punct.type == TokenType::Punctuator::Less || punct.type == TokenType::Punctuator::LessEqual){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = relational();
+            implicit_cast(res, operand);
+            if(punct.type == TokenType::Punctuator::Great){
+                return relation_op<std::greater>(res, operand);
+            }else if(punct.type == TokenType::Punctuator::GreatEqual){
+                return relation_op<std::greater_equal>(res, operand);
+            }else if(punct.type == TokenType::Punctuator::Less){
+                return relation_op<std::less>(res, operand);
+            }else{
+                return relation_op<std::less_equal>(res, operand);
             }
         }
     }
