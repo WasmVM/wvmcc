@@ -89,8 +89,8 @@ private:
         Result bitwise_AND();
         Result bitwise_exclusive_OR();
         Result bitwise_inclusive_OR();
-        Result logical_AND(); // TODO:
-        Result logical_OR(); // TODO:
+        Result logical_AND();
+        Result logical_OR();
         Result conditional(); // TODO:
 
         template<typename T = void>

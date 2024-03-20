@@ -107,7 +107,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::relation_op(PreProces
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return bitwise_inclusive_OR(); // TODO:
+    return logical_OR(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -386,6 +386,38 @@ PreProcessor::Expression::Result PreProcessor::Expression::bitwise_inclusive_OR(
             }
             implicit_cast(res, operand);
             return binary_op<std::bit_or>(res, operand);
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::logical_AND(){
+    PreProcessor::Expression::Result res = bitwise_inclusive_OR();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::DoubleAmp){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = logical_AND();
+            implicit_cast(res, operand);
+            return relation_op<std::logical_and>(res, operand);
+        }
+    }
+    return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::logical_OR(){
+    PreProcessor::Expression::Result res = logical_AND();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::DoubleBar){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand = logical_OR();
+            implicit_cast(res, operand);
+            return relation_op<std::logical_or>(res, operand);
         }
     }
     return res;
