@@ -91,7 +91,7 @@ private:
         Result bitwise_inclusive_OR();
         Result logical_AND();
         Result logical_OR();
-        Result conditional(); // TODO:
+        Result conditional();
 
         template<typename T = void>
         struct lshift {

@@ -107,7 +107,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::relation_op(PreProces
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return logical_OR(); // TODO:
+    return conditional(); // TODO:
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){
@@ -421,4 +421,34 @@ PreProcessor::Expression::Result PreProcessor::Expression::logical_OR(){
         }
     }
     return res;
+}
+
+PreProcessor::Expression::Result PreProcessor::Expression::conditional(){
+    PreProcessor::Expression::Result cond = logical_OR();
+    Line::iterator head = skip_whitespace(cur, end);
+    cur = head;
+    if(cur != end && cur->hold<TokenType::Punctuator>()){
+        TokenType::Punctuator punct = cur->value();
+        if(punct.type == TokenType::Punctuator::Query){
+            cur = std::next(cur);
+            PreProcessor::Expression::Result operand_true = eval();
+            if(cur != end && cur->hold<TokenType::Punctuator>() && ((TokenType::Punctuator)cur->value()).type == TokenType::Punctuator::Colon){
+                cur = std::next(cur);
+                PreProcessor::Expression::Result operand_false = conditional();
+                implicit_cast(operand_true, operand_false);
+                if(std::visit(overloaded {
+                    [](auto val){
+                        return val != 0;
+                    }
+                }, cond)){
+                    return operand_true;
+                }else{
+                    return operand_false;
+                }
+            }else{
+                throw Exception::Error(head->value().pos, "missing ':' in conditional expression");
+            }
+        }
+    }
+    return cond;
 }
