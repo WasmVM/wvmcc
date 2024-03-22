@@ -2,7 +2,6 @@ name: CMake on multiple platforms
 
 on:
   push:
-    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
 
@@ -11,8 +10,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     name: Build & Test
     strategy:
-      # Set fail-fast to false to ensure that feedback is delivered for all matrix combinations. Consider changing this to true when your workflow is stable.
-      fail-fast: false
+      fail-fast: true
 
       matrix:
         os: [ubuntu-latest, macos-14]
