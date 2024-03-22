@@ -29,6 +29,8 @@ struct CommandParser {
         std::string alias;
     };
     struct Repeated : public Fixed {
+        Repeated(std::string name, std::string desc = "", unsigned number = 0, std::string alias = "")
+            : Fixed(name, desc, number), alias(alias) {}
         Repeated(std::string name, std::string desc = "", std::string alias = "")
             : Fixed(name, desc, 0), alias(alias) {}
         std::string alias;

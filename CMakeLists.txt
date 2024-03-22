@@ -17,9 +17,9 @@ include_directories(${WASMVM_INCLUDE_DIR})
 link_directories(${WASMVM_LIBRARY_DIR})
 
 if(UNIX)
-    set(DEFAULT_MODULE_PATH "/usr/local/lib" CACHE PATH "Default module lookup path")
+  set(DEFAULT_LOOKUP_PATH "/usr/local" CACHE PATH "Default lookup path")
 elseif(WIN32)
-    set(DEFAULT_MODULE_PATH $ENV{PATH} CACHE PATH "Default module lookup path")
+  set(DEFAULT_LOOKUP_PATH "C:\\Program Files\\${PROJECT_NAME}" CACHE PATH "Default lookup path")
 endif(UNIX)
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/src/include)

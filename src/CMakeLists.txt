@@ -19,6 +19,6 @@ target_link_libraries(wasmvm-cc
   cc
 )
 target_compile_definitions(wasmvm-cc PUBLIC
-  DEFAULT_MODULE_PATH="${DEFAULT_MODULE_PATH}"
+  DEFAULT_LOOKUP_PATH="${DEFAULT_LOOKUP_PATH}"
   WVMCC_VERSION="${CMAKE_PROJECT_VERSION}"
 )

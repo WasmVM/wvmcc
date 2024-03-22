@@ -39,8 +39,8 @@ struct PreProcessor {
         bool skipped = false;
     };
 
-    PreProcessor(std::filesystem::path path);
-    PreProcessor(std::filesystem::path path, std::string source);
+    PreProcessor(std::filesystem::path path, std::vector<std::filesystem::path> include_paths = {});
+    PreProcessor(std::filesystem::path path, std::string source, std::vector<std::filesystem::path> include_paths = {});
     PPToken get();
 
 #ifndef CCTEST
@@ -130,6 +130,7 @@ private:
     std::stack<std::unique_ptr<Stream>> streams;
     Line line;
     std::unordered_map<std::string, Macro> macros = {};
+    std::vector<std::filesystem::path> include_paths;
     ssize_t if_level = 0;
 
     static Line::iterator skip_whitespace(Line::iterator it, Line::iterator end);
@@ -143,9 +144,9 @@ private:
     void if_directive();
     void ifdef_ifndef_directive(bool if_def = true);
     void else_directive();
+    void include_directive();
     // void undef_directive(PPToken& token); // TODO:
     // void pragma_directive(PPToken& token); // TODO:
-    // void include_directive(PPToken& token); // TODO:
     // void line_directive(PPToken& token); // TODO:
     // void error_directive(PPToken& token);
 };

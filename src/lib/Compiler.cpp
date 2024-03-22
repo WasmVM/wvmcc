@@ -26,7 +26,7 @@ Compiler::Compiler(std::vector<std::filesystem::path> include_paths) :
 }
 
 WasmModule Compiler::compile(std::filesystem::path source_path){
-    PreProcessor pp(source_path);
+    PreProcessor pp(source_path, include_paths);
     // TODO:
     for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
         std::cout << tok->pos << " " << tok.value();

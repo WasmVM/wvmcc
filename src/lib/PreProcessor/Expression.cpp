@@ -107,7 +107,7 @@ PreProcessor::Expression::Result PreProcessor::Expression::relation_op(PreProces
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::eval(){
-    return conditional(); // TODO:
+    return conditional();
 }
 
 PreProcessor::Expression::Result PreProcessor::Expression::primary(){

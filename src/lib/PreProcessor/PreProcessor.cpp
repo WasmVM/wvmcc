@@ -24,10 +24,12 @@
 
 using namespace WasmVM;
 
-PreProcessor::PreProcessor(std::filesystem::path path){
+PreProcessor::PreProcessor(std::filesystem::path path, std::vector<std::filesystem::path> includes) : include_paths(includes)
+{
     streams.emplace(new SourceStream<std::ifstream>(path, path));
 }
-PreProcessor::PreProcessor(std::filesystem::path path, std::string source){
+PreProcessor::PreProcessor(std::filesystem::path path, std::string source, std::vector<std::filesystem::path> includes) : include_paths(includes)
+{
     streams.emplace(new SourceStream<std::istringstream>(path, source));
 }
 
@@ -125,6 +127,10 @@ PreProcessor::PPToken PreProcessor::get(){
                     // TODO:
                 }else if(direcitve_name == "pragma"){
                     // TODO:
+                }else if(direcitve_name == "include"){
+                    include_directive();
+                }else{
+                    throw Exception::Error(pos, "unknown preprocessor directive");
                 }
             }
         }
@@ -151,23 +157,10 @@ bool PreProcessor::evaluate_condition(){
     Expression expr(line.begin(), line.end());
     return std::visit(overloaded {
         [](auto val){
-            //std::cout << val << std::endl; // TODO:
             return val != 0;
         }
     }, expr.eval());
 }
-
-// void PreProcessor::error_directive(PPToken& token){
-//     auto pos = token.value().pos;
-//     token = streams.top().get();
-//     skip_whitespace(token, streams.top());
-//     if(token && std::holds_alternative<TokenType::StringLiteral>(token.value())
-//         && std::holds_alternative<std::string>(((TokenType::StringLiteral)token.value()).value)){
-//         throw Exception::Error(pos, std::get<std::string>(((TokenType::StringLiteral)token.value()).value));
-//     }else{
-//         throw Exception::Error(pos, "");
-//     }
-// }
 
 void PreProcessor::defined_operator(){
     Line::iterator cur = skip_whitespace(line.begin(), line.end());
@@ -298,5 +291,35 @@ void PreProcessor::ifdef_ifndef_directive(bool if_def){
         }
     }else{
         throw Exception::Exception("expected identifier in #ifdef or #ifndef");
+    }
+}
+
+void PreProcessor::include_directive(){
+    replace_macro(line, macros);
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    if(cur != line.end() && cur->hold<TokenType::HeaderName>()){
+        SourcePos pos = cur->value().pos;
+        TokenType::HeaderName header = cur->value();
+        cur = skip_whitespace(std::next(cur), line.end());
+        if(cur != line.end()){
+            throw Exception::Exception("extra tokens in #include");
+        }
+        std::filesystem::path header_path(header.sequence.substr(1, header.sequence.size() - 2));
+        std::filesystem::path cur_parent = pos.path.parent_path();
+        if(header.sequence.front() == '"' && std::filesystem::exists(cur_parent / header_path)){
+            header_path = cur_parent / header_path;
+            streams.emplace(new SourceStream<std::ifstream>(header_path, header_path));
+            return;
+        }
+        for(std::filesystem::path include_path : include_paths){
+            if(std::filesystem::exists(include_path / header_path)){
+                header_path = include_path / header_path;
+                streams.emplace(new SourceStream<std::ifstream>(header_path, header_path));
+                return;
+            }
+        }
+        throw Exception::Error(pos, "'" + header_path.string() + "' file not found");
+    }else{
+        throw Exception::Exception("expected header name in #include");
     }
 }

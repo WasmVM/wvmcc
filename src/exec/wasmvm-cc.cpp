@@ -37,6 +37,10 @@
 #define WVMCC_VERSION "dev"
 #endif
 
+#ifndef DEFAULT_LOOKUP_PATH
+#define DEFAULT_LOOKUP_PATH ""
+#endif
+
 using namespace WasmVM;
 
 int main(int argc, const char* argv[]){
@@ -48,9 +52,9 @@ int main(int argc, const char* argv[]){
         CommandParser::Optional("--pp", "Preprocessor only", "-E"),
         CommandParser::Optional("--comp", "Compile only, do not assemble", "-S"),
         CommandParser::Optional("--as", "Compile and/or assemble, do not link", "-c"),
-        CommandParser::Repeated("--includes", "Add directory to header files search list", "-I"),
-        CommandParser::Repeated("--libraries", "Add directory to library files search list", "-L"),
-        CommandParser::Repeated("--library", "Add library", "-l"),
+        CommandParser::Repeated("--includes", "Add directory to header files search list", 1, "-I"),
+        CommandParser::Repeated("--libraries", "Add directory to library files search list", 1, "-L"),
+        CommandParser::Repeated("--library", "Add library", 1, "-l"),
         CommandParser::Fixed("input_files", "C source files (.c), Wasm binary file (.wasm) or WasmVM static library (.a)", (unsigned int)-1)
     },
         "wasmvm-cc : C compiler for WasmVM"
@@ -181,7 +185,7 @@ int main(int argc, const char* argv[]){
                 linker_config.library_paths.emplace_back(library_path);
             }
         }
-        linker_config.library_paths.emplace_back(DEFAULT_MODULE_PATH);
+        linker_config.library_paths.emplace_back(std::filesystem::path(DEFAULT_LOOKUP_PATH));
         if(args["library"]){
             std::vector<std::string> libraries = std::get<std::vector<std::string>>(args["library"].value());
             for(std::string library : libraries){
