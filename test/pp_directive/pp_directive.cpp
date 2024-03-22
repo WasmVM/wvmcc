@@ -17,6 +17,8 @@
 #include <PreProcessor.hpp>
 #include <Error.hpp>
 
+#include <vector>
+
 using namespace WasmVM;
 using namespace Testing;
 
@@ -138,6 +140,38 @@ Suite pp_directive {
         Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
         Expect(token.value().pos.line() == 24 && token.value().pos.col() == 1);
         Expect(((TokenType::PPNumber)token.value()).sequence == "7");
+        pp.get();
+        pp.get();
+    })
+    Test("include", {
+        std::vector<std::filesystem::path> include_paths {"."}; 
+        PreProcessor pp(std::filesystem::path("include/include.c"), include_paths);
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path == "in.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "in");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path == "out.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "out");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path == "out.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "out");
+        pp.get();
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
+        Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path == "out.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "out");
         pp.get();
         pp.get();
     })
