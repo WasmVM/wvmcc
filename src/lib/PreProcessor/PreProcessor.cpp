@@ -120,7 +120,7 @@ PreProcessor::PPToken PreProcessor::get(){
                 }else if(direcitve_name == "define"){
                     define_directive();
                 }else if(direcitve_name == "undef"){
-                    // TODO:
+                    undef_directive();
                 }else if(direcitve_name == "line"){
                     // TODO:
                 }else if(direcitve_name == "error"){
@@ -321,5 +321,20 @@ void PreProcessor::include_directive(){
         throw Exception::Error(pos, "'" + header_path.string() + "' file not found");
     }else{
         throw Exception::Exception("expected header name in #include");
+    }
+}
+
+void PreProcessor::undef_directive(){
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+        std::string macro_name = ((TokenType::Identifier)cur->value()).sequence;
+        if(macros.contains(macro_name)){
+            macros.erase(macro_name);
+        }
+        if(skip_whitespace(std::next(cur), line.end()) != line.end()){
+            throw Exception::Exception("extra tokens in #undef");
+        }
+    }else{
+        throw Exception::Exception("expected identifier in #undef");
     }
 }

@@ -145,7 +145,7 @@ private:
     void ifdef_ifndef_directive(bool if_def = true);
     void else_directive();
     void include_directive();
-    // void undef_directive(PPToken& token); // TODO:
+    void undef_directive();
     // void pragma_directive(PPToken& token); // TODO:
     // void line_directive(PPToken& token); // TODO:
     // void error_directive(PPToken& token);

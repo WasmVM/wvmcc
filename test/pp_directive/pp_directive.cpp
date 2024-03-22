@@ -149,30 +149,43 @@ Suite pp_directive {
         PreProcessor::PPToken token;
         Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
         Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
-        Expect(token.value().pos.path == "in.h");
-        Expect(((TokenType::StringLiteral)token.value()).sequence == "in");
+        Expect(token.value().pos.path.filename() == "in.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "\"in\"");
         pp.get();
         pp.get();
 
         Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
         Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
-        Expect(token.value().pos.path == "out.h");
-        Expect(((TokenType::StringLiteral)token.value()).sequence == "out");
+        Expect(token.value().pos.path.filename() == "out.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "\"out\"");
         pp.get();
         pp.get();
 
         Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
         Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
-        Expect(token.value().pos.path == "out.h");
-        Expect(((TokenType::StringLiteral)token.value()).sequence == "out");
+        Expect(token.value().pos.path.filename() == "out.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "\"out\"");
         pp.get();
         pp.get();
 
         Expect((token = pp.get()) && token.hold<TokenType::StringLiteral>());
         Expect(token.value().pos.line() == 2 && token.value().pos.col() == 1);
-        Expect(token.value().pos.path == "out.h");
-        Expect(((TokenType::StringLiteral)token.value()).sequence == "out");
+        Expect(token.value().pos.path.filename() == "out.h");
+        Expect(((TokenType::StringLiteral)token.value()).sequence == "\"out\"");
         pp.get();
+        pp.get();
+    })
+    Test("undef", {
+        PreProcessor pp(std::filesystem::path("undef.c"));
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 11);
+        Expect(((TokenType::PPNumber)token.value()).sequence == "3");
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::Identifier>());
+        Expect(token.value().pos.line() == 4 && token.value().pos.col() == 1);
+        Expect(((TokenType::Identifier)token.value()).sequence == "X");
         pp.get();
     })
 };
