@@ -209,4 +209,8 @@ Suite pp_directive {
         Expect(((TokenType::PPNumber)token.value()).sequence == "3");
         pp.get();
     })
+    Test("error", {
+        PreProcessor pp(std::filesystem::path("error.c"));
+        Throw(Exception::Exception, pp.get());
+    })
 };

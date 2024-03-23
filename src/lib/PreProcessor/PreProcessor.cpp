@@ -124,7 +124,7 @@ PreProcessor::PPToken PreProcessor::get(){
                 }else if(direcitve_name == "line"){
                     line_directive();
                 }else if(direcitve_name == "error"){
-                    // TODO:
+                    error_directive();
                 }else if(direcitve_name == "pragma"){
                     // TODO:
                 }else if(direcitve_name == "include"){
@@ -364,4 +364,17 @@ void PreProcessor::line_directive(){
     }else{
         throw Exception::Exception("expected header name in #include");
     }
+}
+
+void PreProcessor::error_directive(){
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    SourcePos pos = cur->value().pos;
+    std::stringstream message;
+    while(cur != line.end() && !cur->hold<TokenType::NewLine>()){
+        if(cur->has_value()){
+            message << cur->value();
+        }
+        cur = std::next(cur);
+    }
+    throw Exception::Error(pos, message.str());
 }

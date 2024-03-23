@@ -147,8 +147,8 @@ private:
     void include_directive();
     void undef_directive();
     void line_directive();
+    void error_directive();
     // void pragma_directive(PPToken& token); // TODO:
-    // void error_directive(PPToken& token); // TODO:
 };
 
 } // namespace WasmVM
