@@ -122,7 +122,7 @@ PreProcessor::PPToken PreProcessor::get(){
                 }else if(direcitve_name == "undef"){
                     undef_directive();
                 }else if(direcitve_name == "line"){
-                    // TODO:
+                    line_directive();
                 }else if(direcitve_name == "error"){
                     // TODO:
                 }else if(direcitve_name == "pragma"){
@@ -336,5 +336,32 @@ void PreProcessor::undef_directive(){
         }
     }else{
         throw Exception::Exception("expected identifier in #undef");
+    }
+}
+
+void PreProcessor::line_directive(){
+    replace_macro(line, macros);
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    if(cur != line.end() && cur->hold<TokenType::PPNumber>()){
+        SourcePos pos = cur->value().pos;
+        if(((TokenType::PPNumber)cur->value()).type != TokenType::PPNumber::Int){
+            throw Exception::Error(pos, "line number should be integer");
+        }
+        intmax_t line_num = ((TokenType::PPNumber)cur->value()).get<intmax_t>();
+        if(line_num <= 0){
+            throw Exception::Error(pos, "line number should be larger than zero");
+        }
+        cur = skip_whitespace(std::next(cur), line.end());
+        streams.top()->pos.col() = 0;
+        streams.top()->pos.line() = (size_t) line_num;
+        if(cur != line.end() && cur->hold<TokenType::StringLiteral>()){
+            streams.top()->pos.path = std::get<std::string>(((TokenType::StringLiteral)cur->value()).value);
+            cur = skip_whitespace(std::next(cur), line.end());
+        }
+        if(cur != line.end()){
+            throw Exception::Exception("extra tokens in #line");
+        }
+    }else{
+        throw Exception::Exception("expected header name in #include");
     }
 }

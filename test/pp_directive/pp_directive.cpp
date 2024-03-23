@@ -188,4 +188,25 @@ Suite pp_directive {
         Expect(((TokenType::Identifier)token.value()).sequence == "X");
         pp.get();
     })
+    Test("line", {
+        PreProcessor pp(std::filesystem::path("line.c"));
+        PreProcessor::PPToken token;
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 1 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path.filename() == "line.c");
+        Expect(((TokenType::PPNumber)token.value()).sequence == "1");
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 10 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path.filename() == "line.c");
+        Expect(((TokenType::PPNumber)token.value()).sequence == "2");
+        pp.get();
+
+        Expect((token = pp.get()) && token.hold<TokenType::PPNumber>());
+        Expect(token.value().pos.line() == 8 && token.value().pos.col() == 1);
+        Expect(token.value().pos.path.filename() == "test.c");
+        Expect(((TokenType::PPNumber)token.value()).sequence == "3");
+        pp.get();
+    })
 };
