@@ -213,4 +213,43 @@ Suite pp_directive {
         PreProcessor pp(std::filesystem::path("error.c"));
         Throw(Exception::Exception, pp.get());
     })
+    Test("pragma", {
+        PreProcessor pp(std::filesystem::path("pragma.c"));
+        PreProcessor::PPToken token;
+        pp.get();
+        Expect(pp.pragma.fp_contract.has_value() && (pp.pragma.fp_contract.value() == true));
+        pp.get();
+
+        pp.get();
+        Expect(pp.pragma.fp_contract.has_value() && (pp.pragma.fp_contract.value() == false));
+        pp.get();
+
+        pp.get();
+        Expect(!pp.pragma.fp_contract.has_value());
+        pp.get();
+
+        pp.get();
+        Expect(pp.pragma.fenv_access.has_value() && (pp.pragma.fenv_access.value() == true));
+        pp.get();
+
+        pp.get();
+        Expect(pp.pragma.fenv_access.has_value() && (pp.pragma.fenv_access.value() == false));
+        pp.get();
+
+        pp.get();
+        Expect(!pp.pragma.fenv_access.has_value());
+        pp.get();
+
+        pp.get();
+        Expect(pp.pragma.cx_limited_value.has_value() && (pp.pragma.cx_limited_value.value() == true));
+        pp.get();
+
+        pp.get();
+        Expect(pp.pragma.cx_limited_value.has_value() && (pp.pragma.cx_limited_value.value() == false));
+        pp.get();
+
+        pp.get();
+        Expect(!pp.pragma.cx_limited_value.has_value());
+        pp.get();
+    })
 };

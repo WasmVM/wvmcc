@@ -43,6 +43,12 @@ struct PreProcessor {
     PreProcessor(std::filesystem::path path, std::string source, std::vector<std::filesystem::path> include_paths = {});
     PPToken get();
 
+    struct {
+        std::optional<bool> fp_contract;
+        std::optional<bool> fenv_access;
+        std::optional<bool> cx_limited_value;
+    } pragma;
+
 #ifndef CCTEST
 private:
 #endif
@@ -148,7 +154,7 @@ private:
     void undef_directive();
     void line_directive();
     void error_directive();
-    // void pragma_directive(PPToken& token); // TODO:
+    void pragma_directive();
 };
 
 } // namespace WasmVM

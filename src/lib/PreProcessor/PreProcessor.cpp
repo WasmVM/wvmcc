@@ -126,7 +126,7 @@ PreProcessor::PPToken PreProcessor::get(){
                 }else if(direcitve_name == "error"){
                     error_directive();
                 }else if(direcitve_name == "pragma"){
-                    // TODO:
+                    pragma_directive();
                 }else if(direcitve_name == "include"){
                     include_directive();
                 }else{
@@ -377,4 +377,42 @@ void PreProcessor::error_directive(){
         cur = std::next(cur);
     }
     throw Exception::Error(pos, message.str());
+}
+
+void PreProcessor::pragma_directive(){
+    Line::iterator cur = skip_whitespace(line.begin(), line.end());
+    SourcePos pos = cur->value().pos;
+    if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+        if(((TokenType::Identifier)cur->value()).sequence == "STDC"){
+            cur = skip_whitespace(std::next(cur), line.end());
+            if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+                TokenType::Identifier name = cur->value();
+                cur = skip_whitespace(std::next(cur), line.end());
+                if(cur != line.end() && cur->hold<TokenType::Identifier>()){
+                    TokenType::Identifier on_off = cur->value();
+                    std::optional<bool> toggle;
+                    if(on_off.sequence == "ON"){
+                        toggle = true;
+                    }else if(on_off.sequence == "OFF"){
+                        toggle = false;
+                    }else if(on_off.sequence == "DEFAULT"){
+                        toggle.reset();
+                    }else{
+                        throw Exception::Error(cur->value().pos, "invalid value of ON/OFF switch");
+                    }
+                    if(name.sequence == "FP_CONTRACT"){
+                        pragma.fp_contract.swap(toggle);
+                        return;
+                    }else if(name.sequence == "FENV_ACCESS"){
+                        pragma.fenv_access.swap(toggle);
+                        return;
+                    }else if(name.sequence == "CX_LIMITED_RANGE"){
+                        pragma.cx_limited_value.swap(toggle);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    throw Exception::Error(pos, "unknown pragma");
 }
