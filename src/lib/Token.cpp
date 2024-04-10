@@ -22,6 +22,7 @@
 #include <cctype>
 #include <cinttypes>
 #include <climits>
+#include <unordered_set>
 
 using namespace WasmVM;
 
@@ -333,6 +334,16 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         [&](TokenType::Identifier& tok){
             os << tok.sequence;
         },
+        [&](TokenType::IntegerConstant& tok){
+            std::visit(overloaded{
+                [&](auto val){
+                    os << val;
+                }
+            }, tok);
+        },
+        [&](TokenType::FloatingConstant& tok){
+            os << tok;
+        },       
         [&](TokenType::CharacterConstant& tok){
             std::visit(overloaded {
                 [&](int val){
@@ -547,34 +558,51 @@ std::string Token::str(){
         [](TokenType::StringLiteral& tok){
             return tok.sequence;
         },
+        [](TokenType::IntegerConstant& tok){
+            std::stringstream ss;
+            std::visit(overloaded{
+                [&](auto val){
+                    ss << val;
+                }
+            }, tok);
+            return ss.str();
+        },
+        [](TokenType::FloatingConstant& tok){
+            std::stringstream ss;
+            ss << tok;
+            return ss.str();
+        },
     }, *this);
+}
+
+int TokenType::PPNumber::base(){
+    int base = 10;
+    if(sequence.starts_with("0x") || sequence.starts_with("0X")){
+        base = 16;
+    }else if(sequence.starts_with("0")){
+        base = 8;
+    }
+    return base;
 }
 
 template<>
 intmax_t TokenType::PPNumber::get<intmax_t>(){
-    int base = 10;
-    if(sequence.starts_with("0x") || sequence.starts_with("0X")){
-        base = 16;
-    }else if(sequence.starts_with("0")){
-        base = 8;
-    }
-    return std::strtoimax(sequence.c_str(), nullptr, base);
+    return std::strtoimax(sequence.c_str(), nullptr, base());
 }
 
 template<>
 uintmax_t TokenType::PPNumber::get<uintmax_t>(){
-    int base = 10;
-    if(sequence.starts_with("0x") || sequence.starts_with("0X")){
-        base = 16;
-    }else if(sequence.starts_with("0")){
-        base = 8;
-    }
-    return std::strtoumax(sequence.c_str(), nullptr, base);
+    return std::strtoumax(sequence.c_str(), nullptr, base());
 }
 
 template<>
 double TokenType::PPNumber::get<double>(){
     return std::stod(sequence);
+}
+
+template<>
+long double TokenType::PPNumber::get<long double>(){
+    return std::stold(sequence);
 }
 
 TokenType::CharacterConstant::CharacterConstant(std::string sequence) : sequence(sequence){
@@ -679,6 +707,23 @@ TokenType::StringLiteral::StringLiteral(std::string sequence) : sequence(sequenc
             }
         }, value);
     }
+}
+
+TokenType::Keyword::Keyword(std::string val) : value(val){
+    if(!is_keyword(value)){
+        throw Exception::Exception("unknown keyword '" + value + "'");
+    }
+}
+
+bool TokenType::Keyword::is_keyword(std::string val){
+    static const std::unordered_set<std::string> keywords {
+        "auto", "extern", "short", "while", "break", "float", "signed", "case", "for", "sizeof",
+        "char", "goto", "static", "const", "if", "struct", "continue", "inline", "switch", "default",
+        "int", "typedef", "_Generic", "do", "long", "union", "_Imaginary", "double", "register", "unsigned",
+        "_Noreturn", "else", "restrict", "void", "_Static_assert", "enum", "return", "volatile", "_Thread_local", "_Alignas",
+        "_Alignaof", "_Atomic", "_Bool", "_Complex"
+    };
+    return keywords.contains(val);
 }
 
 bool TokenType::operator==(const NewLine&, const NewLine&){

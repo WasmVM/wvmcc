@@ -23,6 +23,18 @@ struct Punctuator {
         return type == op.type;
     };
 };
+
+struct Keyword {
+    Keyword(std::string);
+    std::string value;
+
+    static bool is_keyword(std::string);
+    
+    constexpr bool operator==(const Keyword& op) const {
+        return value == op.value;
+    };
+};
+
 struct NewLine {};
 bool operator==(const NewLine&, const NewLine&);
 
@@ -35,6 +47,8 @@ struct PPNumber {
     T get();
     enum {Float, Int} type;
     std::string sequence;
+private:
+    int base();
 };
 bool operator==(const PPNumber&, const PPNumber&);
 
@@ -64,9 +78,33 @@ struct HeaderName {
 };
 bool operator==(const HeaderName&, const HeaderName&);
 
-using Base = std::variant<Punctuator, NewLine, WhiteSpace, PPNumber, Identifier, CharacterConstant, HeaderName, StringLiteral>;
+using IntegerConstant = std::variant<intmax_t, uintmax_t>;
+using FloatingConstant = long double;
 
-template<typename T> requires std::is_same_v<T, Punctuator> || std::is_same_v<T, NewLine> || std::is_same_v<T, WhiteSpace> || std::is_same_v<T, PPNumber> || std::is_same_v<T, Identifier> || std::is_same_v<T, CharacterConstant> || std::is_same_v<T, HeaderName> || std::is_same_v<T, StringLiteral>
+using Base = std::variant<
+    Punctuator,
+    NewLine,
+    WhiteSpace,
+    PPNumber,
+    Identifier,
+    IntegerConstant,
+    FloatingConstant,
+    CharacterConstant,
+    HeaderName,
+    StringLiteral
+>;
+
+template<typename T> requires
+    std::is_same_v<T, Punctuator> ||
+    std::is_same_v<T, NewLine> ||
+    std::is_same_v<T, WhiteSpace> ||
+    std::is_same_v<T, PPNumber> ||
+    std::is_same_v<T, Identifier> ||
+    std::is_same_v<T, IntegerConstant> ||
+    std::is_same_v<T, FloatingConstant> ||
+    std::is_same_v<T, CharacterConstant> ||
+    std::is_same_v<T, HeaderName> ||
+    std::is_same_v<T, StringLiteral>
 struct is_valid {
     template<typename U> requires std::is_constructible_v<T, U>
     is_valid(){}

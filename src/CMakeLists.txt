@@ -6,6 +6,7 @@ add_library(cc
   lib/PreProcessor/Macro.cpp
   lib/PreProcessor/Expression.cpp
   lib/Token.cpp
+  lib/Lexer.cpp
 )
 
 add_executable(wasmvm-cc
