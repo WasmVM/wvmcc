@@ -29,6 +29,7 @@ struct PreProcessor {
         PPToken(std::nullopt_t n = std::nullopt) : std::optional<Token>(){}
         PPToken(Token&& token) : std::optional<Token>(token){}
         PPToken(Token& token) : std::optional<Token>(token){}
+        PPToken(std::optional<Token>& token) : std::optional<Token>(token){}
 
         template<typename T> requires TokenType::is_valid<T>::value
         inline bool hold() {

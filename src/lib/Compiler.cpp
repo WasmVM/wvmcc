@@ -16,6 +16,7 @@
 #include <Compiler.hpp>
 
 #include <PreProcessor.hpp>
+#include <Lexer.hpp>
 #include <iostream> // FIXME:
 
 using namespace WasmVM;
@@ -27,17 +28,27 @@ Compiler::Compiler(std::vector<std::filesystem::path> include_paths) :
 
 WasmModule Compiler::compile(std::filesystem::path source_path){
     PreProcessor pp(source_path, include_paths);
+    Lexer lexer(pp);
     // TODO:
-    for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
-        std::cout << tok->pos << " " << tok.value();
-        if(!tok.expanded.empty()){
-            std::cout << " (expand from: ";
-            for(std::string exp_macro : tok.expanded){
-                std::cout << exp_macro << " ";
-            }
-            std::cout << ")";
+    for(std::optional<Token> tok = lexer.get(); tok.has_value(); tok = lexer.get()){
+        Token& token = tok.value();
+        std::cout << token.pos;
+        if(std::holds_alternative<TokenType::Keyword>(token)){
+            std::cout << " [Keyword] ";
+        }else if(std::holds_alternative<TokenType::Identifier>(token)){
+            std::cout << " [Identifier] ";
+        }else if(std::holds_alternative<TokenType::IntegerConstant>(token)){
+            std::cout << " [Integer] ";
+        }else if(std::holds_alternative<TokenType::FloatingConstant>(token)){
+            std::cout << " [Float] ";
+        }else if(std::holds_alternative<TokenType::CharacterConstant>(token)){
+            std::cout << " [Character] ";
+        }else if(std::holds_alternative<TokenType::StringLiteral>(token)){
+            std::cout << " [String] ";
+        }else if(std::holds_alternative<TokenType::Punctuator>(token)){
+            std::cout << " [Punct] ";
         }
-        std::cout << std::endl;
+        std::cout << token << std::endl;
     }
     return WasmModule(); // FIXME:
 }

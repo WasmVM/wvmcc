@@ -2,6 +2,7 @@
 #define WVMCC_Lexer_DEF
 
 #include <PreProcessor.hpp>
+#include <deque>
 
 namespace WasmVM {
 
@@ -12,6 +13,8 @@ struct Lexer {
 
 private:
     PreProcessor &pp;
+    std::deque<Token> buffer;
+    std::optional<Token> next();
 };
 
 } // namespace WasmVM

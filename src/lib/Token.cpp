@@ -334,6 +334,9 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         [&](TokenType::Identifier& tok){
             os << tok.sequence;
         },
+        [&](TokenType::Keyword& tok){
+            os << tok.value;
+        },
         [&](TokenType::IntegerConstant& tok){
             std::visit(overloaded{
                 [&](auto val){
@@ -549,6 +552,9 @@ std::string Token::str(){
         [](TokenType::Identifier& tok){
             return tok.sequence;
         },
+        [](TokenType::Keyword& tok){
+            return tok.value;
+        },
         [](TokenType::CharacterConstant& tok){
             return tok.sequence;
         },
@@ -652,10 +658,6 @@ TokenType::CharacterConstant::CharacterConstant(std::string sequence) : sequence
     }
 }
 
-enum class StringPrefix {
-    none, L, u, u8, U
-};
-
 TokenType::StringLiteral::StringLiteral(std::string sequence) : sequence(sequence){
     auto seq_it = sequence.begin();
     int width = sizeof(char);
@@ -707,6 +709,56 @@ TokenType::StringLiteral::StringLiteral(std::string sequence) : sequence(sequenc
             }
         }, value);
     }
+}
+
+TokenType::StringLiteral& TokenType::StringLiteral::operator+=(TokenType::StringLiteral rhs){
+    if(value.index() == rhs.value.index()){
+        std::visit(overloaded {
+            [&](std::string& v){
+                v += std::get<std::string>(rhs.value);
+            },
+            [&](std::wstring& v){
+                v += std::get<std::wstring>(rhs.value);
+            },
+            [&](std::u8string& v){
+                v += std::get<std::u8string>(rhs.value);
+            },
+            [&](std::u16string& v){
+                v += std::get<std::u16string>(rhs.value);
+            },
+            [&](std::u32string& v){
+                v += std::get<std::u32string>(rhs.value);
+            }
+        }, value);
+    }else if(std::holds_alternative<std::string>(value)){
+        std::string str = std::get<std::string>(value);
+        std::visit(overloaded {
+            [&](std::string& v){},
+            [&](std::wstring& v){
+                value.emplace<std::wstring>(str.begin(), str.end()) += v;
+            },
+            [&](std::u8string& v){
+                value.emplace<std::u8string>(str.begin(), str.end()) += v;
+            },
+            [&](std::u16string& v){
+                value.emplace<std::u16string>(str.begin(), str.end()) += v;
+            },
+            [&](std::u32string& v){
+                value.emplace<std::u32string>(str.begin(), str.end()) += v;
+            }
+        }, rhs.value);
+    }else if(std::holds_alternative<std::string>(rhs.value)){
+        std::string& str = std::get<std::string>(rhs.value);
+        std::visit(overloaded {
+            [&](auto& v){
+                v.append(str.begin(), str.end());
+            }
+        }, value);
+    }else{
+        throw Exception::Exception("unable to concate string literal with different type");
+    }
+    
+    return *this;
 }
 
 TokenType::Keyword::Keyword(std::string val) : value(val){

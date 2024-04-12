@@ -68,7 +68,8 @@ bool operator==(const CharacterConstant&, const CharacterConstant&);
 struct StringLiteral {
     StringLiteral(std::string sequence);
     std::string sequence;
-    std::variant<std::string, std::wstring, std::u8string, std::u16string, std::u32string> value;
+    std::variant<std::string, std::u8string, std::wstring, std::u16string, std::u32string> value;
+    StringLiteral& operator+=(StringLiteral);
 };
 bool operator==(const StringLiteral&, const StringLiteral&);
 
@@ -91,7 +92,8 @@ using Base = std::variant<
     FloatingConstant,
     CharacterConstant,
     HeaderName,
-    StringLiteral
+    StringLiteral,
+    Keyword
 >;
 
 template<typename T> requires
@@ -104,7 +106,8 @@ template<typename T> requires
     std::is_same_v<T, FloatingConstant> ||
     std::is_same_v<T, CharacterConstant> ||
     std::is_same_v<T, HeaderName> ||
-    std::is_same_v<T, StringLiteral>
+    std::is_same_v<T, StringLiteral> ||
+    std::is_same_v<T, Keyword>
 struct is_valid {
     template<typename U> requires std::is_constructible_v<T, U>
     is_valid(){}

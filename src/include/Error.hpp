@@ -12,6 +12,10 @@ struct Error : public Exception {
     SourcePos pos;
 };
 
+struct SyntaxError : public Error {
+    SyntaxError(SourcePos pos, std::string msg) : Error(pos, "syntax error:" + msg){}
+};
+
 } // namespace WasmVM
 } // namespace WasmVM
 
