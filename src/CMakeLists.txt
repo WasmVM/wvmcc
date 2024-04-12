@@ -11,7 +11,7 @@ add_library(cc
 
 add_executable(wasmvm-cc
   exec/wasmvm-cc.cpp
-  lib/CommandParser.cpp
+  exec/CommandParser.cpp
   lib/Linker.cpp
   lib/Archive.cpp
 )

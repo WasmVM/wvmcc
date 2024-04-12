@@ -26,8 +26,8 @@
 #include <Error.hpp>
 #include <WasmVM.hpp>
 #include <structures/WasmModule.hpp>
-#include <color.hpp>
-#include <CommandParser.hpp>
+#include "color.hpp"
+#include "CommandParser.hpp"
 #include <Archive.hpp>
 #include <Linker.hpp>
 #include <PreProcessor.hpp>

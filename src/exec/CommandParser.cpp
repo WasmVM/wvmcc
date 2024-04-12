@@ -2,14 +2,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-#include <CommandParser.hpp>
+#include "CommandParser.hpp"
 
 #include <queue>
 #include <iostream>
 #include <cstdlib>
 
 #include <Util.hpp>
-#include <color.hpp>
+#include "color.hpp"
 
 static void help(std::filesystem::path program, std::string desc,
     std::vector<CommandParser::Opt> options
