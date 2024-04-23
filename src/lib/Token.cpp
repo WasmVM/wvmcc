@@ -172,156 +172,255 @@ static uintmax_t retrieve_char(std::string::iterator& seq_it){
     return char_val;
 }
 
-std::ostream& operator<<(std::ostream& os, Token& token){
+std::ostream& operator<<(std::ostream& os, WasmVM::TokenType::Punctuator& punct){
+    switch(punct.type){
+        case TokenType::Punctuator::Hash :
+            os << '#';
+        break;
+        case TokenType::Punctuator::Bracket_L :
+            os << '[';
+        break;
+        case TokenType::Punctuator::Bracket_R :
+            os << ']';
+        break;
+        case TokenType::Punctuator::Paren_L :
+            os << '(';
+        break;
+        case TokenType::Punctuator::Paren_R :
+            os << ')';
+        break;
+        case TokenType::Punctuator::Brace_L :
+            os << '{';
+        break;
+        case TokenType::Punctuator::Brace_R :
+            os << '}';
+        break;
+        case TokenType::Punctuator::Semi :
+            os << ';';
+        break;
+        case TokenType::Punctuator::Tlide :
+            os << '~';
+        break;
+        case TokenType::Punctuator::Query :
+            os << '?';
+        break;
+        case TokenType::Punctuator::Comma :
+            os << ',';
+        break;
+        case TokenType::Punctuator::DoubleHash :
+            os << "##";
+        break;
+        case TokenType::Punctuator::Dot :
+            os << ".";
+        break;
+        case TokenType::Punctuator::Ellipsis :
+            os << "...";
+        break;
+        case TokenType::Punctuator::Aster :
+            os << "*";
+        break;
+        case TokenType::Punctuator::AsterEqual :
+            os << "*=";
+        break;
+        case TokenType::Punctuator::Caret :
+            os << "^";
+        break;
+        case TokenType::Punctuator::CaretEqual :
+            os << "^=";
+        break;
+        case TokenType::Punctuator::Exclam :
+            os << "!";
+        break;
+        case TokenType::Punctuator::ExclamEqual :
+            os << "!=";
+        break;
+        case TokenType::Punctuator::Equal :
+            os << "=";
+        break;
+        case TokenType::Punctuator::DoubleEqual :
+            os << "==";
+        break;
+        case TokenType::Punctuator::Slash :
+            os << "/";
+        break;
+        case TokenType::Punctuator::SlashEqual :
+            os << "/=";
+        break;
+        case TokenType::Punctuator::Colon :
+            os << ":";
+        break;
+        case TokenType::Punctuator::Plus :
+            os << "+";
+        break;
+        case TokenType::Punctuator::DoublePlus :
+            os << "++";
+        break;
+        case TokenType::Punctuator::PlusEqual :
+            os << "+=";
+        break;
+        case TokenType::Punctuator::Amp :
+            os << "&";
+        break;
+        case TokenType::Punctuator::DoubleAmp :
+            os << "&&";
+        break;
+        case TokenType::Punctuator::AmpEqual :
+            os << "&=";
+        break;
+        case TokenType::Punctuator::Bar :
+            os << "|";
+        break;
+        case TokenType::Punctuator::DoubleBar :
+            os << "||";
+        break;
+        case TokenType::Punctuator::BarEqual :
+            os << "|=";
+        break;
+        case TokenType::Punctuator::Minus :
+            os << "-";
+        break;
+        case TokenType::Punctuator::DoubleMinus :
+            os << "--";
+        break;
+        case TokenType::Punctuator::MinusEqual :
+            os << "-=";
+        break;
+        case TokenType::Punctuator::Arrow :
+            os << "->";
+        break;
+        case TokenType::Punctuator::Shift_R :
+            os << ">>";
+        break;
+        case TokenType::Punctuator::Great :
+            os << ">";
+        break;
+        case TokenType::Punctuator::GreatEqual :
+            os << ">=";
+        break;
+        case TokenType::Punctuator::ShiftEqual_R :
+            os << ">>=";
+        break;
+        case TokenType::Punctuator::Perce :
+            os << "%";
+        break;
+        case TokenType::Punctuator::PerceEqual :
+            os << "%=";
+        break;
+        case TokenType::Punctuator::Shift_L :
+            os << "<<";
+        break;
+        case TokenType::Punctuator::ShiftEqual_L :
+            os << "<<=";
+        break;
+        case TokenType::Punctuator::Less :
+            os << "<";
+        break;
+        case TokenType::Punctuator::LessEqual :
+            os << "<=";
+        break;
+    }
+    return os;
+}
+std::ostream& operator<<(std::ostream& os, WasmVM::TokenType::Keyword& keyword){
+    return os << keyword.value;
+}
+std::ostream& operator<<(std::ostream& os, WasmVM::TokenType::Identifier& id){
+    return os << id.sequence;
+}
+std::ostream& operator<<(std::ostream& os, WasmVM::TokenType::IntegerConstant& integer){
+    std::visit(overloaded{
+        [&](auto val){
+            os << val;
+        }
+    }, integer);
+    return os;
+}
+std::ostream& operator<<(std::ostream& os, WasmVM::TokenType::CharacterConstant& character){
     std::visit(overloaded {
-        [&](TokenType::Punctuator& tok){
-            switch(tok.type){
-                case TokenType::Punctuator::Hash :
-                    os << '#';
-                break;
-                case TokenType::Punctuator::Bracket_L :
-                    os << '[';
-                break;
-                case TokenType::Punctuator::Bracket_R :
-                    os << ']';
-                break;
-                case TokenType::Punctuator::Paren_L :
-                    os << '(';
-                break;
-                case TokenType::Punctuator::Paren_R :
-                    os << ')';
-                break;
-                case TokenType::Punctuator::Brace_L :
-                    os << '{';
-                break;
-                case TokenType::Punctuator::Brace_R :
-                    os << '}';
-                break;
-                case TokenType::Punctuator::Semi :
-                    os << ';';
-                break;
-                case TokenType::Punctuator::Tlide :
-                    os << '~';
-                break;
-                case TokenType::Punctuator::Query :
-                    os << '?';
-                break;
-                case TokenType::Punctuator::Comma :
-                    os << ',';
-                break;
-                case TokenType::Punctuator::DoubleHash :
-                    os << "##";
-                break;
-                case TokenType::Punctuator::Dot :
-                    os << ".";
-                break;
-                case TokenType::Punctuator::Ellipsis :
-                    os << "...";
-                break;
-                case TokenType::Punctuator::Aster :
-                    os << "*";
-                break;
-                case TokenType::Punctuator::AsterEqual :
-                    os << "*=";
-                break;
-                case TokenType::Punctuator::Caret :
-                    os << "^";
-                break;
-                case TokenType::Punctuator::CaretEqual :
-                    os << "^=";
-                break;
-                case TokenType::Punctuator::Exclam :
-                    os << "!";
-                break;
-                case TokenType::Punctuator::ExclamEqual :
-                    os << "!=";
-                break;
-                case TokenType::Punctuator::Equal :
-                    os << "=";
-                break;
-                case TokenType::Punctuator::DoubleEqual :
-                    os << "==";
-                break;
-                case TokenType::Punctuator::Slash :
-                    os << "/";
-                break;
-                case TokenType::Punctuator::SlashEqual :
-                    os << "/=";
-                break;
-                case TokenType::Punctuator::Colon :
-                    os << ":";
-                break;
-                case TokenType::Punctuator::Plus :
-                    os << "+";
-                break;
-                case TokenType::Punctuator::DoublePlus :
-                    os << "++";
-                break;
-                case TokenType::Punctuator::PlusEqual :
-                    os << "+=";
-                break;
-                case TokenType::Punctuator::Amp :
-                    os << "&";
-                break;
-                case TokenType::Punctuator::DoubleAmp :
-                    os << "&&";
-                break;
-                case TokenType::Punctuator::AmpEqual :
-                    os << "&=";
-                break;
-                case TokenType::Punctuator::Bar :
-                    os << "|";
-                break;
-                case TokenType::Punctuator::DoubleBar :
-                    os << "||";
-                break;
-                case TokenType::Punctuator::BarEqual :
-                    os << "|=";
-                break;
-                case TokenType::Punctuator::Minus :
-                    os << "-";
-                break;
-                case TokenType::Punctuator::DoubleMinus :
-                    os << "--";
-                break;
-                case TokenType::Punctuator::MinusEqual :
-                    os << "-=";
-                break;
-                case TokenType::Punctuator::Arrow :
-                    os << "->";
-                break;
-                case TokenType::Punctuator::Shift_R :
-                    os << ">>";
-                break;
-                case TokenType::Punctuator::Great :
-                    os << ">";
-                break;
-                case TokenType::Punctuator::GreatEqual :
-                    os << ">=";
-                break;
-                case TokenType::Punctuator::ShiftEqual_R :
-                    os << ">>=";
-                break;
-                case TokenType::Punctuator::Perce :
-                    os << "%";
-                break;
-                case TokenType::Punctuator::PerceEqual :
-                    os << "%=";
-                break;
-                case TokenType::Punctuator::Shift_L :
-                    os << "<<";
-                break;
-                case TokenType::Punctuator::ShiftEqual_L :
-                    os << "<<=";
-                break;
-                case TokenType::Punctuator::Less :
-                    os << "<";
-                break;
-                case TokenType::Punctuator::LessEqual :
-                    os << "<=";
-                break;
+        [&](int val){
+            os << "'";
+            if(val == '\''){
+                os << "\\";
+            }
+            print_char(os, val);
+        },
+        [&](wchar_t val){
+            os << "L'";
+            if(val == L'\''){
+                os << "\\";
+            }
+            print_char(os, val, sizeof(wchar_t));
+        },
+        [&](char16_t val){
+            os << "u'";
+            if(val == u'\''){
+                os << "\\";
+            }
+            print_char(os, val, sizeof(char16_t));
+        },
+        [&](char32_t val){
+            os << "U'";
+            if(val == U'\''){
+                os << "\\";
+            }
+            print_char(os, val, sizeof(char32_t));
+        }
+    }, character.value);
+    return os << "'";
+}
+std::ostream& operator<<(std::ostream& os, WasmVM::TokenType::StringLiteral& str){
+    std::visit(overloaded {
+        [&](std::string str){
+            os << "\"";
+            for(char ch : str){
+                if(ch == '\"'){
+                    os << "\\";
+                }
+                print_char(os, ch, sizeof(char));
             }
         },
+        [&](std::u8string str){
+            os << "u8\"";
+            for(char8_t ch : str){
+                if(ch == '\"'){
+                    os << "\\";
+                }
+                print_char(os, ch, sizeof(char8_t));
+            }
+        },
+        [&](std::wstring str){
+            os << "L\"";
+            for(wchar_t ch : str){
+                if(ch == L'\"'){
+                    os << "\\";
+                }
+                print_char(os, ch, sizeof(wchar_t));
+            }
+        },
+        [&](std::u16string str){
+            os << "u\"";
+            for(char16_t ch : str){
+                if(ch == u'\"'){
+                    os << "\\";
+                }
+                print_char(os, ch, sizeof(char16_t));
+            }
+        },
+        [&](std::u32string str){
+            os << "U\"";
+            for(char32_t ch : str){
+                if(ch == U'\"'){
+                    os << "\\";
+                }
+                print_char(os, ch, sizeof(char32_t));
+            }
+        }
+    }, str.value);
+    return os << "\"";
+}
+
+std::ostream& operator<<(std::ostream& os, Token& token){
+    std::visit(overloaded {
         [&](TokenType::NewLine&){
             os << std::endl;
         },
@@ -331,108 +430,12 @@ std::ostream& operator<<(std::ostream& os, Token& token){
         [&](TokenType::PPNumber& tok){
             os << tok.sequence;
         },
-        [&](TokenType::Identifier& tok){
-            os << tok.sequence;
-        },
-        [&](TokenType::Keyword& tok){
-            os << tok.value;
-        },
-        [&](TokenType::IntegerConstant& tok){
-            std::visit(overloaded{
-                [&](auto val){
-                    os << val;
-                }
-            }, tok);
-        },
-        [&](TokenType::FloatingConstant& tok){
-            os << tok;
-        },       
-        [&](TokenType::CharacterConstant& tok){
-            std::visit(overloaded {
-                [&](int val){
-                    os << "'";
-                    if(val == '\''){
-                        os << "\\";
-                    }
-                    print_char(os, val);
-                },
-                [&](wchar_t val){
-                    os << "L'";
-                    if(val == L'\''){
-                        os << "\\";
-                    }
-                    print_char(os, val, sizeof(wchar_t));
-                },
-                [&](char16_t val){
-                    os << "u'";
-                    if(val == u'\''){
-                        os << "\\";
-                    }
-                    print_char(os, val, sizeof(char16_t));
-                },
-                [&](char32_t val){
-                    os << "U'";
-                    if(val == U'\''){
-                        os << "\\";
-                    }
-                    print_char(os, val, sizeof(char32_t));
-                }
-            }, tok.value);
-            os << "'";
-        },
         [&](TokenType::HeaderName& tok){
             os << tok.sequence;
         },
-        [&](TokenType::StringLiteral& tok){
-            std::visit(overloaded {
-                [&](std::string str){
-                    os << "\"";
-                    for(char ch : str){
-                        if(ch == '\"'){
-                            os << "\\";
-                        }
-                        print_char(os, ch, sizeof(char));
-                    }
-                },
-                [&](std::u8string str){
-                    os << "u8\"";
-                    for(char8_t ch : str){
-                        if(ch == '\"'){
-                            os << "\\";
-                        }
-                        print_char(os, ch, sizeof(char8_t));
-                    }
-                },
-                [&](std::wstring str){
-                    os << "L\"";
-                    for(wchar_t ch : str){
-                        if(ch == L'\"'){
-                            os << "\\";
-                        }
-                        print_char(os, ch, sizeof(wchar_t));
-                    }
-                },
-                [&](std::u16string str){
-                    os << "u\"";
-                    for(char16_t ch : str){
-                        if(ch == u'\"'){
-                            os << "\\";
-                        }
-                        print_char(os, ch, sizeof(char16_t));
-                    }
-                },
-                [&](std::u32string str){
-                    os << "U\"";
-                    for(char32_t ch : str){
-                        if(ch == U'\"'){
-                            os << "\\";
-                        }
-                        print_char(os, ch, sizeof(char32_t));
-                    }
-                }
-            }, tok.value);
-            os << "\"";
-        },
+        [&](auto& tok){
+            os << tok;
+        }
     }, token);
     return os;
 }
@@ -773,7 +776,7 @@ bool TokenType::Keyword::is_keyword(std::string val){
         "char", "goto", "static", "const", "if", "struct", "continue", "inline", "switch", "default",
         "int", "typedef", "_Generic", "do", "long", "union", "_Imaginary", "double", "register", "unsigned",
         "_Noreturn", "else", "restrict", "void", "_Static_assert", "enum", "return", "volatile", "_Thread_local", "_Alignas",
-        "_Alignaof", "_Atomic", "_Bool", "_Complex"
+        "_Alignof", "_Atomic", "_Bool", "_Complex"
     };
     return keywords.contains(val);
 }

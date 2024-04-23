@@ -134,5 +134,11 @@ struct Token : public TokenType::Base {
 } // namespace WasmVM
 
 std::ostream& operator<<(std::ostream&, WasmVM::Token&);
+std::ostream& operator<<(std::ostream&, WasmVM::TokenType::Punctuator&);
+std::ostream& operator<<(std::ostream&, WasmVM::TokenType::Keyword&);
+std::ostream& operator<<(std::ostream&, WasmVM::TokenType::Identifier&);
+std::ostream& operator<<(std::ostream&, WasmVM::TokenType::IntegerConstant&);
+std::ostream& operator<<(std::ostream&, WasmVM::TokenType::CharacterConstant&);
+std::ostream& operator<<(std::ostream&, WasmVM::TokenType::StringLiteral&);
 
 #endif

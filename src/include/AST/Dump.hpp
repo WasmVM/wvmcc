@@ -4,11 +4,6 @@
 #include <ostream>
 #include <AST/Expr.hpp>
 
-namespace WasmVM {
-namespace AST {
+std::ostream& operator<< (std::ostream&, WasmVM::AST::PrimaryExpr&&);
 
-std::ostream& operator<< (std::ostream&, const PrimaryExpr&);
-
-} // namespace AST
-} // namespace WasmVM
 #endif

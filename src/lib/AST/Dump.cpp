@@ -37,8 +37,38 @@ std::ostream& operator<< (std::ostream& os, indent in) {
     return os << std::string(2 * in.level, ' ');
 }
 
-std::ostream& AST::operator<< (std::ostream& os, const AST::PrimaryExpr& prim){
+std::ostream& operator<< (std::ostream& os, AST::PrimaryExpr&& prim){
     os << indent() << "<PrimaryExpression>" << std::endl;
+    ++indent();
+    std::visit(overloaded {
+        [&](TokenType::Identifier& id){
+            os << indent() << id << std::endl;
+        },
+        [&](TokenType::StringLiteral& str){
+            os << indent() << str << std::endl;
+        },
+        [&](TokenType::IntegerConstant& val){
+            os << indent() << val << std::endl;
+        },
+        [&](TokenType::CharacterConstant& val){
+            os << indent() << val << std::endl;
+        },
+        [&](TokenType::FloatingConstant& val){
+            os << indent() << val << std::endl;
+        },
+        [&](TokenType::Punctuator& punct){
+            if(punct.type == TokenType::Punctuator::Paren_L){
+                // TODO: expression
+            }
+        },
+        [&](TokenType::Keyword& keyword){
+            if(keyword.value == "_Generic"){
+                // TODO: generic-selectiom
+            }
+        },
+        [&](auto&){}
+    }, prim);
+    --indent();
     os << indent() << "</PrimaryExpression>" << std::endl;
     return os;
 }

@@ -16,7 +16,6 @@ namespace AST {
 
 // struct Expression;
 using PrimaryExpr_Base = std::variant<
-    std::monostate,
     TokenType::Identifier,
     TokenType::StringLiteral,
     TokenType::IntegerConstant,
