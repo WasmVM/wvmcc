@@ -19,6 +19,12 @@
 using namespace WasmVM;
 using namespace AST;
 
+template<> PrimaryExpr::PrimaryExpr(TokenType::Identifier value) : PrimaryExpr::Base(value) {}
+template<> PrimaryExpr::PrimaryExpr(TokenType::StringLiteral value) : PrimaryExpr::Base(value) {}
+template<> PrimaryExpr::PrimaryExpr(TokenType::IntegerConstant value) : PrimaryExpr::Base(value) {}
+template<> PrimaryExpr::PrimaryExpr(TokenType::FloatingConstant value) : PrimaryExpr::Base(value) {}
+template<> PrimaryExpr::PrimaryExpr(TokenType::CharacterConstant value) : PrimaryExpr::Base(value) {}
+
 std::optional<PrimaryExpr> PrimaryExpr::parse(Lexer& lexer){
     std::optional<Token> token = lexer.get();
     if(token){
@@ -45,3 +51,5 @@ std::optional<PrimaryExpr> PrimaryExpr::parse(Lexer& lexer){
     }
     return std::nullopt;
 }
+
+
