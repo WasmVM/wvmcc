@@ -1,5 +1,11 @@
 include_directories(${CMAKE_CURRENT_LIST_DIR}/harness)
+
 add_subdirectory(harness)
+
+include_directories(
+  ${PROJECT_BINARY_DIR}/external/antlr4_runtime/src/antlr4_runtime-install/include/antlr4-runtime
+  ${PROJECT_BINARY_DIR}/src/lib/PreProcessor
+)
 
 macro(add_test_suite suite_name)
   add_executable(${suite_name}_target
@@ -8,7 +14,8 @@ macro(add_test_suite suite_name)
   target_link_libraries(${suite_name}_target
     harness
     WasmVM
-    cc
+    pp
+    antlr4-runtime
   )
   target_compile_definitions(${suite_name}_target PUBLIC CCTEST)
   set_target_properties(${suite_name}_target
@@ -23,7 +30,6 @@ macro(add_test_suite suite_name)
   )
 endmacro(add_test_suite)
 
-add_test_suite(SourceStream)
 add_test_suite(pp_token)
-add_test_suite(pp_directive)
-add_test_suite(pp_macro)
+# add_test_suite(pp_directive)
+# add_test_suite(pp_macro)

@@ -134,18 +134,19 @@ int main(int argc, const char* argv[]){
         // Preprocess
         if(args["pp"]){
             for(std::filesystem::path source_path : source_files){
-                PreProcessor pp(source_path);
-                if(args["output"]){
-                    std::ofstream output_file(std::get<std::string>(args["output"].value()));
-                    for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
-                        output_file << tok.value();
-                    }
-                    output_file.close();
-                }else{
-                    for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
-                        std::cout << tok.value();
-                    }
-                }
+                std::ifstream fin(source_path);
+                PreProcessor pp(source_path, fin);
+                // if(args["output"]){
+                //     std::ofstream output_file(std::get<std::string>(args["output"].value()));
+                //     for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
+                //         output_file << tok.value();
+                //     }
+                //     output_file.close();
+                // }else{
+                //     for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
+                //         std::cout << tok.value();
+                //     }
+                // }
             }
             return 0;
         }
@@ -194,9 +195,9 @@ int main(int argc, const char* argv[]){
         }
         Linker linker(linker_config);
 
-    }catch(Exception::Error &e){
-        std::cerr << e.pos << ": " COLOR_Error ": " << e.what() << std::endl;
-        return -1;
+    // }catch(Exception::Error &e){
+    //     std::cerr << e.pos << ": " COLOR_Error ": " << e.what() << std::endl;
+    //     return -1;
     }catch(Exception::Exception &e){
         std::cerr << args.program.filename().string() << ": " COLOR_Error ": " << e.what() << std::endl;
         return -1;

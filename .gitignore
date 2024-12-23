@@ -5,3 +5,4 @@ install/
 .devcontainer
 .DS_Store
 exclude
+.antlr/

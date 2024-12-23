@@ -23,6 +23,10 @@ elseif(WIN32)
 endif(UNIX)
 
 include_directories(${CMAKE_CURRENT_LIST_DIR}/src/include)
+
+
+add_subdirectory(external)
+link_directories(${PROJECT_BINARY_DIR}/external/antlr4_runtime/src/antlr4_runtime-install/lib)
 add_subdirectory(src)
 
 set(BUILD_TESTS ON CACHE BOOL "Build tests")

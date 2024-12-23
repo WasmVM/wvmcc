@@ -15,13 +15,6 @@
 
 #include <Compiler.hpp>
 
-#include <iostream> // FIXME:
-
-#include <PreProcessor.hpp>
-#include <Lexer.hpp>
-#include <Parser.hpp>
-#include <AST/Dump.hpp>
-
 using namespace WasmVM;
 
 Compiler::Compiler(std::vector<std::filesystem::path> include_paths) :
@@ -30,11 +23,6 @@ Compiler::Compiler(std::vector<std::filesystem::path> include_paths) :
 }
 
 WasmModule Compiler::compile(std::filesystem::path source_path){
-    PreProcessor pp(source_path, include_paths);
-    Lexer lexer(pp);
-    Parser parser(lexer);
-
-    std::cout << parser.parse<AST::PrimaryExpr>().value() << std::endl;
     
     return WasmModule(); // FIXME:
 }

@@ -1,15 +1,7 @@
+add_subdirectory(lib/PreProcessor)
+
 add_library(cc
   lib/Compiler.cpp
-  lib/SourceStream.cpp
-  lib/PreProcessor/PreProcessor.cpp
-  lib/PreProcessor/Scanner.cpp
-  lib/PreProcessor/Macro.cpp
-  lib/PreProcessor/Expression.cpp
-  lib/Token.cpp
-  lib/Lexer.cpp
-  lib/Parser.cpp
-  lib/AST/Expr.cpp
-  lib/AST/Dump.cpp
 )
 
 add_executable(wasmvm-cc
@@ -21,6 +13,8 @@ add_executable(wasmvm-cc
 target_link_libraries(wasmvm-cc
   WasmVM
   cc
+  pp
+  antlr4-runtime
 )
 target_compile_definitions(wasmvm-cc PUBLIC
   DEFAULT_LOOKUP_PATH="${DEFAULT_LOOKUP_PATH}"
