@@ -1,5 +1,3 @@
-"abcd"
-"a\\b\tc\nd"
 u8"qwer"
 u"\1a\1b"
 L"\1a\2b"

@@ -30,17 +30,17 @@ Identifier : ([_a-zA-Z] | UniCharName) ([_a-zA-Z0-9] | UniCharName)*;
 PPNumber : '.'? [0-9] ([_a-zA-Z0-9.] | UniCharName | [eEpP] [+\-]?)*;
 
 /* Character constant */
-CharConst : [LuU] '\'' (Escape | ~['\\\n] | Caret_ | Tlide_ | BracketL_ | BracketR_ | BraceL_ | BraceR_ | Bar_ | Hash_) '\'';
-Escape : BSlash_ ([abfnrtv'"?\\] | BSlash_ | [0-7] [0-7]? [0-7]? | 'x' HexDigit HexDigit+);
+CharConst : [LuU]? '\'' (Escape | ~['\\\n] | Caret_ | Tlide_ | BracketL_ | BracketR_ | BraceL_ | BraceR_ | Bar_ | Hash_) '\'';
+Escape : BSlash_ ([abfnrtv'"?\\] | BSlash_ | [0-7] [0-7]? [0-7]? | 'x' HexDigit HexDigit+) | UniCharName;
 
 /* String literal */
 StringLiteral : ([LuU] | 'u8')? '"' (~["\\\n] | Escape)* '"';
 
 /* Punctuator */
-Punctuator : '%:%:' | '<<=' | '>>=' | '...' | '%:' | '++' | '<'[:%<]? | [:%>]?'>' | ([*/%+\-&^|><!] | Bar_ | Caret_)?'=' | '&&' | '##' | Hash_ Hash_ | '-' [\->] | BraceL_ | BraceR_ | BracketL_ | BracketR_ | Bar_ | Caret_ | Tlide_ | Hash_ | [().&*+\-!/%?:;,];
+Punctuator : '%:%:' | '<<=' | '>>=' | '...' | '%:' | '++' | '<'[:%<]? | [:%>]?'>' | ([*/%+\-&^|><!=] | Bar_ | Caret_)?'=' | '&&' | '##' | Hash_ Hash_ | '-' [\->] | BraceL_ | BraceR_ | BracketL_ | BracketR_ | (Bar_ Bar_?) | Caret_ | Tlide_ | Hash_ | [().&*+\-!/%?:;,];
 
 /* White space */
-WhiteSpace : [\t\f\r \u000B] ;
+WhiteSpace : [\t\f\r \u000B]+ ;
 NewLine : [\n] ;
 
 /* Universal Character Name */
