@@ -1,6 +1,20 @@
-"abcd"// single line
-"defg"/* quoted */"hijk"
-/*
-multiline
-*/123
-/* /* not nested */*/
+123
+0456
+0x789
+0Xabc
+0Xdefu
+0XffaU
+1234l
+4321L
+456ul
+789lu
+234ll
+234LL
+456UL
+789LU
+2345ull
+3456llu
+2345ULL
+3456LLU \
+aaa
+bbb \

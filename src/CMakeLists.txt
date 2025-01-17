@@ -1,4 +1,4 @@
-add_subdirectory(lib/PreProcessor)
+add_subdirectory(lib)
 
 add_library(cc
   lib/Compiler.cpp
@@ -14,6 +14,7 @@ target_link_libraries(wasmvm-cc
   WasmVM
   cc
   pp
+  common
   antlr4-runtime
 )
 target_compile_definitions(wasmvm-cc PUBLIC
