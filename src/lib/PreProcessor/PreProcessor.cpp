@@ -15,4 +15,25 @@
 
 #include <PreProcessor.hpp>
 
+#include "Visitor.hpp"
+
 using namespace WasmVM;
+
+PreProcessor::PreProcessor(std::filesystem::path filepath){
+    visitors.emplace(new Visitor(filepath, *this));
+}
+
+std::optional<PreProcessor::Token> PreProcessor::get(){
+    while(!visitors.empty() && buffer.empty()){
+        std::shared_ptr<Visitor> visitor = visitors.top();
+        if(!visitors.top()->fetch()){
+            visitors.pop();
+        }
+    }
+    if(visitors.empty() && buffer.empty()){
+        return std::nullopt;
+    }
+    Token token = buffer.front();
+    buffer.pop_front();
+    return token;
+}

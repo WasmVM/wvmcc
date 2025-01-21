@@ -7,7 +7,7 @@
 #include <Error.hpp>
 #include <PPParser.h>
 
-void WasmVM::PPParseErrorListener::syntaxError(
+void WasmVM::ParseErrorListener::syntaxError(
     antlr4::Recognizer* recognizer,
     antlr4::Token* offendingSymbol,
     size_t line, size_t col,
@@ -15,7 +15,5 @@ void WasmVM::PPParseErrorListener::syntaxError(
 ){
     // Warning : not end with new_line
     WasmVM::PPParser* parser = static_cast<WasmVM::PPParser*>(recognizer);
-    if((offendingSymbol->getType() == PPParser::EOF) && (parser->getRuleInvocationStack().front() == "text_line")){
-        Exception::Warning("source file should end with new-line");
-    }
+
 }

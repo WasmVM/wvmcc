@@ -4,20 +4,31 @@
 #include <istream>
 #include <sstream>
 #include <filesystem>
+#include <stack>
+#include <deque>
+#include <string>
+#include <optional>
+#include <common.hpp>
 
 namespace WasmVM {
 
-template <typename CharT, typename Traits = std::char_traits<CharT>>
-struct PreProcessor : public std::basic_istream<CharT, Traits> {
+struct PreProcessor {
 
-    PreProcessor(std::filesystem::path filepath, std::basic_istream<CharT, Traits>& stream)
-        : std::basic_istream<CharT, Traits>(&buf), filepath(filepath), stream(stream){}
+    struct Token {
+        enum {
+            HeaderName, Identifier, PPNumber, CharConst, StringLiteral, Punctuator, WhiteSpace, NewLine
+        } type;
+        std::string text;
+        SourcePos pos;
+    };
+
+    PreProcessor(std::filesystem::path filepath);
+    std::optional<Token> get();
 
 protected:
-    std::filesystem::path filepath;
-    std::basic_istream<CharT, Traits>& stream;
-    std::basic_stringbuf<CharT, Traits> buf;
-
+    struct Visitor;
+    std::stack<std::shared_ptr<Visitor>> visitors;
+    std::deque<Token> buffer;
 };
 
 } // namespace WasmVM
