@@ -47,7 +47,7 @@ int main(int argc, char const *argv[])
         std::cerr << "Warning : " << message << std::endl;
     });
 
-    PreProcessor pp("test.txt");
+    PreProcessor pp("test.c");
 
     try{
         for(std::optional<PreProcessor::Token> token = pp.get(); token.has_value(); token = pp.get()){

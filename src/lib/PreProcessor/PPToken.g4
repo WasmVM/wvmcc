@@ -37,7 +37,9 @@ Escape : BSlash_ ([abfnrtv'"?\\] | BSlash_ | [0-7] [0-7]? [0-7]? | 'x' HexDigit 
 StringLiteral : ([LuU] | 'u8')? '"' (~["\\\n] | Escape)* '"';
 
 /* Punctuator */
-Punctuator : '%:%:' | '<<=' | '>>=' | '...' | '%:' | '++' | '<'[:%<]? | [:%>]?'>' | ([*/%+\-&^|><!=] | Bar_ | Caret_)?'=' | '&&' | '##' | Hash_ Hash_ | '-' [\->] | BraceL_ | BraceR_ | BracketL_ | BracketR_ | (Bar_ Bar_?) | Caret_ | Tlide_ | Hash_ | [().&*+\-!/%?:;,];
+HashHash : '%:%:' | Hash_ Hash_;
+Hash : '%:' | Hash_;
+Punctuator : '<<=' | '>>=' | '...' | '++' | '<'[:%<]? | [:%>]?'>' | ([*/%+\-&^|><!=] | Bar_ | Caret_)?'=' | '&&' | '-' [\->] | BraceL_ | BraceR_ | BracketL_ | BracketR_ | (Bar_ Bar_?) | Caret_ | Tlide_ | [().&*+\-!/%?:;,];
 
 /* White space */
 WhiteSpace : [\t\f\r \u000B]+ ;

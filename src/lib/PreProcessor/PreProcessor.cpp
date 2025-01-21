@@ -37,3 +37,22 @@ std::optional<PreProcessor::Token> PreProcessor::get(){
     buffer.pop_front();
     return token;
 }
+
+bool PreProcessor::Macro::operator==(const PreProcessor::Macro& op) const {
+    if((op.name != name) || (op.params.has_value() != params.has_value()) || (op.replacement.size() != replacement.size())){
+        return false;
+    }
+    for(auto op_it = op.replacement.begin(), it = replacement.begin(); op_it != op.replacement.end(); op_it = std::next(op_it), it = std::next(it)){
+        if((op_it->type != it->type) || (op_it->text != it->text)){
+            return false;
+        }
+    }
+    if(op.params.has_value()){
+        for(auto op_it = op.params->begin(), it = params->begin(); op_it != op.params->end(); op_it = std::next(op_it), it = std::next(it)){
+            if(*op_it != *it){
+                return false;
+            }
+        }
+    }
+    return true;
+}

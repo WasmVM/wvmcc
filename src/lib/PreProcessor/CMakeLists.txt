@@ -11,7 +11,6 @@ include_directories(
 
 add_library(pp
   PreProcessor.cpp
-  ErrorListener.cpp
   PPLexer.cpp
   PPParser.cpp
   Visitor.cpp

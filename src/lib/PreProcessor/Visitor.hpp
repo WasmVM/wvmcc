@@ -6,8 +6,7 @@
 #include <PPLexer.h>
 #include <optional>
 #include <memory>
-
-#include "ErrorListener.hpp"
+#include <fstream>
 
 namespace WasmVM {
 
@@ -17,13 +16,15 @@ struct PreProcessor::Visitor : public PPVisitor {
     bool fetch(); // false if match EOF
 
     std::filesystem::path path;
-    ParseErrorListener parseErrorListener;
-    
 
 protected:
     virtual std::any visitGroup(PPParser::GroupContext *) override;
     virtual std::any visitText_line(PPParser::Text_lineContext *) override;
     virtual std::any visitPp_token(PPParser::Pp_tokenContext *ctx) override;
+    virtual std::any visitLine_end(PPParser::Line_endContext* ctx) override;
+    virtual std::any visitControl_line(PPParser::Control_lineContext* ctx) override;
+    virtual std::any visitDefine_obj(PPParser::Define_objContext* ctx) override;
+
     std::ifstream fin;
     std::unique_ptr<antlr4::ANTLRInputStream> input;
     std::unique_ptr<PPLexer> lexer;

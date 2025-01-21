@@ -135,17 +135,17 @@ int main(int argc, const char* argv[]){
         if(args["pp"]){
             for(std::filesystem::path source_path : source_files){
                 PreProcessor pp(source_path);
-                // if(args["output"]){
-                //     std::ofstream output_file(std::get<std::string>(args["output"].value()));
-                //     for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
-                //         output_file << tok.value();
-                //     }
-                //     output_file.close();
-                // }else{
-                //     for(PreProcessor::PPToken tok = pp.get(); tok.has_value(); tok = pp.get()){
-                //         std::cout << tok.value();
-                //     }
-                // }
+                if(args["output"]){
+                    std::ofstream output_file(std::get<std::string>(args["output"].value()));
+                    for(std::optional<PreProcessor::Token> token = pp.get(); token.has_value(); token = pp.get()){
+                        output_file << token->text;
+                    }
+                    output_file.close();
+                }else{
+                    for(std::optional<PreProcessor::Token> token = pp.get(); token.has_value(); token = pp.get()){
+                        std::cout << token->text;
+                    }
+                }
             }
             return 0;
         }

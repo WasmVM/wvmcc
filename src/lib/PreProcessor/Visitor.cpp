@@ -15,6 +15,7 @@
 
 #include "Visitor.hpp"
 #include <Error.hpp>
+#include <exception.hpp>
 
 using namespace WasmVM;
 
@@ -25,24 +26,17 @@ PreProcessor::Visitor::Visitor(std::filesystem::path path, PreProcessor& pp) : p
     lexer = std::make_unique<PPLexer>(input.get());
     tokens = std::make_unique<antlr4::CommonTokenStream>(lexer.get());
     parser = std::make_unique<PPParser>(tokens.get());
-    parser->removeErrorListeners();
-    parser->addErrorListener(&parseErrorListener);
 }
 
 bool PreProcessor::Visitor::fetch(){
-    auto* group = parser->group();
-    visitGroup(group);
-    return !parser->isMatchedEOF();
+    return std::any_cast<bool>(visitGroup(parser->group()));
 }
 
 std::any PreProcessor::Visitor::visitGroup(PPParser::GroupContext *ctx){
     return visitChildren(ctx);
 }
 
-std::any PreProcessor::Visitor::visitText_line(PPParser::Text_lineContext *ctx){
-    for(auto pp_token : ctx->pp_token()){
-        pp.buffer.emplace_back(std::any_cast<Token>(visitPp_token(pp_token)));
-    }
+std::any PreProcessor::Visitor::visitLine_end(PPParser::Line_endContext* ctx){
     antlr4::tree::TerminalNode* newline = ctx->NewLine();
     if(newline){
         pp.buffer.emplace_back(Token {
@@ -54,10 +48,26 @@ std::any PreProcessor::Visitor::visitText_line(PPParser::Text_lineContext *ctx){
                 .col = newline->getSymbol()->getCharPositionInLine() + 1
             }
         });
-        return ctx->pp_token().size() + 1;
-    }else{
-        return ctx->pp_token().size();
     }
+    if(ctx->EOF()){
+        if(newline == nullptr){
+            Exception::Warning("no new-line in the end of file");
+        }
+        return false;
+    }else{
+        return true;
+    }
+}
+
+std::any PreProcessor::Visitor::visitText_line(PPParser::Text_lineContext *ctx){
+    for(auto pp_token : ctx->pp_token()){
+        pp.buffer.emplace_back(std::any_cast<Token>(visitPp_token(pp_token)));
+    }
+    return visitLine_end(ctx->line_end());
+}
+
+std::any PreProcessor::Visitor::visitControl_line(PPParser::Control_lineContext *ctx){
+    return visitChildren(ctx);
 }
 
 std::any PreProcessor::Visitor::visitPp_token(PPParser::Pp_tokenContext *ctx){
@@ -81,6 +91,32 @@ std::any PreProcessor::Visitor::visitPp_token(PPParser::Pp_tokenContext *ctx){
         case PPLexer::WhiteSpace:
             return Token {.type = Token::WhiteSpace, .text = " ", .pos = pos};
         default:
-            throw Exception::SyntaxError(pos, std::string("unknown pre-processor token '") + token->getText() + "'");
+            throw Exception::SyntaxError(pos, "unknown pre-processor token '" + token->getText() + "'");
     }
+}
+
+std::any PreProcessor::Visitor::visitDefine_obj(PPParser::Define_objContext *ctx){
+    std::string name = ctx->Identifier()->getText();
+    Macro macro {.name = name};
+    for(auto pp_token : ctx->pp_token()){
+        macro.replacement.emplace_back(std::any_cast<Token>(visitPp_token(pp_token)));
+    }
+    if(pp.macros.contains(name)){
+        if(pp.macros[name] != macro){
+            SourcePos pos {
+                .file = path,
+                .line = ctx->getStart()->getLine(),
+                .col = ctx->getStart()->getCharPositionInLine() + 1
+            };
+            throw Exception::SyntaxError(pos, "duplicated macro '" + name + "'");
+        }
+    }else{
+        pp.macros[name] = macro;
+        std::cout << "define macro [" << name << "]: ";
+        for(Token token : macro.replacement){
+            std::cout << token.text;
+        }
+        std::cout << std::endl;
+    }
+    return visitLine_end(ctx->line_end());
 }
