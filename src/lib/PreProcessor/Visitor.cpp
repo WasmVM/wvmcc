@@ -36,6 +36,10 @@ std::any PreProcessor::Visitor::visitGroup(PPParser::GroupContext *ctx){
     return visitChildren(ctx);
 }
 
+std::any PreProcessor::Visitor::visitIdentifier_list(PPParser::Identifier_listContext *ctx){
+    return visitChildren(ctx);
+}
+
 std::any PreProcessor::Visitor::visitLine_end(PPParser::Line_endContext* ctx){
     antlr4::tree::TerminalNode* newline = ctx->NewLine();
     if(newline){
@@ -85,6 +89,10 @@ std::any PreProcessor::Visitor::visitPp_token(PPParser::Pp_tokenContext *ctx){
         case PPLexer::StringLiteral:
             return Token {.type = Token::StringLiteral, .text = token->getText(), .pos = pos};
         case PPLexer::Punctuator:
+        case PPLexer::ParenL:
+        case PPLexer::ParenR:
+        case PPLexer::Ellipsis:
+        case PPLexer::Comma:
             return Token {.type = Token::Punctuator, .text = token->getText(), .pos = pos};
         case PPLexer::BlockComment:
         case PPLexer::LineComment:
@@ -112,8 +120,41 @@ std::any PreProcessor::Visitor::visitDefine_obj(PPParser::Define_objContext *ctx
         }
     }else{
         pp.macros[name] = macro;
-        std::cout << "define macro [" << name << "]: ";
-        for(Token token : macro.replacement){
+    }
+    return visitLine_end(ctx->line_end());
+}
+
+std::any PreProcessor::Visitor::visitDefine_func(PPParser::Define_funcContext *ctx){
+    std::string name = ctx->Identifier()->getText();
+    Macro macro {.name = name, .params = std::vector<std::string>()};
+    if(ctx->identifier_list() != nullptr){
+        for(auto param : ctx->identifier_list()->Identifier()){
+            macro.params->emplace_back(param->getText());
+        }
+    }
+    if(ctx->Ellipsis() != nullptr){
+        macro.params->emplace_back("...");
+    }
+    for(auto param : ctx->pp_token()){
+        macro.replacement.emplace_back(std::any_cast<Token>(visitPp_token(param)));
+    }
+    if(pp.macros.contains(name)){
+        if(pp.macros[name] != macro){
+            SourcePos pos {
+                .file = path,
+                .line = ctx->getStart()->getLine(),
+                .col = ctx->getStart()->getCharPositionInLine() + 1
+            };
+            throw Exception::SyntaxError(pos, "duplicated macro '" + name + "'");
+        }
+    }else{
+        pp.macros[name] = macro;
+        std::cout << "define macro [" << macro.name << "] (";
+        for(auto param : macro.params.value()){
+            std::cout << param << ", ";
+        }
+        std::cout << ")";
+        for(auto token : macro.replacement){
             std::cout << token.text;
         }
         std::cout << std::endl;

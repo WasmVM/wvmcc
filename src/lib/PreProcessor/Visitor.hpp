@@ -24,6 +24,8 @@ protected:
     virtual std::any visitLine_end(PPParser::Line_endContext* ctx) override;
     virtual std::any visitControl_line(PPParser::Control_lineContext* ctx) override;
     virtual std::any visitDefine_obj(PPParser::Define_objContext* ctx) override;
+    virtual std::any visitDefine_func(PPParser::Define_funcContext *ctx) override;
+    virtual std::any visitIdentifier_list(PPParser::Identifier_listContext *ctx) override;
 
     std::ifstream fin;
     std::unique_ptr<antlr4::ANTLRInputStream> input;

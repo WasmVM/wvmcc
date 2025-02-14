@@ -39,7 +39,11 @@ StringLiteral : ([LuU] | 'u8')? '"' (~["\\\n] | Escape)* '"';
 /* Punctuator */
 HashHash : '%:%:' | Hash_ Hash_;
 Hash : '%:' | Hash_;
-Punctuator : '<<=' | '>>=' | '...' | '++' | '<'[:%<]? | [:%>]?'>' | ([*/%+\-&^|><!=] | Bar_ | Caret_)?'=' | '&&' | '-' [\->] | BraceL_ | BraceR_ | BracketL_ | BracketR_ | (Bar_ Bar_?) | Caret_ | Tlide_ | [().&*+\-!/%?:;,];
+Punctuator : '<<=' | '>>=' | '++' | '<'[:%<]? | [:%>]?'>' | ([*/%+\-&^|><!=] | Bar_ | Caret_)?'=' | '&&' | '-' [\->] | BraceL_ | BraceR_ | BracketL_ | BracketR_ | (Bar_ Bar_?) | Caret_ | Tlide_ | [.&*+\-!/%?:;];
+Ellipsis : '...';
+ParenL : '(';
+ParenR : ')';
+Comma : ',';
 
 /* White space */
 WhiteSpace : [\t\f\r \u000B]+ ;

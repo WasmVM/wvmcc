@@ -33,8 +33,8 @@ Suite pp_token {
         Expect(tokens[2]->getType() == PPLexer::Punctuator);
         Expect(tokens[4]->getType() == PPLexer::Punctuator);
         Expect(tokens[6]->getType() == PPLexer::Punctuator);
-        Expect(tokens[8]->getType() == PPLexer::Punctuator);
-        Expect(tokens[10]->getType() == PPLexer::Punctuator);
+        Expect(tokens[8]->getType() == PPLexer::ParenL);
+        Expect(tokens[10]->getType() == PPLexer::ParenR);
         Expect(tokens[12]->getType() == PPLexer::Punctuator);
         Expect(tokens[14]->getType() == PPLexer::Punctuator);
         Expect(tokens[16]->getType() == PPLexer::Punctuator);
@@ -66,7 +66,7 @@ Suite pp_token {
         Expect(tokens[68]->getType() == PPLexer::Punctuator);
         Expect(tokens[70]->getType() == PPLexer::Punctuator);
         Expect(tokens[72]->getType() == PPLexer::Punctuator);
-        Expect(tokens[74]->getType() == PPLexer::Punctuator);
+        Expect(tokens[74]->getType() == PPLexer::Ellipsis);
         Expect(tokens[76]->getType() == PPLexer::Punctuator);
         Expect(tokens[78]->getType() == PPLexer::Punctuator);
         Expect(tokens[80]->getType() == PPLexer::Punctuator);
@@ -78,7 +78,7 @@ Suite pp_token {
         Expect(tokens[92]->getType() == PPLexer::Punctuator);
         Expect(tokens[94]->getType() == PPLexer::Punctuator);
         Expect(tokens[96]->getType() == PPLexer::Punctuator);
-        Expect(tokens[98]->getType() == PPLexer::Punctuator);
+        Expect(tokens[98]->getType() == PPLexer::Comma);
     })
     Test("newline", {
         std::ifstream fin("newline.txt");
@@ -98,14 +98,14 @@ Suite pp_token {
         stream.fill();
         std::vector<antlr4::Token*> tokens = stream.getTokens();
         Expect(tokens[0]->getType() == PPLexer::WhiteSpace);
-        Expect(tokens[1]->getType() == PPLexer::Punctuator);
+        Expect(tokens[1]->getType() == PPLexer::ParenL);
         Expect(tokens[2]->getType() == PPLexer::NewLine);
         Expect(tokens[3]->getType() == PPLexer::WhiteSpace);
-        Expect(tokens[4]->getType() == PPLexer::Punctuator);
+        Expect(tokens[4]->getType() == PPLexer::ParenR);
         Expect(tokens[5]->getType() == PPLexer::NewLine);
-        Expect(tokens[6]->getType() == PPLexer::Punctuator);
+        Expect(tokens[6]->getType() == PPLexer::ParenL);
         Expect(tokens[7]->getType() == PPLexer::WhiteSpace);
-        Expect(tokens[8]->getType() == PPLexer::Punctuator);
+        Expect(tokens[8]->getType() == PPLexer::ParenR);
         Expect(tokens[9]->getType() == PPLexer::WhiteSpace);
         Expect(tokens[10]->getType() == PPLexer::NewLine);
         Expect(tokens[11]->getType() == PPLexer::WhiteSpace);
