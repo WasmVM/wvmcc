@@ -79,6 +79,22 @@ Suite pp_token {
         Expect(tokens[94]->getType() == PPLexer::Punctuator);
         Expect(tokens[96]->getType() == PPLexer::Punctuator);
         Expect(tokens[98]->getType() == PPLexer::Comma);
+        Expect(tokens[100]->getType() == PPLexer::Hash);
+        Expect(tokens[102]->getType() == PPLexer::HashHash);
+        Expect(tokens[104]->getType() == PPLexer::Hash);
+        Expect(tokens[106]->getType() == PPLexer::HashHash);
+        Expect(tokens[108]->getType() == PPLexer::Hash);
+        Expect(tokens[110]->getType() == PPLexer::HashHash);
+        Expect(tokens[112]->getType() == PPLexer::Punctuator);
+        Expect(tokens[114]->getType() == PPLexer::Punctuator);
+        Expect(tokens[116]->getType() == PPLexer::Punctuator);
+        Expect(tokens[118]->getType() == PPLexer::Punctuator);
+        Expect(tokens[120]->getType() == PPLexer::Punctuator);
+        Expect(tokens[122]->getType() == PPLexer::Punctuator);
+        Expect(tokens[124]->getType() == PPLexer::Punctuator);
+        Expect(tokens[126]->getType() == PPLexer::Punctuator);
+        Expect(tokens[128]->getType() == PPLexer::Punctuator);
+        Expect(tokens[130]->getType() == PPLexer::Punctuator);
     })
     Test("newline", {
         std::ifstream fin("newline.txt");
@@ -205,6 +221,7 @@ Suite pp_token {
         Expect(tokens[36]->getType() == PPLexer::CharConst);
         Expect(tokens[38]->getType() == PPLexer::CharConst);
         Expect(tokens[40]->getType() == PPLexer::CharConst);
+        Expect(tokens[42]->getType() == PPLexer::CharConst);
     })
     Test("string_literal", {
         std::ifstream fin("string_literal.txt");
@@ -218,6 +235,7 @@ Suite pp_token {
         Expect(tokens[4]->getType() == PPLexer::StringLiteral);
         Expect(tokens[6]->getType() == PPLexer::StringLiteral);
         Expect(tokens[8]->getType() == PPLexer::StringLiteral);
+        Expect(tokens[10]->getType() == PPLexer::StringLiteral);
     })
     Test("header_name", {
         std::ifstream fin("header_name.txt");

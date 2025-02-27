@@ -16,6 +16,7 @@
 #include "Visitor.hpp"
 #include <Error.hpp>
 #include <exception.hpp>
+#include <regex>
 
 using namespace WasmVM;
 
@@ -77,26 +78,88 @@ std::any PreProcessor::Visitor::visitControl_line(PPParser::Control_lineContext 
     return visitChildren(ctx);
 }
 
+static std::string convert_trigraph(std::string text){
+    std::string result = "";
+    for(auto it = text.begin(); it != text.end();){
+        if(*it == '?' && (std::next(it) != text.end()) && (*std::next(it) == '?') && (std::next(std::next(it)) != text.end())){
+            switch(*std::next(std::next(it))){
+                case '!':
+                    result += "|";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case ')':
+                    result += "]";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case '(':
+                    result += "[";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case '>':
+                    result += "}";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case '<':
+                    result += "{";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case '\'':
+                    result += "^";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case '-':
+                    result += "~";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                case '/':
+                    result += "\\";
+                    it = std::next(std::next(std::next(it)));
+                    continue;
+                default:
+                    break;
+            }
+        }
+        result += *it;
+        it = std::next(it);
+    }
+    std::cout << result << std::endl;
+    return result;
+}
+
 std::any PreProcessor::Visitor::visitPp_token(PPParser::Pp_tokenContext *ctx){
     antlr4::Token* token = ctx->getStart();
     SourcePos pos {.file = path, .line = token->getLine(), .col = token->getCharPositionInLine() + 1};
     switch (token->getType()){
         case PPLexer::HeaderName:
-            return Token {.type = Token::HeaderName, .text = token->getText(), .pos = pos};
+            return Token {.type = Token::HeaderName, .text = convert_trigraph(token->getText()), .pos = pos};
         case PPLexer::Identifier:
             return Token {.type = Token::Identifier, .text = token->getText(), .pos = pos};
         case PPLexer::PPNumber:
             return Token {.type = Token::PPNumber, .text = token->getText(), .pos = pos};
         case PPLexer::CharConst:
-            return Token {.type = Token::CharConst, .text = token->getText(), .pos = pos};
+            return Token {.type = Token::CharConst, .text = convert_trigraph(token->getText()), .pos = pos};
         case PPLexer::StringLiteral:
-            return Token {.type = Token::StringLiteral, .text = token->getText(), .pos = pos};
+            return Token {.type = Token::StringLiteral, .text = convert_trigraph(token->getText()), .pos = pos};
         case PPLexer::Punctuator:
+            if(token->getText() == "<:"){
+                return Token {.type = Token::Punctuator, .text = "[", .pos = pos};
+            }else if(token->getText() == ":>"){
+                return Token {.type = Token::Punctuator, .text = "]", .pos = pos};
+            }else if(token->getText() == "<%"){
+                return Token {.type = Token::Punctuator, .text = "{", .pos = pos};
+            }else if(token->getText() == "%>"){
+                return Token {.type = Token::Punctuator, .text = "}", .pos = pos};
+            }
+            return Token {.type = Token::Punctuator, .text = convert_trigraph(token->getText()), .pos = pos};
         case PPLexer::ParenL:
         case PPLexer::ParenR:
         case PPLexer::Ellipsis:
         case PPLexer::Comma:
             return Token {.type = Token::Punctuator, .text = token->getText(), .pos = pos};
+        case PPLexer::Hash:
+            return Token {.type = Token::Punctuator, .text = "#", .pos = pos};
+        case PPLexer::HashHash:
+            return Token {.type = Token::Punctuator, .text = "##", .pos = pos};
         case PPLexer::BlockComment:
         case PPLexer::LineComment:
         case PPLexer::WhiteSpace:
@@ -233,26 +296,23 @@ void PreProcessor::Visitor::replace_macro(std::list<Token>& tokens, const std::u
                         }
                         args.pop_front();
                     }
-                    // FIXME: print args map
-                    for(auto arg_pair : arg_map){
-                        std::cout << "Arg [" << arg_pair.first << "] : ";
-                        for(Token& tok : arg_pair.second){
-                            std::cout << tok.text;
-                        }
-                        std::cout << std::endl;
-                    }
                     // replacement
                     cur_it = tokens.erase(start_it, std::next(cur_it));
                     auto next_it = cur_it;
-                    for(const Token& rep : macro.replacement){
-                        std::list<Token>::iterator ins_it;
-                        if(rep.type == Token::Identifier && arg_map.contains(rep.text)){
-                            ins_it = tokens.insert(cur_it, arg_map[rep.text].begin(), arg_map[rep.text].end());
+                    for(auto rep_it = macro.replacement.begin(); rep_it != macro.replacement.end();){
+                        if(rep_it->type == Token::Punctuator && rep_it->text == "#"){
+
                         }else{
-                            ins_it = tokens.insert(cur_it, rep);
-                        }
-                        if(next_it == cur_it){
-                            next_it = ins_it;
+                            std::list<Token>::iterator ins_it;
+                            if(rep_it->type == Token::Identifier && arg_map.contains(rep_it->text)){
+                                ins_it = tokens.insert(cur_it, arg_map[rep_it->text].begin(), arg_map[rep_it->text].end());
+                            }else{
+                                ins_it = tokens.insert(cur_it, *rep_it);
+                            }
+                            if(next_it == cur_it){
+                                next_it = ins_it;
+                            }
+                            rep_it = std::next(rep_it);
                         }
                     }
                     cur_it = next_it;

@@ -30,6 +30,8 @@ pp_token : HeaderName
     | Punctuator
     | ParenL
     | ParenR
+    | Hash
+    | HashHash
     | Comma
     | Ellipsis
     | BlockComment
