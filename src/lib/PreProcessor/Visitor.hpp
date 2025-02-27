@@ -6,6 +6,7 @@
 #include <PPLexer.h>
 #include <optional>
 #include <memory>
+#include <list>
 #include <fstream>
 
 namespace WasmVM {
@@ -26,6 +27,8 @@ protected:
     virtual std::any visitDefine_obj(PPParser::Define_objContext* ctx) override;
     virtual std::any visitDefine_func(PPParser::Define_funcContext *ctx) override;
     virtual std::any visitIdentifier_list(PPParser::Identifier_listContext *ctx) override;
+
+    void replace_macro(std::list<Token>& tokens, const std::unordered_map<std::string, PreProcessor::Macro>& macros);
 
     std::ifstream fin;
     std::unique_ptr<antlr4::ANTLRInputStream> input;

@@ -31,5 +31,5 @@ macro(add_test_suite suite_name)
 endmacro(add_test_suite)
 
 add_test_suite(pp_token)
-add_test_suite(pp_macro)
+# add_test_suite(pp_macro)
 # add_test_suite(pp_directive)

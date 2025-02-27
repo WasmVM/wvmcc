@@ -64,9 +64,12 @@ std::any PreProcessor::Visitor::visitLine_end(PPParser::Line_endContext* ctx){
 }
 
 std::any PreProcessor::Visitor::visitText_line(PPParser::Text_lineContext *ctx){
+    std::list<Token> token_list;
     for(auto pp_token : ctx->pp_token()){
-        pp.buffer.emplace_back(std::any_cast<Token>(visitPp_token(pp_token)));
+        token_list.emplace_back(std::any_cast<Token>(visitPp_token(pp_token)));
     }
+    replace_macro(token_list, pp.macros);
+    pp.buffer.insert(pp.buffer.end(), token_list.begin(), token_list.end());
     return visitLine_end(ctx->line_end());
 }
 
@@ -149,15 +152,120 @@ std::any PreProcessor::Visitor::visitDefine_func(PPParser::Define_funcContext *c
         }
     }else{
         pp.macros[name] = macro;
-        std::cout << "define macro [" << macro.name << "] (";
-        for(auto param : macro.params.value()){
-            std::cout << param << ", ";
-        }
-        std::cout << ")";
-        for(auto token : macro.replacement){
-            std::cout << token.text;
-        }
-        std::cout << std::endl;
     }
     return visitLine_end(ctx->line_end());
+}
+
+void PreProcessor::Visitor::replace_macro(std::list<Token>& tokens, const std::unordered_map<std::string, Macro>& macros){
+    for(auto cur_it = tokens.begin(); cur_it != tokens.end();){
+        Token cur = *cur_it;
+        if(cur.type == Token::Identifier && macros.contains(cur.text)){
+            // Found macro
+            const Macro& macro = macros.at(cur.text);
+            std::unordered_map<std::string, Macro> next_macros = macros;
+            next_macros.erase(cur.text);
+            auto start_it = cur_it;
+            if(macro.params.has_value()){
+                // function-type macro
+                cur_it = std::next(cur_it);
+                while(cur_it != tokens.end() && cur_it->type == Token::WhiteSpace){
+                    cur_it = std::next(cur_it);
+                }
+                if(cur_it != tokens.end() && cur_it->type == Token::Punctuator && cur_it->text == "("){
+                    cur_it = std::next(cur_it);
+                    // get arguments
+                    std::list<std::list<Token>> args;
+                    if(macro.params->size() > 0){
+                        args.emplace_back();
+                        int level = 0;
+                        while(cur_it != tokens.end()){
+                            if(cur_it->type == Token::Punctuator){
+                                if(cur_it->text == "("){
+                                    level += 1;
+                                }else if(cur_it->text == ")"){
+                                    if(level > 0){
+                                        level -= 1;
+                                    }else{
+                                        break;
+                                    }
+                                }else if(cur_it->text == ","){
+                                    if(level == 0){
+                                        args.emplace_back();
+                                    }
+                                }
+                            }
+                            args.back().emplace_back(*cur_it);
+                            cur_it = std::next(cur_it);
+                        }
+                        if(cur_it == tokens.end() || cur_it->text != ")"){
+                            throw Exception::SyntaxError(start_it->pos, "function-like macro not close");
+                        }
+                    }else{
+                        if(cur_it == tokens.end()){
+                            throw Exception::SyntaxError(start_it->pos, "function-like macro not close");
+                        }else if(cur_it->text != ")"){
+                            throw Exception::SyntaxError(start_it->pos, "too many arguments for macro '" + macro.name +"'");
+                        }
+                    }
+                    if(args.size() < macro.params->size()){
+                        throw Exception::SyntaxError(start_it->pos, "too few arguments for macro '" + macro.name + "'");
+                    }
+                    // replace each argument
+                    for(std::list<Token>& arg : args){
+                        replace_macro(arg, next_macros);
+                    }
+                    // generate argument map
+                    std::unordered_map<std::string, std::list<Token>> arg_map;
+                    for(size_t i = 0; !args.empty(); ++i){
+                        if(i < macro.params->size()){
+                            if(i != 0){
+                                args.front().pop_front();
+                            }
+                            if(macro.params->at(i) == "..."){
+                                arg_map["__VA_ARGS__"] = args.front();
+                            }else{
+                                arg_map[macro.params->at(i)] = args.front();
+                            }
+                        }else if(macro.params->back() == "..."){
+                            arg_map["__VA_ARGS__"].insert(arg_map["__VA_ARGS__"].end(), args.front().begin(), args.front().end());
+                        }else{
+                            throw Exception::SyntaxError(start_it->pos, "too many arguments for macro '" + macro.name + "'");
+                        }
+                        args.pop_front();
+                    }
+                    // FIXME: print args map
+                    for(auto arg_pair : arg_map){
+                        std::cout << "Arg [" << arg_pair.first << "] : ";
+                        for(Token& tok : arg_pair.second){
+                            std::cout << tok.text;
+                        }
+                        std::cout << std::endl;
+                    }
+                    // replacement
+                    cur_it = tokens.erase(start_it, std::next(cur_it));
+                    auto next_it = cur_it;
+                    for(const Token& rep : macro.replacement){
+                        std::list<Token>::iterator ins_it;
+                        if(rep.type == Token::Identifier && arg_map.contains(rep.text)){
+                            ins_it = tokens.insert(cur_it, arg_map[rep.text].begin(), arg_map[rep.text].end());
+                        }else{
+                            ins_it = tokens.insert(cur_it, rep);
+                        }
+                        if(next_it == cur_it){
+                            next_it = ins_it;
+                        }
+                    }
+                    cur_it = next_it;
+                }
+            }else{
+                // object-type macro
+                std::list<Token> replacement(macro.replacement.begin(), macro.replacement.end());
+                replace_macro(replacement, next_macros);
+                cur_it = tokens.erase(start_it, std::next(cur_it));
+                cur_it = tokens.insert(cur_it, replacement.begin(), replacement.end());
+            }
+            continue;
+        }
+        cur_it = std::next(cur_it);
+    }
 }

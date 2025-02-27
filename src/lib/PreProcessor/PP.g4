@@ -16,7 +16,7 @@ text_line : pp_token* line_end;
 
 define_obj : Hash WhiteSpace* 'define' WhiteSpace+ Identifier WhiteSpace+ pp_token* line_end;
 
-define_func : Hash WhiteSpace* 'define' WhiteSpace+ Identifier '(' identifier_list? Comma? WhiteSpace* Ellipsis? WhiteSpace* ParenR pp_token* line_end;
+define_func : Hash WhiteSpace* 'define' WhiteSpace+ Identifier '(' ( Ellipsis | identifier_list ( Comma WhiteSpace* Ellipsis )? )? WhiteSpace* ParenR pp_token* line_end;
 
 identifier_list : (WhiteSpace* Identifier WhiteSpace* Comma)* WhiteSpace* Identifier WhiteSpace*;
 
