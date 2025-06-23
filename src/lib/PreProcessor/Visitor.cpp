@@ -122,7 +122,6 @@ static std::string convert_trigraph(std::string text){
         result += *it;
         it = std::next(it);
     }
-    std::cout << result << std::endl;
     return result;
 }
 
