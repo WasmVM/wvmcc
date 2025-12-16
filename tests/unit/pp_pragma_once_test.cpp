@@ -37,20 +37,27 @@ static int test_basic_pragma_once() {
     out.close();
     
     Preprocessor pp;
-    auto result = pp.run("test_once_main1.c");
+    if (!pp.open("test_once_main1.c")) {
+        std::filesystem::remove("test_once1.h");
+        std::filesystem::remove("test_once_main1.c");
+        std::cerr << "test_basic_pragma_once: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     
     // Clean up
     std::filesystem::remove("test_once1.h");
     std::filesystem::remove("test_once_main1.c");
     
-    if (!result.success) {
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
         std::cerr << "Preprocessing failed" << std::endl;
         return 1;
     }
     
     // Count how many times "value" appears
     int valueCount = 0;
-    for (const auto& tok : result.tokens) {
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "value") {
             valueCount++;
         }
@@ -81,20 +88,27 @@ static int test_no_pragma_once() {
     out.close();
     
     Preprocessor pp;
-    auto result = pp.run("test_once_main2.c");
+    if (!pp.open("test_once_main2.c")) {
+        std::filesystem::remove("test_once2.h");
+        std::filesystem::remove("test_once_main2.c");
+        std::cerr << "test_no_pragma_once: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     
     // Clean up
     std::filesystem::remove("test_once2.h");
     std::filesystem::remove("test_once_main2.c");
     
-    if (!result.success) {
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
         std::cerr << "Preprocessing failed" << std::endl;
         return 1;
     }
     
     // Count how many times "counter" appears
     int counterCount = 0;
-    for (const auto& tok : result.tokens) {
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "counter") {
             counterCount++;
         }
@@ -128,21 +142,29 @@ static int test_multiple_pragma_once() {
     out.close();
     
     Preprocessor pp;
-    auto result = pp.run("test_once_main3.c");
+    if (!pp.open("test_once_main3.c")) {
+        std::filesystem::remove("test_once3a.h");
+        std::filesystem::remove("test_once3b.h");
+        std::filesystem::remove("test_once_main3.c");
+        std::cerr << "test_multiple_pragma_once: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     
     // Clean up
     std::filesystem::remove("test_once3a.h");
     std::filesystem::remove("test_once3b.h");
     std::filesystem::remove("test_once_main3.c");
     
-    if (!result.success) {
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
         std::cerr << "Preprocessing failed" << std::endl;
         return 1;
     }
     
     // Count identifiers
     int aCount = 0, bCount = 0;
-    for (const auto& tok : result.tokens) {
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Identifier) {
             if (tok.lexeme == "a") aCount++;
             if (tok.lexeme == "b") bCount++;
@@ -184,21 +206,29 @@ static int test_cross_file_pragma_once() {
     out.close();
     
     Preprocessor pp;
-    auto result = pp.run("test_once_main4.c");
+    if (!pp.open("test_once_main4.c")) {
+        std::filesystem::remove("test_once4a.h");
+        std::filesystem::remove("test_once4b.h");
+        std::filesystem::remove("test_once_main4.c");
+        std::cerr << "test_cross_file_pragma_once: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     
     // Clean up
     std::filesystem::remove("test_once4a.h");
     std::filesystem::remove("test_once4b.h");
     std::filesystem::remove("test_once_main4.c");
     
-    if (!result.success) {
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
         std::cerr << "Preprocessing failed" << std::endl;
         return 1;
     }
     
     // Should successfully handle mutual inclusion
     int aCount = 0, bCount = 0;
-    for (const auto& tok : result.tokens) {
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Identifier) {
             if (tok.lexeme == "a") aCount++;
             if (tok.lexeme == "b") bCount++;
@@ -241,20 +271,27 @@ static int test_pragma_once_complex() {
     outmain.close();
     
     Preprocessor pp;
-    auto result = pp.run("test_once_main5.c");
+    if (!pp.open("test_once_main5.c")) {
+        std::filesystem::remove("test_once5.h");
+        std::filesystem::remove("test_once_main5.c");
+        std::cerr << "test_pragma_once_complex: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     
     // Clean up
     std::filesystem::remove("test_once5.h");
     std::filesystem::remove("test_once_main5.c");
     
-    if (!result.success) {
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
         std::cerr << "Preprocessing failed" << std::endl;
         return 1;
     }
     
     // Count "Point" identifier
     int pointCount = 0;
-    for (const auto& tok : result.tokens) {
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "Point") {
             pointCount++;
         }
@@ -286,21 +323,29 @@ static int test_pragma_once_scoping() {
     out.close();
     
     Preprocessor pp;
-    auto result = pp.run("test_once_main6.c");
+    if (!pp.open("test_once_main6.c")) {
+        std::filesystem::remove("test_once6a.h");
+        std::filesystem::remove("test_once6b.h");
+        std::filesystem::remove("test_once_main6.c");
+        std::cerr << "test_pragma_once_scoping: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     
     // Clean up
     std::filesystem::remove("test_once6a.h");
     std::filesystem::remove("test_once6b.h");
     std::filesystem::remove("test_once_main6.c");
     
-    if (!result.success) {
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
         std::cerr << "Preprocessing failed" << std::endl;
         return 1;
     }
     
     // Count how many times "shared" appears
     int sharedCount = 0;
-    for (const auto& tok : result.tokens) {
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "shared") {
             sharedCount++;
         }
