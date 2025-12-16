@@ -65,11 +65,14 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                                           const std::string& currentDir) {
     auto executeInclude = [&](const std::string& header, bool isAngle, std::optional<SourceSpan> span) -> bool {
         if (auto resolved = resolveInclude(header, isAngle, currentDir)) {
+            // TODO: Include guard optimization disabled for now
+            
             Preprocessor child;
             child.includePaths = includePaths;
             child.inclusionStack = inclusionStack;
             auto childRes = child.run(*resolved);
             diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+            
             if (childRes.success) {
                 for (const auto& tk : childRes.tokens) out.push_back(tk);
                 return true;
@@ -255,9 +258,7 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
             macroTable.defineObjectMacro("__FILE__", replacement);
         }
         
-        // __LINE__ macro - current line (will be handled specially during expansion)
-        // For now, we'll leave __LINE__ to be a placeholder
-        // In practice, __LINE__ needs special handling during expansion
+        // __LINE__ macro is handled dynamically during expansion (not predefined)
         
         // __DATE__ macro - compilation date
         {
@@ -651,6 +652,9 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
         hasErrors = true;
     }
     
+    // TODO: Include guard detection will be implemented properly
+    // For now, the optimization is disabled to avoid incorrect behavior
+    
     popInclusion();
     
     // Return failure if any errors were encountered during preprocessing
@@ -810,6 +814,19 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
         // Skip expansion for non-identifiers
         if (t.kind != PPTokenKind::Identifier) {
             result.push_back(t);
+            continue;
+        }
+
+        // Special handling for __LINE__ macro (dynamic expansion)
+        if (t.lexeme == "__LINE__") {
+            // Expand to current line number
+            std::string lineStr = std::to_string(t.span.begin.line);
+            result.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = t.span,
+                .lexeme = lineStr,
+                .paintedMacros = {}
+            });
             continue;
         }
 
@@ -1003,6 +1020,10 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
                 if (!isParam) {
                     auto replToken = repl;
                     replToken.paint(m->name);
+                    // Special handling for __LINE__: update span to invocation site
+                    if (replToken.kind == PPTokenKind::Identifier && replToken.lexeme == "__LINE__") {
+                        replToken.span = t.span;  // Use the span of the macro invocation token
+                    }
                     substituted.push_back(replToken);
                 }
             }
@@ -1058,6 +1079,10 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
         std::vector<PPToken> substituted;
         for (auto repl : m->replacement) {
             repl.paint(m->name);
+            // Special handling for __LINE__: update span to invocation site
+            if (repl.kind == PPTokenKind::Identifier && repl.lexeme == "__LINE__") {
+                repl.span = t.span;  // Use the span of the macro invocation token
+            }
             substituted.push_back(repl);
         }
 

@@ -4,6 +4,7 @@
 #include <vector>
 #include <optional>
 #include <deque>
+#include <unordered_map>
 #include "Tokenizer.hpp"
 #include "MacroTable.hpp"
 #include "Diagnostics.hpp"
@@ -33,6 +34,10 @@ private:
     std::deque<std::string> includeQueue{};
     // Stack of files currently being processed (for cycle detection)
     std::vector<std::string> inclusionStack{};
+    
+    // Include guard optimization: maps file path to its guard macro name
+    // If a file has a detected guard and the macro is defined, we skip re-processing
+    std::unordered_map<std::string, std::string> includeGuards{};
 
     // Structured diagnostics collected during preprocessing
     std::vector<Diagnostic> diagnostics{};
