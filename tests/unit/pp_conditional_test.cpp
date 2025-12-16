@@ -17,16 +17,17 @@ static int test_if_true() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_if_true.c");
-    std::remove("temp_if_true.c");
-
-    if (!res.success) {
-        std::cerr << "test_if_true: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_if_true.c")) {
+        std::remove("temp_if_true.c");
+        std::cerr << "test_if_true: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_if_true.c");
 
     bool hasX = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") { hasX = true; break; }
     }
     if (!hasX) {
@@ -48,16 +49,17 @@ static int test_if_false() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_if_false.c");
-    std::remove("temp_if_false.c");
-
-    if (!res.success) {
-        std::cerr << "test_if_false: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_if_false.c")) {
+        std::remove("temp_if_false.c");
+        std::cerr << "test_if_false: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_if_false.c");
 
     bool hasX = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") { hasX = true; break; }
     }
     if (hasX) {
@@ -81,16 +83,17 @@ static int test_if_else() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_if_else.c");
-    std::remove("temp_if_else.c");
-
-    if (!res.success) {
-        std::cerr << "test_if_else: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_if_else.c")) {
+        std::remove("temp_if_else.c");
+        std::cerr << "test_if_else: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_if_else.c");
 
     bool hasX = false, hasY = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") hasX = true;
         if (t.lexeme == "y") hasY = true;
     }
@@ -118,16 +121,17 @@ static int test_ifdef() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_ifdef.c");
-    std::remove("temp_ifdef.c");
-
-    if (!res.success) {
-        std::cerr << "test_ifdef: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_ifdef.c")) {
+        std::remove("temp_ifdef.c");
+        std::cerr << "test_ifdef: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_ifdef.c");
 
     bool hasX = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") { hasX = true; break; }
     }
     if (!hasX) {
@@ -149,22 +153,23 @@ static int test_ifndef() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_ifndef.c");
-    std::remove("temp_ifndef.c");
-
-    if (!res.success) {
-        std::cerr << "test_ifndef: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_ifndef.c")) {
+        std::remove("temp_ifndef.c");
+        std::cerr << "test_ifndef: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_ifndef.c");
 
     bool hasX = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") { hasX = true; break; }
     }
     if (!hasX) {
         std::cerr << "test_ifndef: expected 'x' in output\n";
         std::cerr << "tokens:";
-        for (const auto& t : res.tokens) {
+        for (const auto& t : tokens) {
             std::cerr << " [" << t.lexeme << "]";
         }
         std::cerr << "\n";
@@ -189,16 +194,17 @@ static int test_elif() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_elif.c");
-    std::remove("temp_elif.c");
-
-    if (!res.success) {
-        std::cerr << "test_elif: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_elif.c")) {
+        std::remove("temp_elif.c");
+        std::cerr << "test_elif: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_elif.c");
 
     bool hasX = false, hasY = false, hasZ = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") hasX = true;
         if (t.lexeme == "y") hasY = true;
         if (t.lexeme == "z") hasZ = true;
@@ -228,16 +234,17 @@ static int test_nested() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_nested.c");
-    std::remove("temp_nested.c");
-
-    if (!res.success) {
-        std::cerr << "test_nested: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_nested.c")) {
+        std::remove("temp_nested.c");
+        std::cerr << "test_nested: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_nested.c");
 
     bool hasX = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") { hasX = true; break; }
     }
     if (!hasX) {
@@ -260,16 +267,17 @@ static int test_defined() {
     }
 
     Preprocessor pp;
-    auto res = pp.run("temp_defined.c");
-    std::remove("temp_defined.c");
-
-    if (!res.success) {
-        std::cerr << "test_defined: preprocess failed: " << res.errorMsg << "\n";
+    if (!pp.open("temp_defined.c")) {
+        std::remove("temp_defined.c");
+        std::cerr << "test_defined: failed to open input\n";
         return 1;
     }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove("temp_defined.c");
 
     bool hasX = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "x") { hasX = true; break; }
     }
     if (!hasX) {

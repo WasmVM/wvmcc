@@ -294,6 +294,23 @@ void Preprocessor::handleDirective() {
         }
         handleIfDirective(*fileStack.back().tokenizer, lineTokens);
         return;
+    } else if (dir == "elif") {
+        std::vector<PPToken> lineTokens;
+        while (true) {
+            auto t = readRawToken();
+            if (!t || t->kind == PPTokenKind::Newline) break;
+            lineTokens.push_back(*t);
+        }
+        handleElifDirective(*fileStack.back().tokenizer, lineTokens);
+        return;
+    } else if (dir == "else") {
+        // consume rest of line, then flip active state appropriately
+        while (true) {
+            auto t = readRawToken();
+            if (!t || t->kind == PPTokenKind::Newline) break;
+        }
+        handleElseDirective();
+        return;
     } else if (dir == "endif") {
         handleEndifDirective();
         return;
