@@ -103,6 +103,13 @@ private:
     bool handleElifDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
     bool handleElseDirective();
     bool handleEndifDirective();
+    
+    // Handle utility directives
+    // Returns true if the directive was successfully parsed, false on error.
+    bool handleErrorDirective(const std::vector<PPToken>& tokens);
+    bool handleWarningDirective(const std::vector<PPToken>& tokens);
+    bool handleLineDirective(const std::vector<PPToken>& tokens);
+    bool handlePragmaDirective(const std::vector<PPToken>& tokens);
 };
 
 } // namespace wvmcc

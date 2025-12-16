@@ -559,6 +559,54 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                             if (!handleEndifDirective()) {
                                 hasErrors = true;
                             }
+                        } else if (dir->lexeme == "error") {
+                            // Only execute #error if in active region
+                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                            if (shouldExecute) {
+                                auto lineTokens = collectLineTokens(tokenizer);
+                                if (!handleErrorDirective(lineTokens)) {
+                                    hasErrors = true;
+                                }
+                            } else {
+                                // Consume tokens but don't execute
+                                collectLineTokens(tokenizer);
+                            }
+                        } else if (dir->lexeme == "warning") {
+                            // Only execute #warning if in active region
+                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                            if (shouldExecute) {
+                                auto lineTokens = collectLineTokens(tokenizer);
+                                if (!handleWarningDirective(lineTokens)) {
+                                    hasErrors = true;
+                                }
+                            } else {
+                                // Consume tokens but don't execute
+                                collectLineTokens(tokenizer);
+                            }
+                        } else if (dir->lexeme == "line") {
+                            // Only execute #line if in active region
+                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                            if (shouldExecute) {
+                                auto lineTokens = collectLineTokens(tokenizer);
+                                if (!handleLineDirective(lineTokens)) {
+                                    hasErrors = true;
+                                }
+                            } else {
+                                // Consume tokens but don't execute
+                                collectLineTokens(tokenizer);
+                            }
+                        } else if (dir->lexeme == "pragma") {
+                            // Only execute #pragma if in active region
+                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                            if (shouldExecute) {
+                                auto lineTokens = collectLineTokens(tokenizer);
+                                if (!handlePragmaDirective(lineTokens)) {
+                                    hasErrors = true;
+                                }
+                            } else {
+                                // Consume tokens but don't execute
+                                collectLineTokens(tokenizer);
+                            }
                         } else {
                             // Unknown directive: consume until newline but emit as-is
                             while (auto a = tokenizer.peek()) {
@@ -1189,6 +1237,145 @@ bool Preprocessor::handleEndifDirective() {
 
     conditionalStack.pop_back();
     return true;
+}
+
+bool Preprocessor::handleErrorDirective(const std::vector<PPToken>& tokens) {
+    // #error directive: emit error message and fail preprocessing
+    // Collect all tokens (excluding whitespace at boundaries) as the error message
+    std::string errorMsg;
+    
+    for (const auto& tok : tokens) {
+        if (tok.kind == PPTokenKind::Whitespace) {
+            if (!errorMsg.empty()) {
+                errorMsg += " ";
+            }
+        } else {
+            errorMsg += tok.lexeme;
+        }
+    }
+    
+    // Trim trailing whitespace
+    while (!errorMsg.empty() && (errorMsg.back() == ' ' || errorMsg.back() == '\t')) {
+        errorMsg.pop_back();
+    }
+    
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("#error: ") + (errorMsg.empty() ? "(no message)" : errorMsg),
+        .severity = Diagnostic::Severity::Error,
+        .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
+    });
+    
+    return false; // #error always causes preprocessing to fail
+}
+
+bool Preprocessor::handleWarningDirective(const std::vector<PPToken>& tokens) {
+    // #warning directive: emit warning message but continue preprocessing
+    std::string warningMsg;
+    
+    for (const auto& tok : tokens) {
+        if (tok.kind == PPTokenKind::Whitespace) {
+            if (!warningMsg.empty()) {
+                warningMsg += " ";
+            }
+        } else {
+            warningMsg += tok.lexeme;
+        }
+    }
+    
+    // Trim trailing whitespace
+    while (!warningMsg.empty() && (warningMsg.back() == ' ' || warningMsg.back() == '\t')) {
+        warningMsg.pop_back();
+    }
+    
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("#warning: ") + (warningMsg.empty() ? "(no message)" : warningMsg),
+        .severity = Diagnostic::Severity::Warning,
+        .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
+    });
+    
+    return true; // #warning does not cause preprocessing to fail
+}
+
+bool Preprocessor::handleLineDirective(const std::vector<PPToken>& tokens) {
+    // #line directive: change line number and optionally filename for subsequent diagnostics
+    // Format: #line digit-sequence ["filename"]
+    // For now, we'll just validate and accept it without changing our line tracking
+    // (Full implementation would require modifying SourcePos in emitted tokens)
+    
+    if (tokens.empty()) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#line directive requires line number",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+    
+    // First token should be a number
+    size_t idx = 0;
+    while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) {
+        idx++;
+    }
+    
+    if (idx >= tokens.size() || tokens[idx].kind != PPTokenKind::PPNumber) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#line directive requires line number as first argument",
+            .severity = Diagnostic::Severity::Error,
+            .span = idx < tokens.size() ? std::optional<SourceSpan>(tokens[idx].span) : std::nullopt
+        });
+        return false;
+    }
+    
+    // Optionally followed by a string literal (filename)
+    idx++;
+    while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) {
+        idx++;
+    }
+    
+    if (idx < tokens.size()) {
+        if (tokens[idx].kind != PPTokenKind::StringLiteral) {
+            diagnostics.push_back(Diagnostic{
+                .message = "#line directive optional second argument must be a string literal",
+                .severity = Diagnostic::Severity::Error,
+                .span = tokens[idx].span
+            });
+            return false;
+        }
+    }
+    
+    // Note: Full implementation would update line/file tracking here
+    // For now, we just validate the syntax
+    return true;
+}
+
+bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
+    // #pragma directive: implementation-defined behavior
+    // We'll use a pass-through approach: emit a diagnostic but continue
+    
+    std::string pragmaContent;
+    for (const auto& tok : tokens) {
+        if (tok.kind == PPTokenKind::Whitespace) {
+            if (!pragmaContent.empty()) {
+                pragmaContent += " ";
+            }
+        } else {
+            pragmaContent += tok.lexeme;
+        }
+    }
+    
+    // Trim trailing whitespace
+    while (!pragmaContent.empty() && (pragmaContent.back() == ' ' || pragmaContent.back() == '\t')) {
+        pragmaContent.pop_back();
+    }
+    
+    // Emit an info diagnostic about the pragma (not an error or warning)
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("#pragma: ") + (pragmaContent.empty() ? "(empty)" : pragmaContent),
+        .severity = Diagnostic::Severity::Warning, // Use warning level for visibility
+        .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
+    });
+    
+    return true; // #pragma does not cause preprocessing to fail
 }
 
 } // namespace wvmcc
