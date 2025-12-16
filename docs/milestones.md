@@ -20,26 +20,28 @@ This document tracks key milestones achieved so far and the upcoming work items 
   - Identifier (per 6.4.2: ASCII letters/underscore start; digits allowed after; supports UCNs \uXXXX and \UXXXXXXXX)
 - Header-name recognition (6.4.7) in `#include` directives
   - Post-tokenization transform combines `<...>` or "..." into a single `HeaderName`
-- **Preprocessor Phase 4: Complete directive processing and macro expansion**
-  - ✅ Object-like and function-like macros (`#define`, `#undef`) with basic recursion guards
+-- **Preprocessor: Directive processing, macro expansion, and replacement operators**
+  - ✅ Object-like and function-like macros (`#define`, `#undef`) with recursion protection
   - ✅ Variadic macros with `__VA_ARGS__` support
   - ✅ Macro expansion with argument substitution
   - ✅ Conditional compilation (`#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`)
-  - ✅ Constant expression evaluation (ConstExprParser) with full operator support
-  - ✅ `defined()` operator with proper semantics (no operand expansion)
+  - ✅ Constant expression evaluation (ConstExprParser) used by preprocessing
+  - ✅ `defined()` operator with correct semantics (no operand expansion)
   - ✅ `#include` directives with cycle detection and search path resolution
   - ✅ Macro-replaced includes (expand then reparse header-name)
   - ✅ Nested conditional tracking and inactive region skipping
   - ✅ Structured diagnostics with severity levels and source spans
-  - ❌ Stringification `#` operator (deferred to Phase 7)
-  - ❌ Token pasting `##` operator (deferred to Phase 7)
-  - 🚧 **Full rescanning with paint semantics** (basic recursion prevention insufficient; need proper implementation per C17 §6.10.3.3)
-  - ❌ Predefined macros (`__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `__STDC__`) — future work
-- Unit tests
-  - Preprocessor: basic, macro expansion, conditionals, includes, constant expressions
+  - ✅ Stringification `#` operator (`#`) implemented
+  - ✅ Token pasting `##` operator implemented
+  - ✅ Full rescanning with paint semantics per C17 §6.10.3.3 (paint tracking in `PPToken`)
+  - ✅ Utility directives: `#error`, `#warning`, `#line`, `#pragma` (with validation)
+  - ✅ Predefined macros implemented (`__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, etc.)
+
+Unit tests
+  - Preprocessor: basic, macro expansion, conditionals, includes, constant expressions, and macro replacement operator tests
   - Tokenizer: whitespace, punctuators, strings, chars, pp-number, identifiers
   - Updated to use range-style iteration over streaming tokenizer
-  - 13 test suites all passing
+  - 13+ test suites passing (new macro-replacement operator tests added)
 
 ## In Progress / Near-Term
 - **Parser for translation units (next major milestone)**
@@ -54,12 +56,10 @@ This document tracks key milestones achieved so far and the upcoming work items 
   - Type checking and conversions
   - Constant expression evaluation (semantic, not preprocessor)
   - Lvalue/rvalue analysis
-- Preprocessor enhancements (deferred)
-  - Stringification `#` operator in macro replacements
-  - Token pasting `##` operator
-  - `#error`, `#warning`, `#line`, `#pragma` directives
-  - Predefined macros (`__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`)
-  - Include guard optimization
+- Preprocessor enhancements (remaining)
+  - Include guard optimization and detection improvements
+  - Configurable predefined macros by target/flags
+  - Additional robustness tests and edge-case handling for complex macro chains
 
 ## Later Milestones
 - Parser for translation units (C17 subset initially)
@@ -75,8 +75,9 @@ This document tracks key milestones achieved so far and the upcoming work items 
 ## Preprocessor Phases Summary (C17 §5.1.1.2)
 - Phase 1–3: ✅ Implemented (trigraphs, line splicing, comment removal, tokenization)
 - Phase 4: ✅ Implemented (directives, macro expansion, conditionals, includes)
-- Phase 5–6: 🚧 Deferred (escape sequence interpretation, string concatenation handled in parser)
-- Phase 7: 📋 Next (token conversion from preprocessing-tokens to language tokens; parser integration)
+- Phase 5: ✅ Implemented (escape/escape-sequence handling and string literal concatenation as required by preprocessing)
+- Phase 6: ✅ Implemented (conversion to translation-unit tokens for later phases where applicable)
+- Phase 7: ✅ Implemented (macro replacement operators, token pasting, stringification, and paint semantics)
 - Phase 8: 📋 Future (linkage and translation unit merging)
 
 ## Notes
