@@ -62,6 +62,38 @@ std::vector<PPToken> Tokenizer::tokenize_with_punctuators(const std::string& inp
         char c = input[i];
         SourcePos begin = pos;
 
+        // Preprocessing number (PPNumber)
+        auto is_digit = [](char ch){ return ch>='0' && ch<='9'; };
+        auto is_nondigit = [](char ch){ return (ch=='_') || (ch>='a'&&ch<='z') || (ch>='A'&&ch<='Z'); };
+        if (c == '.' ? (i + 1 < input.size() && is_digit(input[i+1])) : is_digit(c)) {
+            size_t j = i;
+            bool afterExpMarker = false;
+            // if started with '.', consume it
+            if (input[j] == '.') { advance_pos('.'); ++j; }
+            // consume first run character (digit)
+            if (j < input.size() && is_digit(input[j])) { advance_pos(input[j]); ++j; }
+            // main loop: digits, identifier-nondigit, exponent markers with optional sign, and trailing dot
+            while (j < input.size()) {
+                char d = input[j];
+                if (d=='e'||d=='E'||d=='p'||d=='P') {
+                    // Consume exponent marker
+                    advance_pos(d); ++j;
+                    // Optional sign
+                    if (j < input.size() && (input[j] == '+' || input[j] == '-')) { advance_pos(input[j]); ++j; }
+                    // Consume subsequent digits (if any) as part of pp-number
+                    while (j < input.size() && (input[j] >= '0' && input[j] <= '9')) { advance_pos(input[j]); ++j; }
+                    continue;
+                }
+                if (is_digit(d) || is_nondigit(d)) { advance_pos(d); ++j; continue; }
+                if (d == '.') { advance_pos('.'); ++j; continue; }
+                break;
+            }
+            std::string lex = input.substr(i, j - i);
+            emit(PPTokenKind::PPNumber, lex, begin, pos);
+            i = j;
+            continue;
+        }
+
         // Character constant (with optional encoding prefix L/u/U)
         auto starts_char = [&](size_t idx, size_t& prefixLen) -> bool {
             prefixLen = 0;
