@@ -12,14 +12,18 @@ std::vector<PPToken> preprocessString(const std::string& source, const std::stri
     std::ofstream out(filename);
     out << source;
     out.close();
-
     Preprocessor pp;
-    auto result = pp.run(filename);
-    
+    if (!pp.open(filename)) {
+        std::filesystem::remove(filename);
+        return {};
+    }
+
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+
     // Clean up
     std::filesystem::remove(filename);
-    
-    return result.tokens;
+    return tokens;
 }
 
 // Test 1: Basic __LINE__ expansion

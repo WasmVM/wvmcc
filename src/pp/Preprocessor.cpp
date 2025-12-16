@@ -141,6 +141,21 @@ void Preprocessor::ensureBuffer() {
             continue;
         }
 
+        // If we're inside an inactive conditional block, skip tokens except directives and newlines
+        if (!conditionalStack.empty() && !conditionalStack.back().currentlyActive) {
+            if (tok.kind == PPTokenKind::Newline) {
+                outBuffer.push_back(tok);
+                atLineStart = true;
+                continue;
+            }
+            if (atLineStart && tok.kind == PPTokenKind::Punctuator && tok.lexeme == "#") {
+                handleDirective();
+                continue;
+            }
+            // Otherwise skip this token (do not emit)
+            continue;
+        }
+
         if (atLineStart && tok.kind == PPTokenKind::Punctuator && tok.lexeme == "#") {
             handleDirective();
             continue;
@@ -152,7 +167,18 @@ void Preprocessor::ensureBuffer() {
                 if (mOpt) {
                     const Macro* m = *mOpt;
                     if (!m->isFunction) {
-                        for (auto it = m->replacement.rbegin(); it != m->replacement.rend(); ++it) {
+                        // Object-like macro: substitute and recursively expand before emitting
+                        std::vector<PPToken> substituted;
+                        for (auto repl : m->replacement) {
+                            repl.paint(m->name);
+                            if (repl.kind == PPTokenKind::Identifier && repl.lexeme == "__LINE__") {
+                                repl.span = tok.span;
+                            }
+                            substituted.push_back(repl);
+                        }
+                        auto expanded = expandMacros(substituted);
+                        // push expanded tokens to front in reverse order
+                        for (auto it = expanded.rbegin(); it != expanded.rend(); ++it) {
                             outBuffer.push_front(*it);
                         }
                         continue;
@@ -216,7 +242,19 @@ void Preprocessor::ensureBuffer() {
             }
         }
 
-        outBuffer.push_back(tok);
+        // Handle dynamic __LINE__ expansion in streaming mode
+        if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "__LINE__") {
+            std::string lineStr = std::to_string(tok.span.begin.line);
+            PPToken numTok{
+                .kind = PPTokenKind::PPNumber,
+                .span = tok.span,
+                .lexeme = lineStr,
+                .paintedMacros = {}
+            };
+            outBuffer.push_back(numTok);
+        } else {
+            outBuffer.push_back(tok);
+        }
         atLineStart = false;
     }
 }
@@ -246,6 +284,19 @@ void Preprocessor::handleDirective() {
         handleIfdef(true);
     } else if (dir == "ifndef") {
         handleIfdef(false);
+    } else if (dir == "if") {
+        // collect rest of line tokens and evaluate
+        std::vector<PPToken> lineTokens;
+        while (true) {
+            auto t = readRawToken();
+            if (!t || t->kind == PPTokenKind::Newline) break;
+            lineTokens.push_back(*t);
+        }
+        handleIfDirective(*fileStack.back().tokenizer, lineTokens);
+        return;
+    } else if (dir == "endif") {
+        handleEndifDirective();
+        return;
     } else {
         std::optional<PPToken> t;
         while ((t = readRawToken())) { if (t->kind == PPTokenKind::Newline) break; }
