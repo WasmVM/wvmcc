@@ -302,13 +302,22 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                             }
                         }
                     } else {
-                        // Other directives: consume until newline but do not execute; emit as-is
-                        // TODO: Parse and store directive arguments for later execution
-                        // TODO: Implement execution for object-like macros (#define/#undef)
-                        // TODO: Implement conditional stack handling (#if/#ifdef/#ifndef/#elif/#else/#endif)
-                        while (auto a = tokenizer.peek()) {
-                            if (a->kind == PPTokenKind::Newline) break;
-                            out.push_back(*tokenizer.next());
+                        // Other directives: parse and execute
+                        if (dir->lexeme == "define") {
+                            if (!handleDefineDirective(tokenizer)) {
+                                hasErrors = true;
+                            }
+                        } else if (dir->lexeme == "undef") {
+                            if (!handleUndefDirective(tokenizer)) {
+                                hasErrors = true;
+                            }
+                        } else {
+                            // Other directives: consume until newline but do not execute; emit as-is
+                            // TODO: Implement conditional stack handling (#if/#ifdef/#ifndef/#elif/#else/#endif)
+                            while (auto a = tokenizer.peek()) {
+                                if (a->kind == PPTokenKind::Newline) break;
+                                out.push_back(*tokenizer.next());
+                            }
                         }
                     }
                 }
@@ -340,6 +349,134 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
         return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
     }
     return PreprocessResult{std::move(out), true, std::string()};
+}
+
+std::vector<PPToken> Preprocessor::collectLineTokens(Tokenizer& tokenizer) {
+    std::vector<PPToken> tokens;
+    while (auto t = tokenizer.peek()) {
+        if (t->kind == PPTokenKind::Newline) {
+            break;
+        }
+        tokens.push_back(*tokenizer.next());
+    }
+    return tokens;
+}
+
+bool Preprocessor::handleDefineDirective(Tokenizer& tokenizer) {
+    // Skip whitespace after 'define' keyword
+    while (auto w = tokenizer.peek()) {
+        if (w->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
+        else break;
+    }
+
+    auto macroName = tokenizer.peek();
+    if (!macroName || macroName->kind != PPTokenKind::Identifier) {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected macro name after #define",
+            .severity = Diagnostic::Severity::Error,
+        });
+        return false;
+    }
+
+    std::string name = macroName->lexeme;
+    tokenizer.next(); // consume macro name
+
+    // Check if this is a function-like or object-like macro
+    auto next = tokenizer.peek();
+    bool isFunction = false;
+    std::vector<std::string> params;
+    bool variadic = false;
+
+    if (next && next->kind == PPTokenKind::Punctuator && next->lexeme == "(") {
+        // Function-like macro: #define NAME(params) replacement
+        // Note: no space between NAME and (
+        isFunction = true;
+        tokenizer.next(); // consume '('
+
+        // Parse parameter list
+        while (auto param = tokenizer.peek()) {
+            if (param->kind == PPTokenKind::Punctuator && param->lexeme == ")") {
+                tokenizer.next(); // consume ')'
+                break;
+            }
+            if (param->kind == PPTokenKind::Whitespace) {
+                tokenizer.next();
+                continue;
+            }
+            if (param->kind == PPTokenKind::Punctuator && param->lexeme == ",") {
+                tokenizer.next();
+                continue;
+            }
+            if (param->kind == PPTokenKind::Punctuator && param->lexeme == "...") {
+                variadic = true;
+                tokenizer.next();
+                // consume trailing ) for variadic
+                while (auto p = tokenizer.peek()) {
+                    if (p->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
+                    else break;
+                }
+                if (auto close = tokenizer.peek()) {
+                    if (close->kind == PPTokenKind::Punctuator && close->lexeme == ")") {
+                        tokenizer.next();
+                    }
+                }
+                break;
+            }
+            if (param->kind == PPTokenKind::Identifier) {
+                params.push_back(param->lexeme);
+                tokenizer.next();
+            } else {
+                diagnostics.push_back(Diagnostic{
+                    .message = "invalid parameter in function-like macro",
+                    .severity = Diagnostic::Severity::Error,
+                });
+                return false;
+            }
+        }
+    }
+
+    // Collect replacement tokens until end of line
+    std::vector<PPToken> replacement = collectLineTokens(tokenizer);
+
+    // Remove leading/trailing whitespace from replacement
+    while (!replacement.empty() && replacement.front().kind == PPTokenKind::Whitespace) {
+        replacement.erase(replacement.begin());
+    }
+    while (!replacement.empty() && replacement.back().kind == PPTokenKind::Whitespace) {
+        replacement.pop_back();
+    }
+
+    // Store macro definition
+    if (isFunction) {
+        macroTable.defineFunctionMacro(name, params, replacement, variadic);
+    } else {
+        macroTable.defineObjectMacro(name, replacement);
+    }
+
+    return true;
+}
+
+bool Preprocessor::handleUndefDirective(Tokenizer& tokenizer) {
+    // Skip whitespace after 'undef' keyword
+    while (auto w = tokenizer.peek()) {
+        if (w->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
+        else break;
+    }
+
+    auto macroName = tokenizer.peek();
+    if (!macroName || macroName->kind != PPTokenKind::Identifier) {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected macro name after #undef",
+            .severity = Diagnostic::Severity::Error,
+        });
+        return false;
+    }
+
+    std::string name = macroName->lexeme;
+    macroTable.undefine(name);
+    tokenizer.next(); // consume macro name
+
+    return true;
 }
 
 } // namespace wvmcc

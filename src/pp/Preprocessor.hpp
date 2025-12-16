@@ -5,6 +5,7 @@
 #include <optional>
 #include <deque>
 #include "Tokenizer.hpp"
+#include "MacroTable.hpp"
 
 namespace wvmcc {
 
@@ -42,6 +43,9 @@ private:
     // Structured diagnostics collected during preprocessing
     std::vector<Diagnostic> diagnostics{};
 
+    // Macro definitions
+    MacroTable macroTable{};
+
     // Parse an #include directive payload starting right after the 'include' identifier.
     // Consumes whitespace and either <...> or "..." and emits a single HeaderName token into 'out'.
     // Execution/resolution is not performed here (parse only).
@@ -66,6 +70,18 @@ private:
 
     // Pop the current file from inclusion stack.
     void popInclusion();
+
+    // Parse and execute a #define directive starting right after 'define' keyword.
+    // Returns true if successful, false on error.
+    bool handleDefineDirective(Tokenizer& tokenizer);
+
+    // Parse and execute a #undef directive starting right after 'undef' keyword.
+    // Returns true if successful, false on error.
+    bool handleUndefDirective(Tokenizer& tokenizer);
+
+    // Collect all tokens from current position until end of logical line (newline).
+    // Does not consume the newline. Used by directive parsers.
+    std::vector<PPToken> collectLineTokens(Tokenizer& tokenizer);
 };
 
 } // namespace wvmcc
