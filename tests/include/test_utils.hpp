@@ -3,8 +3,8 @@
 #include <iostream>
 #include <string>
 #include <vector>
-
-// Requires the including file to include "../../src/pp/Tokenizer.hpp" first.
+#include <sstream>
+#include "../../src/pp/Tokenizer.hpp"
 
 namespace testutil {
 
@@ -12,7 +12,8 @@ inline bool expectKindsLex(const std::string& name,
                            const std::string& input,
                            const std::vector<wvmcc::PPTokenKind>& kinds,
                            const std::vector<std::string>& lexemes) {
-    wvmcc::Tokenizer tokenizer(input);
+    std::istringstream iss(input);
+    wvmcc::Tokenizer tokenizer(iss);
     std::vector<wvmcc::PPToken> toks;
     toks.reserve(128);
     for (const auto& t : tokenizer) {

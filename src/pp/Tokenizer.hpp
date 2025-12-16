@@ -1,8 +1,8 @@
 #pragma once
 
 #include <string>
-#include <vector>
 #include <optional>
+#include <deque>
 #include <istream>
 
 namespace wvmcc {
@@ -30,36 +30,43 @@ struct PPToken {
 
 class SourceBuffer {
 public:
-    explicit SourceBuffer(const std::string& input);
     explicit SourceBuffer(std::istream& in);
     bool next_char(char& outCh);
-    void ensure_stream(std::string& stream, std::size_t upto);
-    bool lastWhitespace() const { return lastEmittedWhitespace; }
     const SourcePos& position() const { return pos; }
     void reset();
+    
+    // Ring-buffer based lookahead API
+    // Ensure at least k characters available in lookahead buffer
+    void ensure(std::size_t k);
+    // Peek i-th lookahead character (0-based), std::nullopt if EOF before i
+    std::optional<char> peek(std::size_t i);
+    // Consume n characters from lookahead (returns true if fully consumed)
+    bool consume(std::size_t n);
+    // Get and consume one character from lookahead
+    std::optional<char> get();
 
 private:
     enum class State { Normal, InString, InChar, InBlockComment, InLineComment };
-    const std::string& inputRef;
-    std::istream* inStream{nullptr};
-    std::string inputAccum; // used when inStream!=nullptr
+    std::istream& inStream;
+    std::string inputAccum; // normalized input accumulated incrementally from inStream
     bool eof{false};
     State st{State::Normal};
     bool esc{false};
     std::size_t rawIdx{0};
-    bool lastEmittedWhitespace{false};
-    bool inputEndsWithNewline{false};
+    bool lastOutputWasWhitespace{false};
     std::string charBuf;
+    std::deque<char> ring;
+    bool pendingSpace{false};
     SourcePos pos{0,1,1,0};
 
     char trigraph_at(std::size_t idx) const;
     void fill_buffer();
     void ensure_input(std::size_t upto);
+    void account_consumed(char ch);
 };
 
 class Tokenizer {
 public:
-    explicit Tokenizer(const std::string& input);
     explicit Tokenizer(std::istream& in);
     
     // Streaming API: read next token; returns std::nullopt at EOF
@@ -71,9 +78,7 @@ public:
     
     // Optional convenience: check if we've reached end-of-input
     bool empty() {
-        // Ensure at least one char is available if any remain
-        feeder.ensure_stream(stream, streamPos);
-        return streamPos >= stream.size();
+        return !feeder.peek(0).has_value();
     }
 
     // Range-style iteration support (consuming iterator)
@@ -120,14 +125,10 @@ private:
     static bool is_oct(char c);
 
     // Member state for tokenization
-    const std::string& input;
     SourceBuffer feeder;
-    std::vector<PPToken> tokens;
-    std::string stream;
-    size_t streamPos{0};
     std::optional<PPToken> lookahead;
 
-    void emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end);
+    // no-op: emit helper removed in feeder-only design
     bool try_ucn(size_t idx, size_t& consumed);
     bool starts_char(size_t idx, size_t& prefixLen);
     bool starts_string(size_t idx, size_t& prefixLen);

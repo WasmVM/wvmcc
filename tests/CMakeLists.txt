@@ -59,3 +59,35 @@ if(EXISTS ${PP_TOKENIZER_IDENTIFIER_TEST})
     target_include_directories(wvmcc-pp-tokenizer-identifier-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
     add_test(NAME pp-tokenizer-identifier COMMAND wvmcc-pp-tokenizer-identifier-test)
 endif()
+
+# Tokenizer istream test
+set(TOKENIZER_ISTREAM_TEST ${TEST_ROOT}/unit/tokenizer_istream_test.cpp)
+if(EXISTS ${TOKENIZER_ISTREAM_TEST})
+    add_executable(wvmcc-tokenizer-istream-test ${TOKENIZER_ISTREAM_TEST} ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-tokenizer-istream-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME tokenizer-istream COMMAND wvmcc-tokenizer-istream-test)
+endif()
+
+# Tokenizer ifstream reset test
+set(TOKENIZER_IFSTREAM_RESET_TEST ${TEST_ROOT}/unit/tokenizer_ifstream_reset_test.cpp)
+if(EXISTS ${TOKENIZER_IFSTREAM_RESET_TEST})
+    add_executable(wvmcc-tokenizer-ifstream-reset-test ${TOKENIZER_IFSTREAM_RESET_TEST} ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-tokenizer-ifstream-reset-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME tokenizer-ifstream-reset COMMAND wvmcc-tokenizer-ifstream-reset-test)
+endif()
+
+# Include success test
+set(PP_INCLUDE_SUCCESS_TEST ${TEST_ROOT}/unit/pp_include_success_test.cpp)
+if(EXISTS ${PP_INCLUDE_SUCCESS_TEST})
+    add_executable(wvmcc-pp-include-success-test ${PP_INCLUDE_SUCCESS_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-include-success-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-include-success COMMAND wvmcc-pp-include-success-test)
+endif()
+
+# Include failure test
+set(PP_INCLUDE_FAILURE_TEST ${TEST_ROOT}/unit/pp_include_failure_test.cpp)
+if(EXISTS ${PP_INCLUDE_FAILURE_TEST})
+    add_executable(wvmcc-pp-include-failure-test ${PP_INCLUDE_FAILURE_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-include-failure-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-include-failure COMMAND wvmcc-pp-include-failure-test)
+endif()

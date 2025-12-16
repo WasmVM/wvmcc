@@ -10,6 +10,18 @@
 
 namespace wvmcc {
 
+static bool file_ends_with_newline(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return true; // if unreadable, avoid noisy warnings here
+    f.seekg(0, std::ios::end);
+    std::streampos sz = f.tellg();
+    if (sz <= 0) return true; // empty file: treat as ok
+    f.seekg(-1, std::ios::end);
+    char last = '\n';
+    f.read(&last, 1);
+    return last == '\n';
+}
+
 bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                                           std::vector<PPToken>& out,
                                           const std::string& currentDir) {
@@ -38,8 +50,7 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                     // Execute: stream tokens from included file inline
                     std::ifstream hfs(*resolved);
                     if (hfs) {
-                        std::ostringstream hoss; hoss << hfs.rdbuf();
-                        Tokenizer htok(hoss.str());
+                        Tokenizer htok(hfs);
                         htok.reset();
                         while (auto itok = htok.next()) { out.push_back(*itok); }
                         return true;
@@ -83,8 +94,7 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
             // Execute: stream tokens from included file inline
             std::ifstream hfs(*resolved);
             if (hfs) {
-                std::ostringstream hoss; hoss << hfs.rdbuf();
-                Tokenizer htok(hoss.str());
+                Tokenizer htok(hfs);
                 htok.reset();
                 while (auto itok = htok.next()) { out.push_back(*itok); }
                 tokenizer.next();
@@ -148,15 +158,14 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
     if (!ifs) {
         return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cannot open input: ") + inputPath};
     }
-    std::ostringstream oss;
-    oss << ifs.rdbuf();
+    const bool endsWithNewline = file_ends_with_newline(inputPath);
     // Derive current file directory for quote-style includes
     std::filesystem::path inputPathFs(inputPath);
     std::string currentDir = inputPathFs.has_parent_path() ? inputPathFs.parent_path().string() : std::string();
-    // Single-pass streaming: consume tokens, parse directives (no execution yet), and recognize header-name in #include
-    Tokenizer tokenizer(oss.str());
+    // Single-pass streaming: consume tokens, parse directives and includes
+    Tokenizer tokenizer(ifs);
     std::vector<PPToken> out;
-    out.reserve(oss.str().size() / 2);
+    out.reserve(256);
     tokenizer.reset();
     bool atLineStart = true; // start of file is line start
     while (auto tokOpt = tokenizer.next()) {
@@ -234,6 +243,13 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
         out.push_back(t);
     }
 
+    if (!endsWithNewline) {
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("input file '") + inputPath + "' does not end with a newline",
+            .severity = Diagnostic::Severity::Warning,
+            .span = std::nullopt
+        });
+    }
     return PreprocessResult{std::move(out), true, std::string()};
 }
 

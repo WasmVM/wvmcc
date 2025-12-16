@@ -1,8 +1,7 @@
 #include "Tokenizer.hpp"
 #include <cstring>
 #include <istream>
-#include <ostream>
-#include <sstream>
+#include <deque>
 
 namespace wvmcc {
 
@@ -78,19 +77,13 @@ static size_t match_punct(const std::string& s, size_t i) {
     }
 }
 
-SourceBuffer::SourceBuffer(const std::string& input) : inputRef(input) {
+SourceBuffer::SourceBuffer(std::istream& in) : inStream(in) {
     charBuf.reserve(64);
-    inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
-}
-
-SourceBuffer::SourceBuffer(std::istream& in) : inputRef(inputAccum), inStream(&in) {
-    charBuf.reserve(64);
-    inputEndsWithNewline = false;
 }
 
 char SourceBuffer::trigraph_at(std::size_t idx) const {
-    if (idx + 2 < inputRef.size() && inputRef[idx] == '?' && inputRef[idx+1] == '?') {
-        switch (inputRef[idx+2]) {
+    if (idx + 2 < inputAccum.size() && inputAccum[idx] == '?' && inputAccum[idx+1] == '?') {
+        switch (inputAccum[idx+2]) {
             case '=': return '#';
             case '(': return '[';
             case '/': return '\\';
@@ -108,12 +101,23 @@ char SourceBuffer::trigraph_at(std::size_t idx) const {
 void SourceBuffer::fill_buffer() {
     while (charBuf.empty()) {
         ensure_input(rawIdx + 3);
-        if (rawIdx >= inputRef.size()) break;
-        char c = inputRef[rawIdx];
+        if (rawIdx >= inputAccum.size()) break;
+        char c = inputAccum[rawIdx];
+        // If a pending separating space is requested, emit exactly one space
+        // Skip inserting if we already emitted whitespace just before
+        if (pendingSpace) {
+            if (!lastOutputWasWhitespace) {
+                charBuf.push_back(' ');
+                lastOutputWasWhitespace = true;
+            }
+            pendingSpace = false;
+            break;
+        }
         // EOL normalize
         if (c == '\r') {
-            if (rawIdx + 1 < inputRef.size() && inputRef[rawIdx+1] == '\n') { rawIdx += 2; charBuf.push_back('\n'); }
+            if (rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '\n') { rawIdx += 2; charBuf.push_back('\n'); }
             else { ++rawIdx; charBuf.push_back('\n'); }
+            lastOutputWasWhitespace = true;
             break;
         }
         if (st == State::Normal) {
@@ -121,71 +125,61 @@ void SourceBuffer::fill_buffer() {
             char tr = trigraph_at(rawIdx);
             if (tr) { rawIdx += 3; charBuf.push_back(tr); break; }
             // enter string/char literals
-            if (c == '"') { charBuf.push_back(c); ++rawIdx; st = State::InString; esc = false; break; }
-            if (c == '\'') { charBuf.push_back(c); ++rawIdx; st = State::InChar; esc = false; break; }
+            if (c == '"') { charBuf.push_back(c); lastOutputWasWhitespace = false; ++rawIdx; st = State::InString; esc = false; break; }
+            if (c == '\'') { charBuf.push_back(c); lastOutputWasWhitespace = false; ++rawIdx; st = State::InChar; esc = false; break; }
             // comments
-            if (c == '/' && rawIdx + 1 < inputRef.size()) {
-                char n = inputRef[rawIdx+1];
+            if (c == '/' && rawIdx + 1 < inputAccum.size()) {
+                char n = inputAccum[rawIdx+1];
                 if (n == '*') { st = State::InBlockComment; rawIdx += 2; continue; }
                 if (n == '/') { st = State::InLineComment; rawIdx += 2; continue; }
             }
-            // line splicing
+            // line splicing (remove backslash-newline without inserting space)
             if (c == '\\') {
-                if (rawIdx + 1 < inputRef.size()) {
-                    if (inputRef[rawIdx+1] == '\n') { rawIdx += 2; continue; }
-                    if (inputRef[rawIdx+1] == '\r') {
-                        if (rawIdx + 2 < inputRef.size() && inputRef[rawIdx+2] == '\n') { rawIdx += 3; continue; }
+                if (rawIdx + 1 < inputAccum.size()) {
+                    if (inputAccum[rawIdx+1] == '\n') { rawIdx += 2; continue; }
+                    if (inputAccum[rawIdx+1] == '\r') {
+                        if (rawIdx + 2 < inputAccum.size() && inputAccum[rawIdx+2] == '\n') { rawIdx += 3; continue; }
                         rawIdx += 2; continue;
                     }
                 }
             }
             // normal emission
             charBuf.push_back(c);
+            lastOutputWasWhitespace = (c == ' ' || c == '\t' || c == '\v' || c == '\f');
             ++rawIdx;
             break;
         } else if (st == State::InString) {
             charBuf.push_back(c);
+            lastOutputWasWhitespace = false;
             ++rawIdx;
             if (!esc) { if (c == '\\') esc = true; else if (c == '"') st = State::Normal; }
             else { esc = false; }
             break;
         } else if (st == State::InChar) {
             charBuf.push_back(c);
+            lastOutputWasWhitespace = false;
             ++rawIdx;
             if (!esc) { if (c == '\\') esc = true; else if (c == '\'') st = State::Normal; }
             else { esc = false; }
             break;
         } else if (st == State::InBlockComment) {
-            if (c == '*' && rawIdx + 1 < inputRef.size() && inputRef[rawIdx+1] == '/') {
+            if (c == '*' && rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '/') {
                 rawIdx += 2;
                 st = State::Normal;
-                // Insert a single space to separate tokens around removed block comment
-                if (!lastEmittedWhitespace) {
-                    charBuf.push_back(' ');
-                }
+                // Always insert a single separating space after removing a block comment
+                pendingSpace = true;
                 break;
             }
             ++rawIdx; continue;
         } else if (st == State::InLineComment) {
-            if (c == '\n') { ++rawIdx; charBuf.push_back('\n'); st = State::Normal; break; }
+            if (c == '\n') { ++rawIdx; charBuf.push_back('\n'); lastOutputWasWhitespace = true; st = State::Normal; break; }
             ++rawIdx; continue;
         }
     }
-    // ensure final newline only if original input didn't end with newline
-    if (rawIdx >= inputRef.size() && charBuf.empty()) {
-        // For stream-backed input, recompute whether input ends with newline at EOF
-        if (inStream) {
-            if (eof) {
-                inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
-            } else {
-                // Not at EOF yet: do not append final newline
-                return;
-            }
-        }
-        if (!inputEndsWithNewline) {
-            charBuf.push_back('\n');
-            inputEndsWithNewline = true;
-        }
+    // At end of raw input and no buffered output, stop; do not synthesize final newline.
+    if (rawIdx >= inputAccum.size() && charBuf.empty()) {
+        if (!eof) return; // more input may still arrive
+        return; // true EOF reached
     }
 }
 
@@ -194,23 +188,14 @@ bool SourceBuffer::next_char(char& outCh) {
     if (charBuf.empty()) return false;
     outCh = charBuf.front();
     charBuf.erase(charBuf.begin());
-    // advance pos for emitted character
-    if (outCh == '\n') { ++pos.line; pos.column = 1; } else { ++pos.column; }
-    ++pos.offset;
-    lastEmittedWhitespace = (outCh == '\n' || outCh == ' ' || outCh == '\t' || outCh == '\v' || outCh == '\f');
     return true;
 }
 
-void SourceBuffer::ensure_stream(std::string& stream, std::size_t upto) {
-    while (stream.size() <= upto) {
-        char ch; if (!next_char(ch)) break; stream.push_back(ch);
-    }
-}
+// Removed legacy ensure_stream; Tokenizer now uses ring buffer API.
 
 void SourceBuffer::ensure_input(std::size_t upto) {
-    if (!inStream) return; // string-backed
-    while (inputRef.size() <= upto) {
-        int c = inStream->get();
+    while (inputAccum.size() <= upto) {
+        int c = inStream.get();
         if (c == EOF) { eof = true; break; }
         inputAccum.push_back(static_cast<char>(c));
     }
@@ -220,26 +205,56 @@ void SourceBuffer::reset() {
     st = State::Normal;
     esc = false;
     rawIdx = 0;
-    lastEmittedWhitespace = false;
-    if (!inStream) {
-        inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
-    } else {
-        // Attempt to seek to beginning if stream is seekable
-        std::istream& s = *inStream;
-        if (s.good()) {
-            try {
-                s.clear();
-                s.seekg(0, std::ios::beg);
-                inputAccum.clear();
-                eof = false;
-            } catch (...) {
-                // Non-seekable streams: keep current position, mark eof if already at end
-            }
-        }
-        inputEndsWithNewline = false;
-    }
+    lastOutputWasWhitespace = false;
+    inStream.clear();
+    inStream.seekg(0, std::ios::beg);
+    inputAccum.clear();
+    eof = false;
     charBuf.clear();
+    ring.clear();
+    pendingSpace = false;
     pos = SourcePos{0, 1, 1, 0};
+}
+
+// Ring buffer lookahead API implementations
+void SourceBuffer::ensure(std::size_t k) {
+    while (ring.size() < k) {
+        char ch;
+        if (!next_char(ch)) break;
+        ring.push_back(ch);
+    }
+}
+
+std::optional<char> SourceBuffer::peek(std::size_t i) {
+    ensure(i + 1);
+    if (i < ring.size()) return ring[i];
+    return std::nullopt;
+}
+
+bool SourceBuffer::consume(std::size_t n) {
+    ensure(n);
+    if (ring.size() < n) return false;
+    for (std::size_t i = 0; i < n; ++i) {
+        char ch = ring.front();
+        ring.pop_front();
+        account_consumed(ch);
+    }
+    return true;
+}
+
+std::optional<char> SourceBuffer::get() {
+    ensure(1);
+    if (ring.empty()) return std::nullopt;
+    char c = ring.front();
+    ring.pop_front();
+    account_consumed(c);
+    return c;
+}
+
+void SourceBuffer::account_consumed(char ch) {
+    if (ch == '\n') { ++pos.line; pos.column = 1; }
+    else { ++pos.column; }
+    ++pos.offset;
 }
 
 bool Tokenizer::is_digit(char c) {
@@ -262,63 +277,55 @@ bool Tokenizer::is_oct(char c) {
     return c >= '0' && c <= '7';
 }
 
-Tokenizer::Tokenizer(const std::string& input) : input(input), feeder(input) {}
-
-Tokenizer::Tokenizer(std::istream& in) : input(stream), feeder(in) {}
-
-void Tokenizer::emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end) {
-    tokens.push_back(PPToken{kind, SourceSpan{begin, end}, lexeme});
-}
+Tokenizer::Tokenizer(std::istream& in) : feeder(in) {}
 
 bool Tokenizer::try_ucn(size_t idx, size_t& consumed) {
     consumed = 0;
-    if (idx >= stream.size()) feeder.ensure_stream(stream, idx);
-    if (idx >= stream.size() || stream[idx] != '\\') return false;
-    feeder.ensure_stream(stream, idx + 1);
-    if (idx + 1 < stream.size() && stream[idx+1] == 'u') {
+    auto c0 = feeder.peek(idx);
+    if (!c0.has_value() || c0.value() != '\\') return false;
+    auto c1 = feeder.peek(idx + 1);
+    if (c1.has_value() && c1.value() == 'u') {
         // \\uXXXX (exactly 4 hex digits)
-        feeder.ensure_stream(stream, idx + 5);
-        if (idx + 6 <= stream.size()) {
-            for (size_t k = idx+2; k < idx+6; ++k) {
-                char ch = stream[k];
-                if (!Tokenizer::is_hex(ch)) return false;
-            }
-            consumed = 6; return true;
+        for (size_t k = 0; k < 4; ++k) {
+            auto ch = feeder.peek(idx + 2 + k);
+            if (!ch.has_value() || !Tokenizer::is_hex(ch.value())) return false;
         }
-        return false;
+        consumed = 6; return true;
     }
-    if (idx + 1 < stream.size() && stream[idx+1] == 'U') {
+    if (c1.has_value() && c1.value() == 'U') {
         // \\UXXXXXXXX (exactly 8 hex digits)
-        feeder.ensure_stream(stream, idx + 9);
-        if (idx + 10 <= stream.size()) {
-            for (size_t k = idx+2; k < idx+10; ++k) {
-                char ch = stream[k];
-                if (!Tokenizer::is_hex(ch)) return false;
-            }
-            consumed = 10; return true;
+        for (size_t k = 0; k < 8; ++k) {
+            auto ch = feeder.peek(idx + 2 + k);
+            if (!ch.has_value() || !Tokenizer::is_hex(ch.value())) return false;
         }
-        return false;
+        consumed = 10; return true;
     }
     return false;
 }
 
 bool Tokenizer::starts_char(size_t idx, size_t& prefixLen) {
     prefixLen = 0;
-    if (idx >= stream.size()) return false;
-    if (stream[idx] == '\'') { prefixLen = 0; return true; }
-    if ((stream[idx] == 'L' || stream[idx] == 'u' || stream[idx] == 'U') && idx + 1 < stream.size() && stream[idx + 1] == '\'') { prefixLen = 1; return true; }
+    auto c0 = feeder.peek(idx);
+    if (!c0.has_value()) return false;
+    if (c0.value() == '\'') { prefixLen = 0; return true; }
+    auto c1 = feeder.peek(idx + 1);
+    if ((c0.value() == 'L' || c0.value() == 'u' || c0.value() == 'U') && c1.has_value() && c1.value() == '\'') { prefixLen = 1; return true; }
     return false;
 }
 
 bool Tokenizer::starts_string(size_t idx, size_t& prefixLen) {
     prefixLen = 0;
-    if (idx >= stream.size()) return false;
-    if (stream[idx] == '"') { prefixLen = 0; return true; }
-    if (stream[idx] == 'u') {
-        if (idx + 2 < stream.size() && stream[idx + 1] == '8' && stream[idx + 2] == '"') { prefixLen = 2; return true; }
-        if (idx + 1 < stream.size() && stream[idx + 1] == '"') { prefixLen = 1; return true; }
-    } else if (stream[idx] == 'U' || stream[idx] == 'L') {
-        if (idx + 1 < stream.size() && stream[idx + 1] == '"') { prefixLen = 1; return true; }
+    auto c0 = feeder.peek(idx);
+    if (!c0.has_value()) return false;
+    if (c0.value() == '"') { prefixLen = 0; return true; }
+    if (c0.value() == 'u') {
+        auto c1 = feeder.peek(idx + 1);
+        auto c2 = feeder.peek(idx + 2);
+        if (c1.has_value() && c1.value() == '8' && c2.has_value() && c2.value() == '"') { prefixLen = 2; return true; }
+        if (c1.has_value() && c1.value() == '"') { prefixLen = 1; return true; }
+    } else if (c0.value() == 'U' || c0.value() == 'L') {
+        auto c1 = feeder.peek(idx + 1);
+        if (c1.has_value() && c1.value() == '"') { prefixLen = 1; return true; }
     }
     return false;
 }
@@ -326,10 +333,6 @@ bool Tokenizer::starts_string(size_t idx, size_t& prefixLen) {
 
 void Tokenizer::reset() {
     feeder.reset();
-    stream.clear();
-    stream.reserve(input.size());
-    streamPos = 0;
-    tokens.clear();
     lookahead.reset();
 }
 
@@ -369,162 +372,146 @@ Tokenizer::Iterator Tokenizer::end() {
 }
 
 bool Tokenizer::readNextToken(PPToken& out) {
-    feeder.ensure_stream(stream, streamPos);
-    if (streamPos >= stream.size()) return false;
-    char c = stream[streamPos];
+    auto c0 = feeder.peek(0);
+    if (!c0.has_value()) return false;
+    char c = c0.value();
     SourcePos begin = feeder.position();
 
     // Preprocessing number (PPNumber)
-    feeder.ensure_stream(stream, streamPos + 1);
-    if (c == '.' ? (streamPos + 1 < stream.size() && is_digit(stream[streamPos + 1])) : is_digit(c)) {
-        size_t j = streamPos;
-        if (stream[j] == '.') { ++j; }
-        if (j < stream.size() && is_digit(stream[j])) { ++j; }
+    auto c1 = feeder.peek(1);
+    if (c == '.' ? (c1.has_value() && is_digit(c1.value())) : is_digit(c)) {
+        std::string lex;
+        if (c == '.') { feeder.consume(1); lex.push_back('.'); }
+        auto d0 = feeder.peek(0);
+        if (d0.has_value() && is_digit(d0.value())) { lex.push_back(d0.value()); feeder.consume(1); }
         while (true) {
-            if (j >= stream.size()) feeder.ensure_stream(stream, j);
-            if (j >= stream.size()) break;
-            char d = stream[j];
+            auto dopt = feeder.peek(0);
+            if (!dopt.has_value()) break;
+            char d = dopt.value();
             if (d=='e'||d=='E'||d=='p'||d=='P') {
-                ++j;
-                if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                if (j < stream.size() && (stream[j] == '+' || stream[j] == '-')) { ++j; }
+                feeder.consume(1); lex.push_back(d);
+                auto sign = feeder.peek(0);
+                if (sign.has_value() && (sign.value() == '+' || sign.value() == '-')) { lex.push_back(sign.value()); feeder.consume(1); }
                 while (true) {
-                    if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                    if (j < stream.size() && (stream[j] >= '0' && stream[j] <= '9')) { ++j; }
+                    auto nd = feeder.peek(0);
+                    if (nd.has_value() && (nd.value() >= '0' && nd.value() <= '9')) { lex.push_back(nd.value()); feeder.consume(1); }
                     else break;
                 }
                 continue;
             }
-            if (is_digit(d) || is_nondigit(d)) { ++j; continue; }
-            if (d == '.') { ++j; continue; }
+            if (is_digit(d) || is_nondigit(d)) { lex.push_back(d); feeder.consume(1); continue; }
+            if (d == '.') { lex.push_back('.'); feeder.consume(1); continue; }
             break;
         }
-        std::string lex = stream.substr(streamPos, j - streamPos);
         out = PPToken{PPTokenKind::PPNumber, SourceSpan{begin, feeder.position()}, lex};
-        streamPos = j;
         return true;
     }
 
     // Character constant (with optional encoding prefix L/u/U)
     size_t charPrefixLen = 0;
-    feeder.ensure_stream(stream, streamPos + 1);
-    if (starts_char(streamPos, charPrefixLen)) {
-        size_t j = streamPos;
-        for (size_t k = 0; k < charPrefixLen; ++k) { ++j; }
-        if (j < stream.size() && stream[j] == '\'') { ++j; }
+    if (starts_char(0, charPrefixLen)) {
+        std::string lex;
+        for (size_t k = 0; k < charPrefixLen; ++k) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); }
+        auto q = feeder.get(); if (q) lex.push_back(q.value());
         bool escaped = false;
         while (true) {
-            if (j >= stream.size()) feeder.ensure_stream(stream, j);
-            if (j >= stream.size()) break;
-            char d = stream[j];
+            auto dopt = feeder.peek(0);
+            if (!dopt.has_value()) break;
+            char d = dopt.value();
             if (!escaped) {
-                if (d == '\\') { ++j; escaped = true; continue; }
-                if (d == '\'') { ++j; break; }
+                if (d == '\\') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); escaped = true; continue; }
+                if (d == '\'') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); break; }
                 if (d == '\n') { break; }
-                ++j;
+                auto ch = feeder.get(); if (ch) lex.push_back(ch.value());
             } else {
-                if (d == 'x') {
-                    ++j; while (j < stream.size() && is_hex(stream[j])) { ++j; }
-                    escaped = false; continue;
-                }
-                if (d == 'u') { ++j; for (int k=0;k<4 && j<stream.size() && is_hex(stream[j]);++k){ ++j; } escaped = false; continue; }
-                if (d == 'U') { ++j; for (int k=0;k<8 && j<stream.size() && is_hex(stream[j]);++k){ ++j; } escaped = false; continue; }
-                if (is_oct(d)) { ++j; for (int k=1;k<3 && j<stream.size() && is_oct(stream[j]);++k){ ++j; } escaped = false; continue; }
-                ++j; escaped = false;
+                if (d == 'x') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); while (true) { auto hx = feeder.peek(0); if (hx && is_hex(hx.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } else break; } escaped = false; continue; }
+                if (d == 'u') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); for (int k=0;k<4; ++k) { auto hx = feeder.peek(0); if (hx && is_hex(hx.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } } escaped = false; continue; }
+                if (d == 'U') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); for (int k=0;k<8; ++k) { auto hx = feeder.peek(0); if (hx && is_hex(hx.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } } escaped = false; continue; }
+                if (is_oct(d)) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); for (int k=1;k<3; ++k) { auto oc = feeder.peek(0); if (oc && is_oct(oc.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } } escaped = false; continue; }
+                auto ch2 = feeder.get(); if (ch2) lex.push_back(ch2.value()); escaped = false;
             }
         }
-        std::string lex = stream.substr(streamPos, j - streamPos);
         out = PPToken{PPTokenKind::CharConst, SourceSpan{begin, feeder.position()}, lex};
-        streamPos = j;
         return true;
     }
 
     // String literal (with optional encoding prefix u8/u/U/L)
     size_t prefixLen = 0;
-    feeder.ensure_stream(stream, streamPos + 2);
-    if (starts_string(streamPos, prefixLen)) {
-        size_t j = streamPos;
-        for (size_t k = 0; k < prefixLen; ++k) { ++j; }
-        if (j < stream.size() && stream[j] == '"') { ++j; }
+    if (starts_string(0, prefixLen)) {
+        std::string lex;
+        for (size_t k = 0; k < prefixLen; ++k) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); }
+        auto q = feeder.get(); if (q) lex.push_back(q.value());
         bool escaped = false;
         while (true) {
-            if (j >= stream.size()) feeder.ensure_stream(stream, j);
-            if (j >= stream.size()) break;
-            char d = stream[j];
+            auto dopt = feeder.peek(0);
+            if (!dopt.has_value()) break;
+            char d = dopt.value();
             if (!escaped) {
-                if (d == '\\') { ++j; escaped = true; continue; }
-                if (d == '"') { ++j; break; }
+                if (d == '\\') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); escaped = true; continue; }
+                if (d == '"') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); break; }
                 if (d == '\n') { break; }
-                ++j;
+                auto ch = feeder.get(); if (ch) lex.push_back(ch.value());
             } else {
-                ++j; escaped = false;
+                auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); escaped = false;
             }
         }
-        std::string lex = stream.substr(streamPos, j - streamPos);
         out = PPToken{PPTokenKind::StringLiteral, SourceSpan{begin, feeder.position()}, lex};
-        streamPos = j;
         return true;
     }
 
     // Newline
     if (c == '\n') {
+        feeder.consume(1);
         out = PPToken{PPTokenKind::Newline, SourceSpan{begin, feeder.position()}, "\n"};
-        ++streamPos; return true;
+        return true;
     }
 
     // Whitespace
     if (is_space(c)) {
         std::string lex;
         do {
-            lex.push_back(c);
-            ++streamPos;
-            feeder.ensure_stream(stream, streamPos);
-            if (streamPos>=stream.size()) break;
-            c = stream[streamPos];
+            auto ch = feeder.get(); if (ch) lex.push_back(ch.value());
+            auto np = feeder.peek(0); if (!np.has_value()) break; c = np.value();
         } while (is_space(c));
         out = PPToken{PPTokenKind::Whitespace, SourceSpan{begin, feeder.position()}, lex};
         return true;
     }
 
     // Identifier: starts with nondigit or universal-character-name
-    feeder.ensure_stream(stream, streamPos + 1);
-    if (is_nondigit(c) || (c=='\\' && (streamPos+1<stream.size()) && (stream[streamPos+1]=='u' || stream[streamPos+1]=='U'))) {
-        size_t j = streamPos;
+    auto n1 = feeder.peek(1);
+    if (is_nondigit(c) || (c=='\\' && n1.has_value() && (n1.value()=='u' || n1.value()=='U'))) {
         bool validStart = false;
-        if (is_nondigit(stream[j])) { if (j + 1 > stream.size()) feeder.ensure_stream(stream, j + 1); ++j; validStart = true; }
-        else { size_t u = 0; if (try_ucn(j, u)) { j += u; validStart = true; } }
+        std::string lex;
+        if (is_nondigit(c)) { auto ch = feeder.get(); if (ch) { lex.push_back(ch.value()); validStart = true; } }
+        else { size_t u = 0; if (try_ucn(0, u)) { for (size_t k=0;k<u;++k){ auto ch2 = feeder.get(); if (ch2) lex.push_back(ch2.value()); } validStart = true; } }
         if (validStart) {
             while (true) {
-                if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                if (j >= stream.size()) break;
-                if (is_nondigit(stream[j]) || is_digit(stream[j])) { ++j; continue; }
-                size_t u = 0; if (try_ucn(j, u)) { j += u; continue; }
+                auto p = feeder.peek(0);
+                if (!p.has_value()) break;
+                char d = p.value();
+                if (is_nondigit(d) || is_digit(d)) { auto ch3 = feeder.get(); (void)ch3; lex.push_back(d); continue; }
+                size_t u = 0; if (try_ucn(0, u)) { for (size_t k=0;k<u;++k){ auto ch4 = feeder.get(); if (ch4) lex.push_back(ch4.value()); } continue; }
                 break;
             }
-            if (j > streamPos) {
-                std::string lex = stream.substr(streamPos, j - streamPos);
-                out = PPToken{PPTokenKind::Identifier, SourceSpan{begin, feeder.position()}, lex};
-                streamPos = j; return true;
-            }
+            out = PPToken{PPTokenKind::Identifier, SourceSpan{begin, feeder.position()}, lex};
+            return true;
         }
     }
 
-    // Punctuator: greedy longest-match
-    size_t plen = 0;
-    if (streamPos < stream.size()) {
-        if (stream.size() - streamPos < 4) feeder.ensure_stream(stream, streamPos + 3);
-        plen = match_punct(stream, streamPos);
-    }
+    // Punctuator: greedy longest-match over up to 4 chars
+    std::string snapshot;
+    for (size_t i=0;i<4;++i) { auto ch = feeder.peek(i); if (ch) snapshot.push_back(ch.value()); else break; }
+    size_t plen = match_punct(snapshot, 0);
     if (plen > 0) {
-        std::string lex = stream.substr(streamPos, plen);
-        streamPos += plen;
+        std::string lex;
+        for (size_t i=0;i<plen;++i) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); }
         out = PPToken{PPTokenKind::Punctuator, SourceSpan{begin, feeder.position()}, lex};
         return true;
     }
 
     // Fallback: single Other character
-    std::string lex(1, c);
-    ++streamPos;
+    std::string lex;
+    auto gc = feeder.get(); if (gc) lex.push_back(gc.value());
     out = PPToken{PPTokenKind::Other, SourceSpan{begin, feeder.position()}, lex};
     return true;
 }
