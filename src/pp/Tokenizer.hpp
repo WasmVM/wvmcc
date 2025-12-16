@@ -30,6 +30,7 @@ class Tokenizer {
 public:
     // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
     static std::vector<PPToken> tokenize_with_punctuators(const std::string& input);
+    // Single-pass tokenizer: performs necessary phase-1–3 handling inline.
 };
 
 } // namespace wvmcc

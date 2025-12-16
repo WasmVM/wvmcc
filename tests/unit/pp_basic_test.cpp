@@ -2,7 +2,7 @@
 #include <string>
 #include <vector>
 
-#include "../../src/pp/Preprocessor.hpp"
+#include "../../src/pp/Tokenizer.hpp"
 
 struct Case {
     const char* name;
@@ -12,7 +12,11 @@ struct Case {
 
 static bool run_case(const Case& c) {
     std::string in(c.input);
-    std::string out = wvmcc::Preprocessor::phase1to3_process(in);
+        // Single-pass tokenizer: concatenate lexemes to approximate preprocessed stream
+        auto toks = wvmcc::Tokenizer::tokenize_with_punctuators(in);
+        std::string out;
+        out.reserve(256);
+        for (auto& t : toks) out += t.lexeme;
     bool ok = (out == std::string(c.expected));
     if (!ok) {
         std::cerr << "[FAIL] " << c.name << "\nExpected:\n" << c.expected
