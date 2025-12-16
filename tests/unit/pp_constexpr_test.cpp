@@ -1,8 +1,11 @@
 #include <iostream>
 #include <cassert>
+#include <fstream>
+#include <cstdio>
 #include "../src/pp/ConstExprParser.hpp"
 #include "../src/pp/MacroTable.hpp"
 #include "../src/pp/Diagnostics.hpp"
+#include "../src/pp/Preprocessor.hpp"
 
 // Test 1: Simple integer literal
 static int test_integer_literal() {
@@ -12,12 +15,23 @@ static int test_integer_literal() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
+    // Use streaming Preprocessor to produce tokens for the expression
+    {
+        std::ofstream ofs("temp_constexpr_integer.c");
+        ofs << "42\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_integer.c")) {
+        std::remove("temp_constexpr_integer.c");
+        std::cerr << "test_integer_literal: failed to open input\n";
+        return 1;
+    }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{
-        .kind = PPTokenKind::PPNumber,
-        .lexeme = "42",
-        .span = SourceSpan{SourcePos{0,1,1,0}, SourcePos{0,1,3,2}}
-    });
+    while (auto t = pp.next()) {
+        if (t->kind == PPTokenKind::Newline) break;
+        tokens.push_back(*t);
+    }
+    std::remove("temp_constexpr_integer.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 42) {
@@ -35,13 +49,15 @@ static int test_arithmetic() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 2 + 3 * 4
+    {
+        std::ofstream ofs("temp_constexpr_arith.c");
+        ofs << "2 + 3 * 4\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_arith.c")) { std::remove("temp_constexpr_arith.c"); std::cerr << "test_arithmetic: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "2", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "+", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "3", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "*", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "4", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_arith.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 14) {
@@ -59,15 +75,15 @@ static int test_parentheses() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // (2 + 3) * 4
+    {
+        std::ofstream ofs("temp_constexpr_paren.c");
+        ofs << "(2 + 3) * 4\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_paren.c")) { std::remove("temp_constexpr_paren.c"); std::cerr << "test_parentheses: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "(", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "2", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "+", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "3", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = ")", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "*", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "4", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_paren.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 20) {
@@ -85,13 +101,15 @@ static int test_logical() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 1 && 0 || 1
+    {
+        std::ofstream ofs("temp_constexpr_logical.c");
+        ofs << "1 && 0 || 1\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_logical.c")) { std::remove("temp_constexpr_logical.c"); std::cerr << "test_logical: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "1", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "&&", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "0", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "||", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "1", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_logical.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 1) {
@@ -109,11 +127,15 @@ static int test_comparison() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 3 < 5
+    {
+        std::ofstream ofs("temp_constexpr_comp.c");
+        ofs << "3 < 5\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_comp.c")) { std::remove("temp_constexpr_comp.c"); std::cerr << "test_comparison: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "3", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "<", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "5", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_comp.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 1) {
@@ -131,13 +153,15 @@ static int test_ternary() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 1 ? 10 : 20
+    {
+        std::ofstream ofs("temp_constexpr_ternary.c");
+        ofs << "1 ? 10 : 20\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_ternary.c")) { std::remove("temp_constexpr_ternary.c"); std::cerr << "test_ternary: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "1", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "?", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "10", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = ":", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "20", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_ternary.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 10) {
@@ -155,10 +179,15 @@ static int test_unary() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // !0
+    {
+        std::ofstream ofs("temp_constexpr_unary.c");
+        ofs << "!0\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_unary.c")) { std::remove("temp_constexpr_unary.c"); std::cerr << "test_unary: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "!", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "0", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_unary.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 1) {
@@ -178,12 +207,15 @@ static int test_defined_true() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // defined(MYVAR)
+    {
+        std::ofstream ofs("temp_constexpr_defined_true.c");
+        ofs << "defined(MYVAR)\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_defined_true.c")) { std::remove("temp_constexpr_defined_true.c"); std::cerr << "test_defined_true: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::Identifier, .lexeme = "defined", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "(", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Identifier, .lexeme = "MYVAR", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = ")", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_defined_true.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 1) {
@@ -201,12 +233,15 @@ static int test_defined_false() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // defined(UNDEFINED)
+    {
+        std::ofstream ofs("temp_constexpr_defined_false.c");
+        ofs << "defined(UNDEFINED)\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_defined_false.c")) { std::remove("temp_constexpr_defined_false.c"); std::cerr << "test_defined_false: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::Identifier, .lexeme = "defined", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "(", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Identifier, .lexeme = "UNDEFINED", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = ")", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_defined_false.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 0) {
@@ -224,11 +259,15 @@ static int test_division_by_zero() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 10 / 0
+    {
+        std::ofstream ofs("temp_constexpr_div0.c");
+        ofs << "10 / 0\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_div0.c")) { std::remove("temp_constexpr_div0.c"); std::cerr << "test_division_by_zero: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "10", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "/", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "0", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_div0.c");
     
     auto result = parser.evaluate(tokens);
     if (result) {
@@ -250,11 +289,15 @@ static int test_modulo_by_zero() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 10 % 0
+    {
+        std::ofstream ofs("temp_constexpr_mod0.c");
+        ofs << "10 % 0\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_mod0.c")) { std::remove("temp_constexpr_mod0.c"); std::cerr << "test_modulo_by_zero: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "10", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "%", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "0", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_mod0.c");
     
     auto result = parser.evaluate(tokens);
     if (result) {
@@ -276,10 +319,15 @@ static int test_trailing_tokens() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 42 garbage
+    {
+        std::ofstream ofs("temp_constexpr_trailing.c");
+        ofs << "42 garbage\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_trailing.c")) { std::remove("temp_constexpr_trailing.c"); std::cerr << "test_trailing_tokens: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "42", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Identifier, .lexeme = "garbage", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_trailing.c");
     
     auto result = parser.evaluate(tokens);
     if (result) {
@@ -323,11 +371,15 @@ static int test_bitwise() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 5 & 3
+    {
+        std::ofstream ofs("temp_constexpr_bitwise.c");
+        ofs << "5 & 3\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_bitwise.c")) { std::remove("temp_constexpr_bitwise.c"); std::cerr << "test_bitwise: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "5", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "&", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "3", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_bitwise.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 1) {
@@ -345,11 +397,15 @@ static int test_shift() {
     std::vector<Diagnostic> diagnostics;
     ConstExprParser parser(macroTable, diagnostics);
     
-    // 1 << 3
+    {
+        std::ofstream ofs("temp_constexpr_shift.c");
+        ofs << "1 << 3\n";
+    }
+    Preprocessor pp;
+    if (!pp.open("temp_constexpr_shift.c")) { std::remove("temp_constexpr_shift.c"); std::cerr << "test_shift: failed to open input\n"; return 1; }
     std::vector<PPToken> tokens;
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "1", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::Punctuator, .lexeme = "<<", .span = {}});
-    tokens.push_back(PPToken{.kind = PPTokenKind::PPNumber, .lexeme = "3", .span = {}});
+    while (auto t = pp.next()) { if (t->kind == PPTokenKind::Newline) break; tokens.push_back(*t); }
+    std::remove("temp_constexpr_shift.c");
     
     auto result = parser.evaluate(tokens);
     if (!result || *result != 8) {
