@@ -10,7 +10,8 @@ This document tracks key milestones achieved so far and the upcoming work items 
   - Line splicing (backslash-newline)
   - Comment stripping (// and /* */) with correct handling inside strings/chars
   - Ensuring final newline
-- Tokenizer
+- Tokenizer (Streaming)
+  - Streaming API (`next()`, `peek()`, range iteration); removed batch `tokenize()`
   - Whitespace and Newline
   - Punctuators (greedy longest match, including digraphs and multi-char operators)
   - String literals (prefixes: u8/u/U/L; escape handling; newline terminates)
@@ -22,6 +23,7 @@ This document tracks key milestones achieved so far and the upcoming work items 
 - Unit tests
   - Preprocessor basic tests
   - Tokenizer: whitespace, punctuators, strings, chars, pp-number, identifiers
+  - Updated to use range-style iteration over streaming tokenizer
   - Header-name transform tests
 
 ## In Progress / Near-Term
@@ -33,6 +35,9 @@ This document tracks key milestones achieved so far and the upcoming work items 
   - PPNumber corner cases and suffix interactions
   - Identifier UCN range validation (disallow invalid code points per spec)
   - Header-name edge cases (whitespace variations, malformed terminators)
+- Single-pass Preprocessor executor
+  - Consume streamed tokens; detect directives at line-start; execute `#include`, object-like macros, and basic conditionals inline.
+  - Gradually expand to function-like macros, `#`, `##`, variadics.
 - Diagnostics and error reporting
   - Clear messages with spans for unterminated literals and invalid sequences
 

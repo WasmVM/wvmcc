@@ -1,6 +1,6 @@
-# Preprocessor Directives Design
+# Preprocessor Directives Design (Updated)
 
-This document outlines the design and phased plan to implement a C preprocessor for WVMCC. Tokenization (including phase 1–3 preprocessing) is already implemented via `Tokenizer` and `SourceBuffer`. This plan focuses on directive parsing, macro expansion, conditional compilation, and includes.
+This document outlines the design and phased plan to implement a C preprocessor for WVMCC. Tokenization (including phase 1–3 preprocessing) is implemented via a streaming `Tokenizer` and `SourceBuffer`. The Tokenizer now provides `next()`, `peek()`, and range-style iteration; the former batch `tokenize()` API has been removed. This plan focuses on directive parsing, macro expansion, conditional compilation, and includes, moving toward a single-pass model.
 
 ## Goals
 - Standards-compliant handling of C preprocessor directives (target C11/C17 semantics)
@@ -14,7 +14,27 @@ This document outlines the design and phased plan to implement a C preprocessor 
 - MacroTable: Stores and manages object-like and function-like macros.
 - ConditionalState: Tracks nested conditional compilation blocks.
 - IncludeHandler: Resolves `#include` directives and manages include depth/guards.
-- Preprocessor: Orchestrates token stream processing, directive execution, and macro expansion.
+- Preprocessor: Orchestrates streamed token processing, directive execution, and macro expansion.
+
+## Tokenizer API (Streaming)
+
+```
+Tokenizer tz(input);
+// Stream tokens
+while (auto t = tz.next()) { /* use *t */ }
+
+// Lookahead without consuming
+if (auto p = tz.peek()) { /* inspect */ }
+
+// Range-style iteration
+for (const auto& tok : tz) { /* use tok */ }
+```
+
+Notes:
+- `SourceBuffer` performs phases 1–3 (trigraphs, EOL normalization, line splicing, comment removal).
+- Punctuator recognition uses a switch-based longest-match dispatcher.
+- Helpers like `is_hex` and `is_oct` live on `Tokenizer`.
+- `reset()` reinitializes stream state; `peek()` caches one lookahead token.
 
 ## Directive Set
 - Macro definition: `#define`, `#undef`
@@ -65,10 +85,11 @@ private:
 
 ## Phased Plan
 
-### Phase 1: Directive Parsing (foundation)
+### Phase 1: Directive Parsing (foundation) — Done
 - Detect `#` at start of logical line (after optional whitespace)
 - Parse directive keyword and capture trailing tokens until newline
 - Validate syntax and produce `Directive` objects
+- Status: Parsing implemented and integrated; tests updated to use streaming Tokenizer.
 
 ### Phase 2: Object-like Macros
 - Implement `#define NAME value` and `#undef NAME`
@@ -106,6 +127,8 @@ private:
 - Conditional nesting and inactive region skipping
 - Include path resolution + guard detection
 - Negative tests for error reporting
+
+Tokenizer-focused tests use range-style iteration to verify phases 1–3 and literal handling.
 
 ## Performance Considerations
 - Minimize rescans; use efficient token views

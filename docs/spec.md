@@ -27,6 +27,7 @@
 ## Architecture
 - Frontend:
   - Lexer: C17 tokens, tracks `typedef` names.
+  - Preprocessor: streams pp-tokens via `Tokenizer` (`next()`, `peek()`, range iteration).
   - Parser: hand-written recursive descent with declarator grammar; recovery at `;`/`}`/`,`.
   - AST: typed nodes, source spans; casts inserted during semantic analysis.
   - Semantics: scope stacks (file/block/function/tag), type system (qualifiers, arrays, functions, pointers), conversions, constant folding, diagnostics.
@@ -46,6 +47,7 @@
   - Delete backslash-newline pairs; only the last backslash on a physical line is eligible.
 - Phase 3: Preprocessing tokenization + comments
   - Decompose into pp-tokens and whitespace; replace comments with a single space; retain newlines; error on partial pp-token/comment at EOF.
+  - Implemented via streaming `Tokenizer` (lookahead supported) and `SourceBuffer`.
 ### Preprocessing Tokens (PPToken)
 
 Per C17 §6.4, Phase 3 decomposes the character stream into preprocessing-tokens and sequences of whitespace. We will represent both pp-tokens and whitespace as tokens, with explicit new-line tokens to preserve directive boundaries and macro spacing.
@@ -127,6 +129,7 @@ using PPTokenStream = std::vector<PPToken>;
 
 - Phase 4: Directives + macro expansion
   - Implement `#define/#undef/#include/#if/#ifdef/#ifndef/#elif/#else/#endif`, `_Pragma` later; expand object/function-like macros; delete directives; includes processed recursively (phases 1–4).
+  - Single-pass executor consumes streamed tokens; detects directives at line starts and executes inline.
   - See `docs/preprocessor.md` for detailed directive architecture, data structures, phased plan, and testing strategy.
 - Phase 5: Char constants and strings
   - Convert escapes to execution set (UTF-8 initially).
