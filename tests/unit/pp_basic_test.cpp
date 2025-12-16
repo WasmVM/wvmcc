@@ -14,7 +14,11 @@ static bool run_case(const Case& c) {
     std::string in(c.input);
     // Single-pass tokenizer: concatenate lexemes to approximate preprocessed stream
     wvmcc::Tokenizer tokenizer(in);
-    auto toks = tokenizer.tokenize();
+    std::vector<wvmcc::PPToken> toks;
+    tokenizer.reset();
+    while (auto t = tokenizer.next()) {
+        toks.push_back(*t);
+    }
     std::string out;
     out.reserve(256);
     for (auto& t : toks) out += t.lexeme;

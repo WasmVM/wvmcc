@@ -2,6 +2,7 @@
 
 #include <string>
 #include <vector>
+#include <optional>
 
 namespace wvmcc {
 
@@ -33,6 +34,7 @@ public:
     void ensure_stream(std::string& stream, std::size_t upto);
     bool lastWhitespace() const { return lastEmittedWhitespace; }
     const SourcePos& position() const { return pos; }
+    void reset();
 
 private:
     enum class State { Normal, InString, InChar, InBlockComment, InLineComment };
@@ -53,8 +55,17 @@ class Tokenizer {
 public:
     explicit Tokenizer(const std::string& input);
     
-    // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
-    std::vector<PPToken> tokenize();
+    // Streaming API: read next token; returns std::nullopt at EOF
+    std::optional<PPToken> next();
+    // Reset tokenizer state to the beginning of input
+    void reset();
+    
+    // Optional convenience: check if we've reached end-of-input
+    bool empty() {
+        // Ensure at least one char is available if any remain
+        feeder.ensure_stream(stream, streamPos);
+        return streamPos >= stream.size();
+    }
 
 private:
     static bool is_digit(char c);
@@ -74,6 +85,9 @@ private:
     bool try_ucn(size_t idx, size_t& consumed);
     bool starts_char(size_t idx, size_t& prefixLen);
     bool starts_string(size_t idx, size_t& prefixLen);
+
+    // Core worker to produce one token; returns false at EOF
+    bool readNextToken(PPToken& out);
 };
 
 } // namespace wvmcc

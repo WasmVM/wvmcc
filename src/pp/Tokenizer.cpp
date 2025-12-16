@@ -188,6 +188,16 @@ void SourceBuffer::ensure_stream(std::string& stream, std::size_t upto) {
     }
 }
 
+void SourceBuffer::reset() {
+    st = State::Normal;
+    esc = false;
+    rawIdx = 0;
+    lastEmittedWhitespace = false;
+    inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
+    charBuf.clear();
+    pos = SourcePos{0, 1, 1, 0};
+}
+
 bool Tokenizer::is_digit(char c) {
     return c >= '0' && c <= '9';
 }
@@ -267,214 +277,180 @@ bool Tokenizer::starts_string(size_t idx, size_t& prefixLen) {
     return false;
 }
 
-std::vector<PPToken> Tokenizer::tokenize() {
-    // Single-pass: tokenize directly over input without a separate preprocess call
-    tokens.clear();
-    tokens.reserve(input.size() / 2);
 
+void Tokenizer::reset() {
+    feeder.reset();
     stream.clear();
     stream.reserve(input.size());
     streamPos = 0;
-    while (true) {
-        feeder.ensure_stream(stream, streamPos);
-        if (streamPos >= stream.size()) break;
-        char c = stream[streamPos];
-        SourcePos begin = feeder.position();
+    tokens.clear();
+}
 
-        // Preprocessing number (PPNumber)
-        feeder.ensure_stream(stream, streamPos + 1);
-        if (c == '.' ? (streamPos + 1 < stream.size() && is_digit(stream[streamPos + 1])) : is_digit(c)) {
-            size_t j = streamPos;
-            // if started with '.', consume it
-            if (stream[j] == '.') { ++j; }
-            // consume first run character (digit)
-            if (j < stream.size() && is_digit(stream[j])) { ++j; }
-            // main loop: digits, identifier-nondigit, exponent markers with optional sign, and trailing dot
-            while (true) {
+std::optional<PPToken> Tokenizer::next() {
+    PPToken tok;
+    if (!readNextToken(tok)) return std::nullopt;
+    return tok;
+}
+
+bool Tokenizer::readNextToken(PPToken& out) {
+    feeder.ensure_stream(stream, streamPos);
+    if (streamPos >= stream.size()) return false;
+    char c = stream[streamPos];
+    SourcePos begin = feeder.position();
+
+    // Preprocessing number (PPNumber)
+    feeder.ensure_stream(stream, streamPos + 1);
+    if (c == '.' ? (streamPos + 1 < stream.size() && is_digit(stream[streamPos + 1])) : is_digit(c)) {
+        size_t j = streamPos;
+        if (stream[j] == '.') { ++j; }
+        if (j < stream.size() && is_digit(stream[j])) { ++j; }
+        while (true) {
+            if (j >= stream.size()) feeder.ensure_stream(stream, j);
+            if (j >= stream.size()) break;
+            char d = stream[j];
+            if (d=='e'||d=='E'||d=='p'||d=='P') {
+                ++j;
                 if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                if (j >= stream.size()) break;
-                char d = stream[j];
-                if (d=='e'||d=='E'||d=='p'||d=='P') {
-                    // Consume exponent marker
-                    ++j;
-                    // Optional sign
-                    if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                    if (j < stream.size() && (stream[j] == '+' || stream[j] == '-')) { ++j; }
-                    // Consume subsequent digits (if any) as part of pp-number
-                    while (true) {
-                        if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                        if (j < stream.size() && (stream[j] >= '0' && stream[j] <= '9')) { ++j; }
-                        else break;
-                    }
-                    continue;
-                }
-                if (is_digit(d) || is_nondigit(d)) { ++j; continue; }
-                if (d == '.') { ++j; continue; }
-                break;
-            }
-            std::string lex = stream.substr(streamPos, j - streamPos);
-            emit(PPTokenKind::PPNumber, lex, begin, feeder.position());
-            streamPos = j;
-            continue;
-        }
-
-        // Character constant (with optional encoding prefix L/u/U)
-        size_t charPrefixLen = 0;
-        // Ensure lookahead for char prefix detection
-        feeder.ensure_stream(stream, streamPos + 1);
-        if (starts_char(streamPos, charPrefixLen)) {
-            size_t j = streamPos;
-            for (size_t k = 0; k < charPrefixLen; ++k) { ++j; }
-            // opening '
-            if (j < stream.size() && stream[j] == '\'') { ++j; }
-            bool escaped = false;
-            while (true) {
-                if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                if (j >= stream.size()) break;
-                char d = stream[j];
-                if (!escaped) {
-                    if (d == '\\') {
-                        ++j; escaped = true; continue;
-                    }
-                    if (d == '\'') { ++j; break; }
-                    if (d == '\n') { break; }
-                    ++j;
-                } else {
-                    // after backslash, handle escape classes
-                    if (d == 'x') {
-                        ++j;
-                        // one or more hex digits
-                        while (j < stream.size() && is_hex(stream[j])) { ++j; }
-                        escaped = false;
-                        continue;
-                    }
-                    if (d == 'u') {
-                        ++j;
-                        // exactly 4 hex digits if available
-                        for (int k=0;k<4 && j<stream.size() && is_hex(stream[j]);++k){ ++j; }
-                        escaped = false; continue;
-                    }
-                    if (d == 'U') {
-                        ++j;
-                        // up to 8 hex digits
-                        for (int k=0;k<8 && j<stream.size() && is_hex(stream[j]);++k){ ++j; }
-                        escaped = false; continue;
-                    }
-                    // octal: up to 3 oct digits
-                    if (is_oct(d)) {
-                        ++j;
-                        for (int k=1;k<3 && j<stream.size() && is_oct(stream[j]);++k){ ++j; }
-                        escaped = false; continue;
-                    }
-                    // simple escape or other single char after backslash
-                    ++j; escaped = false;
-                }
-            }
-            std::string lex = stream.substr(streamPos, j - streamPos);
-            emit(PPTokenKind::CharConst, lex, begin, feeder.position());
-            streamPos = j;
-            continue;
-        }
-
-        // String literal (with optional encoding prefix u8/u/U/L)
-        size_t prefixLen = 0;
-        // Ensure lookahead for string prefix detection (u8/u/U/L)
-        feeder.ensure_stream(stream, streamPos + 2);
-        if (starts_string(streamPos, prefixLen)) {
-            size_t j = streamPos;
-            // Emit full literal from start of prefix to ending quote
-            // Advance through prefix and opening quote updating pos
-            for (size_t k = 0; k < prefixLen; ++k) { ++j; }
-            // opening quote
-            if (j < stream.size() && stream[j] == '"') { ++j; }
-            bool escaped = false;
-            while (true) {
-                if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                if (j >= stream.size()) break;
-                char d = stream[j];
-                if (!escaped) {
-                    if (d == '\\') {
-                        ++j; escaped = true; continue;
-                    }
-                    if (d == '"') {
-                        // include closing quote
-                        ++j; break;
-                    }
-                    if (d == '\n') {
-                        // Invalid: newline terminates string literal (do not consume) per C spec
-                        break;
-                    }
-                    ++j; // normal char
-                } else {
-                    // escaped character
-                    ++j; escaped = false;
-                }
-            }
-            std::string lex = stream.substr(streamPos, j - streamPos);
-            emit(PPTokenKind::StringLiteral, lex, begin, feeder.position());
-            streamPos = j;
-            continue;
-        }
-
-        if (c == '\n') { emit(PPTokenKind::Newline, "\n", begin, feeder.position()); ++streamPos; continue; }
-
-        if (is_space(c)) {
-            std::string lex;
-            do { lex.push_back(c); ++streamPos; feeder.ensure_stream(stream, streamPos); if (streamPos>=stream.size()) break; c = stream[streamPos]; } while (is_space(c));
-            emit(PPTokenKind::Whitespace, lex, begin, feeder.position());
-            continue;
-        }
-        // Identifier: starts with nondigit or universal-character-name
-        // Ensure lookahead so UCN detection sees the 'u'/'U' after '\\'
-        feeder.ensure_stream(stream, streamPos + 1);
-        if (is_nondigit(c) || (c=='\\' && (streamPos+1<stream.size()) && (stream[streamPos+1]=='u' || stream[streamPos+1]=='U'))) {
-            size_t j = streamPos;
-            bool validStart = false;
-            // consume first char or require valid UCN
-            if (is_nondigit(stream[j])) { 
-                if (j + 1 > stream.size()) feeder.ensure_stream(stream, j + 1);
-                ++j; 
-                validStart = true;
-            } else {
-                size_t u = 0; if (try_ucn(j, u)) { j += u; validStart = true; }
-            }
-            if (validStart) {
-                // consume subsequent identifier chars: alnum or underscores or ucn
+                if (j < stream.size() && (stream[j] == '+' || stream[j] == '-')) { ++j; }
                 while (true) {
                     if (j >= stream.size()) feeder.ensure_stream(stream, j);
-                    if (j >= stream.size()) break;
-                    if (is_nondigit(stream[j]) || is_digit(stream[j])) { ++j; continue; }
-                    size_t u = 0; if (try_ucn(j, u)) { j += u; continue; }
-                    break;
+                    if (j < stream.size() && (stream[j] >= '0' && stream[j] <= '9')) { ++j; }
+                    else break;
                 }
-                if (j > streamPos) {
-                    std::string lex = stream.substr(streamPos, j - streamPos);
-                    emit(PPTokenKind::Identifier, lex, begin, feeder.position());
-                    streamPos = j; continue;
-                }
+                continue;
             }
+            if (is_digit(d) || is_nondigit(d)) { ++j; continue; }
+            if (d == '.') { ++j; continue; }
+            break;
         }
-
-        size_t plen = 0;
-        if (streamPos < stream.size()) {
-            // Ensure enough lookahead for longest punctuators (e.g., "%:%:" is 4 chars)
-            if (stream.size() - streamPos < 4) feeder.ensure_stream(stream, streamPos + 3);
-            plen = match_punct(stream, streamPos);
-        }
-        if (plen > 0) {
-            std::string lex = stream.substr(streamPos, plen);
-            streamPos += plen;
-            emit(PPTokenKind::Punctuator, lex, begin, feeder.position());
-            continue;
-        }
-
-        // Fallback: single Other character
-        std::string lex(1, c);
-        ++streamPos;
-        emit(PPTokenKind::Other, lex, begin, feeder.position());
+        std::string lex = stream.substr(streamPos, j - streamPos);
+        out = PPToken{PPTokenKind::PPNumber, SourceSpan{begin, feeder.position()}, lex};
+        streamPos = j;
+        return true;
     }
 
-    return tokens;
+    // Character constant (with optional encoding prefix L/u/U)
+    size_t charPrefixLen = 0;
+    feeder.ensure_stream(stream, streamPos + 1);
+    if (starts_char(streamPos, charPrefixLen)) {
+        size_t j = streamPos;
+        for (size_t k = 0; k < charPrefixLen; ++k) { ++j; }
+        if (j < stream.size() && stream[j] == '\'') { ++j; }
+        bool escaped = false;
+        while (true) {
+            if (j >= stream.size()) feeder.ensure_stream(stream, j);
+            if (j >= stream.size()) break;
+            char d = stream[j];
+            if (!escaped) {
+                if (d == '\\') { ++j; escaped = true; continue; }
+                if (d == '\'') { ++j; break; }
+                if (d == '\n') { break; }
+                ++j;
+            } else {
+                if (d == 'x') {
+                    ++j; while (j < stream.size() && is_hex(stream[j])) { ++j; }
+                    escaped = false; continue;
+                }
+                if (d == 'u') { ++j; for (int k=0;k<4 && j<stream.size() && is_hex(stream[j]);++k){ ++j; } escaped = false; continue; }
+                if (d == 'U') { ++j; for (int k=0;k<8 && j<stream.size() && is_hex(stream[j]);++k){ ++j; } escaped = false; continue; }
+                if (is_oct(d)) { ++j; for (int k=1;k<3 && j<stream.size() && is_oct(stream[j]);++k){ ++j; } escaped = false; continue; }
+                ++j; escaped = false;
+            }
+        }
+        std::string lex = stream.substr(streamPos, j - streamPos);
+        out = PPToken{PPTokenKind::CharConst, SourceSpan{begin, feeder.position()}, lex};
+        streamPos = j;
+        return true;
+    }
+
+    // String literal (with optional encoding prefix u8/u/U/L)
+    size_t prefixLen = 0;
+    feeder.ensure_stream(stream, streamPos + 2);
+    if (starts_string(streamPos, prefixLen)) {
+        size_t j = streamPos;
+        for (size_t k = 0; k < prefixLen; ++k) { ++j; }
+        if (j < stream.size() && stream[j] == '"') { ++j; }
+        bool escaped = false;
+        while (true) {
+            if (j >= stream.size()) feeder.ensure_stream(stream, j);
+            if (j >= stream.size()) break;
+            char d = stream[j];
+            if (!escaped) {
+                if (d == '\\') { ++j; escaped = true; continue; }
+                if (d == '"') { ++j; break; }
+                if (d == '\n') { break; }
+                ++j;
+            } else {
+                ++j; escaped = false;
+            }
+        }
+        std::string lex = stream.substr(streamPos, j - streamPos);
+        out = PPToken{PPTokenKind::StringLiteral, SourceSpan{begin, feeder.position()}, lex};
+        streamPos = j;
+        return true;
+    }
+
+    // Newline
+    if (c == '\n') {
+        out = PPToken{PPTokenKind::Newline, SourceSpan{begin, feeder.position()}, "\n"};
+        ++streamPos; return true;
+    }
+
+    // Whitespace
+    if (is_space(c)) {
+        std::string lex;
+        do {
+            lex.push_back(c);
+            ++streamPos;
+            feeder.ensure_stream(stream, streamPos);
+            if (streamPos>=stream.size()) break;
+            c = stream[streamPos];
+        } while (is_space(c));
+        out = PPToken{PPTokenKind::Whitespace, SourceSpan{begin, feeder.position()}, lex};
+        return true;
+    }
+
+    // Identifier: starts with nondigit or universal-character-name
+    feeder.ensure_stream(stream, streamPos + 1);
+    if (is_nondigit(c) || (c=='\\' && (streamPos+1<stream.size()) && (stream[streamPos+1]=='u' || stream[streamPos+1]=='U'))) {
+        size_t j = streamPos;
+        bool validStart = false;
+        if (is_nondigit(stream[j])) { if (j + 1 > stream.size()) feeder.ensure_stream(stream, j + 1); ++j; validStart = true; }
+        else { size_t u = 0; if (try_ucn(j, u)) { j += u; validStart = true; } }
+        if (validStart) {
+            while (true) {
+                if (j >= stream.size()) feeder.ensure_stream(stream, j);
+                if (j >= stream.size()) break;
+                if (is_nondigit(stream[j]) || is_digit(stream[j])) { ++j; continue; }
+                size_t u = 0; if (try_ucn(j, u)) { j += u; continue; }
+                break;
+            }
+            if (j > streamPos) {
+                std::string lex = stream.substr(streamPos, j - streamPos);
+                out = PPToken{PPTokenKind::Identifier, SourceSpan{begin, feeder.position()}, lex};
+                streamPos = j; return true;
+            }
+        }
+    }
+
+    // Punctuator: greedy longest-match
+    size_t plen = 0;
+    if (streamPos < stream.size()) {
+        if (stream.size() - streamPos < 4) feeder.ensure_stream(stream, streamPos + 3);
+        plen = match_punct(stream, streamPos);
+    }
+    if (plen > 0) {
+        std::string lex = stream.substr(streamPos, plen);
+        streamPos += plen;
+        out = PPToken{PPTokenKind::Punctuator, SourceSpan{begin, feeder.position()}, lex};
+        return true;
+    }
+
+    // Fallback: single Other character
+    std::string lex(1, c);
+    ++streamPos;
+    out = PPToken{PPTokenKind::Other, SourceSpan{begin, feeder.position()}, lex};
+    return true;
 }
 
 } // namespace wvmcc
