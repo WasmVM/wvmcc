@@ -1,0 +1,52 @@
+# Project Milestones
+
+This document tracks key milestones achieved so far and the upcoming work items for the freestanding C17 → Wasm compiler.
+
+## Completed
+- Repository scaffolding with CMake, tests, and CLI entrypoints
+- Preprocessor Phases 1–3 (single pass)
+  - Trigraph replacement
+  - End-of-line normalization (CRLF/CR → LF)
+  - Line splicing (backslash-newline)
+  - Comment stripping (// and /* */) with correct handling inside strings/chars
+  - Ensuring final newline
+- Tokenizer
+  - Whitespace and Newline
+  - Punctuators (greedy longest match, including digraphs and multi-char operators)
+  - String literals (prefixes: u8/u/U/L; escape handling; newline terminates)
+  - Char constants (prefixes: L/u/U; escape handling: simple/octal/hex/UCN)
+  - PPNumber (per 6.4.8: digit or .digit start; supports e/E and p/P with optional sign; trailing dot; hex-float forms)
+  - Identifier (per 6.4.2: ASCII letters/underscore start; digits allowed after; supports UCNs \uXXXX and \UXXXXXXXX)
+- Header-name recognition (6.4.7) in `#include` directives
+  - Post-tokenization transform combines `<...>` or "..." into a single `HeaderName`
+- Unit tests
+  - Preprocessor basic tests
+  - Tokenizer: whitespace, punctuators, strings, chars, pp-number, identifiers
+  - Header-name transform tests
+
+## In Progress / Near-Term
+- Macro processing (Phase 4)
+  - `#define`, `#undef`, object-like and function-like macros
+  - Macro substitution rules, argument expansion, stringizing `#`, token pasting `##`
+  - Recursive expansion guards and ordering
+- Additional tokenization refinements
+  - PPNumber corner cases and suffix interactions
+  - Identifier UCN range validation (disallow invalid code points per spec)
+  - Header-name edge cases (whitespace variations, malformed terminators)
+- Diagnostics and error reporting
+  - Clear messages with spans for unterminated literals and invalid sequences
+
+## Later Milestones
+- Parser for translation units (C17 subset initially)
+- Semantic analysis (types, declarations, expressions)
+- IR design for Wasm module generation
+- Code generation to Wasm (MVP)
+  - Function compilation, basic control flow, locals
+  - Minimal runtime stubs for freestanding environment
+- Optimizations and verification
+  - Basic optimization passes
+  - Validation against Wasm constraints
+
+## Notes
+- Freestanding target: no libc/WASI; emit Wasm modules directly.
+- Unit tests should evolve alongside features; prefer focused tests with clear expectations and token dumps on failure.
