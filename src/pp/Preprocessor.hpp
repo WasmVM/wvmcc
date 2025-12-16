@@ -17,84 +17,54 @@ namespace wvmcc {
 
 class Preprocessor {
 public:
-    // Streaming interface only: treat Preprocessor as a live token stream
-    // Previously there was a non-streaming `run()` API; removed in favor of streaming.
+    // --- Public streaming API -------------------------------------------------
+    // Streaming interface only: treat Preprocessor as a live token stream.
+    // The previous batch API (`run()`) has been removed.
     bool open(const std::string& inputPath);
     std::optional<PPToken> peek();
     std::optional<PPToken> next();
     void reset();
     bool empty();
-    // Include search paths management
+
+    // Include path management
     void addIncludePath(const std::string& path) { includePaths.push_back(path); }
     void clearIncludePaths() { includePaths.clear(); }
     const std::vector<std::string>& getIncludePaths() const { return includePaths; }
 
+    // Diagnostics collected during preprocessing
     const std::vector<Diagnostic>& getDiagnostics() const { return diagnostics; }
 
 private:
-    // Configurable -I paths (searched for quote includes after current file dir, and for angle includes)
-    std::vector<std::string> includePaths{};
-    // Queue of resolved include file paths to be executed in a later phase
-    std::deque<std::string> includeQueue{};
-    // Stack of files currently being processed (for cycle detection)
-    std::vector<std::string> inclusionStack{};
-    
-    // Include guard optimization: maps file path to its guard macro name
-    // If a file has a detected guard and the macro is defined, we skip re-processing
-    std::unordered_map<std::string, std::string> includeGuards{};
-    
-    // #pragma once optimization: set of files that have #pragma once
-    // These files should only be processed once per translation unit
-    std::unordered_set<std::string> pragmaOnceFiles{};
-
-    // Structured diagnostics collected during preprocessing
+    // --- Configuration & state -----------------------------------------------
+    std::vector<std::string> includePaths{};           // -I search paths
+    std::vector<std::string> inclusionStack{};         // include cycle detection
+    std::unordered_set<std::string> pragmaOnceFiles{}; // pragma once tracking
     std::vector<Diagnostic> diagnostics{};
-
-    // Macro definitions
     MacroTable macroTable{};
 
-    // Parse an #include directive payload starting right after the 'include' identifier.
-    // Consumes whitespace and either <...> or "..." and emits a single HeaderName token into 'out'.
-    // Execution/resolution is not performed here (parse only).
-    // Returns true if include was executed (tokens from file emitted),
-    // false if only a HeaderName token was emitted or nothing parsed.
+    // --- Include parsing & execution helpers --------------------------------
+    // Parse-only: parse an #include payload (after the 'include' identifier).
+    // Emits a HeaderName token into `out` when appropriate. Returns true if
+    // the include was executed (file tokens emitted), false otherwise.
     bool handleIncludeDirective(Tokenizer& tokenizer,
                                 std::vector<PPToken>& out,
                                 const std::string& currentDir);
 
-    // Resolve include to a filesystem path according to search rules.
-    // isAngle=true for <...> includes, false for "..." includes.
-    // Returns a resolved absolute or canonical path if found, std::nullopt otherwise.
+    // Resolve include names to filesystem paths. `isAngle=true` for <...>
     std::optional<std::string> resolveInclude(const std::string& header,
                                               bool isAngle,
                                               const std::string& currentDir) const;
 
-    // Check if a file is already in the inclusion stack (cycle detection).
+    // Inclusion stack helpers
     bool isInInclusionStack(const std::string& filePath) const;
-
-    // Push file onto inclusion stack; returns false if already present (cycle detected).
     bool pushInclusion(const std::string& filePath);
-
-    // Pop the current file from inclusion stack.
     void popInclusion();
 
-    // Parse and execute a #define directive starting right after 'define' keyword.
-    // Returns true if successful, false on error.
-    bool handleDefineDirective(Tokenizer& tokenizer);
-    bool parseMacroParameters(Tokenizer& tokenizer, std::vector<std::string>& params, bool& variadic);
-    void trimReplacementWhitespace(std::vector<PPToken>& replacement);
-    bool handleVariadicParameter(Tokenizer& tokenizer, bool& variadic);
-    void skipToCloseParen(Tokenizer& tokenizer);
-
-    // Parse and execute a #undef directive starting right after 'undef' keyword.
-    // Returns true if successful, false on error.
-    bool handleUndefDirective(Tokenizer& tokenizer);
-    
-    // Helper methods for handleIncludeDirective
+    // Helpers used by include handling (angle vs string vs macro-expanded)
     bool executeInclude(const std::string& header, bool isAngle,
-                       std::optional<SourceSpan> span,
-                       std::vector<PPToken>& out,
-                       const std::string& currentDir);
+                        std::optional<SourceSpan> span,
+                        std::vector<PPToken>& out,
+                        const std::string& currentDir);
     bool processAngleBracketInclude(Tokenizer& tokenizer,
                                     std::vector<PPToken>& out,
                                     const std::string& currentDir);
@@ -112,25 +82,53 @@ private:
                                     std::vector<PPToken>& out,
                                     const std::string& currentDir);
 
-    // Collect all tokens from current position until end of logical line (newline).
-    // Does not consume the newline. Used by directive parsers.
+    // --- Directive parsing helpers (parse & execute specific directives) -----
+    // Collect tokens until end of logical line (does not consume newline).
     std::vector<PPToken> collectLineTokens(Tokenizer& tokenizer);
 
-    // Expand object-like macros in a token stream.
-    // Returns the expanded token list with macro substitutions applied.
-    // Prevents infinite recursion by tracking expanded macro names.
+    // #define / #undef parsing
+    bool handleDefineDirective(Tokenizer& tokenizer);
+    bool handleUndefDirective(Tokenizer& tokenizer);
+    bool parseMacroParameters(Tokenizer& tokenizer, std::vector<std::string>& params, bool& variadic);
+    void trimReplacementWhitespace(std::vector<PPToken>& replacement);
+    bool handleVariadicParameter(Tokenizer& tokenizer, bool& variadic);
+    void skipToCloseParen(Tokenizer& tokenizer);
+
+    // #if / #ifdef / #ifndef / #elif / #else / #endif handling (parsers)
+    bool handleIfDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
+    bool handleIfdefDirective(const std::string& macroName);
+    bool handleIfndefDirective(const std::string& macroName);
+    bool handleElifDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
+    bool handleElseDirective();
+    bool handleEndifDirective();
+
+    // Utility directives
+    bool handleErrorDirective(const std::vector<PPToken>& tokens);
+    bool handleWarningDirective(const std::vector<PPToken>& tokens);
+    bool handleLineDirective(const std::vector<PPToken>& tokens);
+    bool handlePragmaDirective(const std::vector<PPToken>& tokens);
+
+    // Helpers for pragma parsing
+    bool isPragmaOnceDirective(const std::vector<PPToken>& tokens);
+    std::string buildPragmaContent(const std::vector<PPToken>& tokens);
+    void trimTrailingWhitespace(std::string& content);
+
+    // --- Macro expansion helpers ---------------------------------------------
     std::vector<PPToken> expandMacros(const std::vector<PPToken>& tokens);
-    
-    // Helper methods for expandMacros
-    bool tryExpandFunctionLikeMacro(const std::vector<PPToken>& tokens, size_t& i, 
+    bool tryExpandFunctionLikeMacro(const std::vector<PPToken>& tokens, size_t& i,
                                     const Macro* m, const PPToken& invocationToken,
                                     std::vector<PPToken>& result);
     std::vector<std::vector<PPToken>> collectMacroArguments(const std::vector<PPToken>& tokens,
                                                             size_t startIdx, size_t& endIdx,
                                                             const Macro* m);
     void handleOpenParen(std::vector<PPToken>& currentArg, const PPToken& tok, int& parenDepth);
+    struct CloseParenContext {
+        int& parenDepth;
+        size_t& endIdx;
+        size_t k;
+    };
     bool handleCloseParen(std::vector<PPToken>& currentArg, std::vector<std::vector<PPToken>>& args,
-                         const PPToken& tok, int& parenDepth, size_t& endIdx, size_t k);
+                                    const PPToken& tok, CloseParenContext& ctx);
     void handleComma(std::vector<PPToken>& currentArg, std::vector<std::vector<PPToken>>& args);
     void collectVariadicArgs(std::vector<std::vector<PPToken>>& args, const Macro* m);
     std::vector<PPToken> substituteParameters(const Macro* m,
@@ -151,83 +149,25 @@ private:
     std::vector<PPToken> handleTokenPasting(const std::vector<PPToken>& tokens);
     std::string stringifyTokens(const std::vector<PPToken>& tokens);
 
-    // Conditional compilation state tracking
+    // --- Conditional evaluation helpers -------------------------------------
     struct ConditionalFrame {
-        bool seenTrueBranch{false};  // Has a taken #if/#elif been seen in this frame?
-        bool currentlyActive{true};  // Should we emit tokens in this frame?
-        bool inElse{false};          // Have we seen #else in this frame?
+        bool seenTrueBranch{false};
+        bool currentlyActive{true};
+        bool inElse{false};
     };
     std::vector<ConditionalFrame> conditionalStack{};
 
-    // Evaluate a C17 6.6 constant expression (integer-only, per preprocessor requirements).
-    // Expands macros in tokens, then parses and evaluates as an integer expression.
-    // Returns the evaluated result, or std::nullopt on parse/eval error (diagnostics emitted).
     std::optional<int64_t> evaluateConstantExpression(const std::vector<PPToken>& tokens);
-    
-    // Helper methods for evaluateConstantExpression
     size_t skipWhitespaceTokens(const std::vector<PPToken>& tokens, size_t start);
     bool tryParseDefinedOperator(const std::vector<PPToken>& tokens, size_t& i, std::vector<PPToken>& preprocessed);
     std::optional<std::string> parseDefinedMacroName(const std::vector<PPToken>& tokens, size_t& j, bool hasParens);
     bool validateDefinedCloseParen(const std::vector<PPToken>& tokens, size_t& j);
 
-    // Handle #if/#ifdef/#ifndef/#elif/#else/#endif directives.
-    // Returns true if the directive was successfully parsed, false on error.
-    bool handleIfDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
-    bool handleIfdefDirective(const std::string& macroName);
-    bool handleIfndefDirective(const std::string& macroName);
-    bool handleElifDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
-    bool handleElseDirective();
-    bool handleEndifDirective();
-    
-    // Handle utility directives
-    // Returns true if the directive was successfully parsed, false on error.
-    bool handleErrorDirective(const std::vector<PPToken>& tokens);
-    bool handleWarningDirective(const std::vector<PPToken>& tokens);
-    bool handleLineDirective(const std::vector<PPToken>& tokens);
-    bool handlePragmaDirective(const std::vector<PPToken>& tokens);
-    
-    // Helper methods for handlePragmaDirective
-    bool isPragmaOnceDirective(const std::vector<PPToken>& tokens);
-    std::string buildPragmaContent(const std::vector<PPToken>& tokens);
-    void trimTrailingWhitespace(std::string& content);
-
-    // Refactoring helpers for run()
-    bool validateLiteralToken(const PPToken& t, std::string& errMsg) const;
-    bool processDirective(Tokenizer& tokenizer,
-                          const PPToken& hashTok,
-                          std::vector<PPToken>& out,
-                          const std::string& currentDir,
-                          bool& hasErrors);
-    bool processLineStartToken(Tokenizer& tokenizer,
-                               const PPToken& t,
-                               std::vector<PPToken>& out,
-                               const std::string& currentDir,
-                               bool& hasErrors,
-                               bool& atLineStart);
-    void emitIfActive(const PPToken& t, std::vector<PPToken>& out) const;
-    
-    // Directive handlers
-    bool handleDirectiveIfdef(Tokenizer& tokenizer, bool& hasErrors);
-    bool handleDirectiveIfndef(Tokenizer& tokenizer, bool& hasErrors);
-    bool handleDirectiveConditional(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors);
-    bool handleDirectiveConditionalsGroup(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors);
-    bool handleDirectiveMessage(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors);
-    bool handleDirectiveLine(Tokenizer& tokenizer, bool& hasErrors);
-    bool handleDirectivePragma(Tokenizer& tokenizer, bool& hasErrors);
-    bool handleDirectiveDefineUndef(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors);
-    void consumeToEndOfLine(Tokenizer& tokenizer);
-    
-    // Helper methods for processDirective
-    void skipDirectiveWhitespace(Tokenizer& tokenizer);
+    // --- Small utility helpers used by streaming implementation --------------
     bool checkActiveState();
-    bool routeDirective(Tokenizer& tokenizer, const PPToken& hashTok, const PPToken& dir,
-                       std::vector<PPToken>& out, const std::string& currentDir, bool& hasErrors);
-    void consumeUnknownDirective(Tokenizer& tokenizer, std::vector<PPToken>& out);
-    bool handleDirectiveInclude(Tokenizer& tokenizer, const PPToken& hashTok, 
-                               const PPToken& dirToken, std::vector<PPToken>& out,
-                               const std::string& currentDir, bool& hasErrors);
+    void consumeToEndOfLine(Tokenizer& tokenizer);
 
-    // Streaming helpers (migrated from PPStream)
+    // --- Streaming implementation details -----------------------------------
     struct FileCtx {
         std::string path;
         std::unique_ptr<std::istringstream> stream;
@@ -242,13 +182,31 @@ private:
     bool pushFile(const std::string& path);
     std::optional<PPToken> readRawToken();
     void ensureBuffer();
+
+    // Helpers extracted from ensureBuffer to reduce complexity of the hot path
+    bool handleNewlineToken(const PPToken& tok);
+    bool handleInactiveConditionalToken(const PPToken& tok);
+    bool handleIdentifierExpansionToken(const PPToken& tok);
+    bool tryHandleFunctionLikeMacroInvocation(const Macro* m, const PPToken& tok);
+    void emitTokenOrLineExpansion(const PPToken& tok);
     void skipToEndOfLineTokensFromTokenizer(Tokenizer& tz);
-    void handleDirective();
+
+    // Runtime-facing directive handlers used by the streaming `ensureBuffer`
+    void handleDirective();            // dispatches to the specific directive parsers
     void skipLineFromToken(PPToken t);
-    void handleDefine();
-    void handleUndef();
-    void handleInclude();
-    void handleIfdef(bool wantDefined);
+    void handleDefine();               // wrapper used by streaming layer
+    void handleUndef();                // wrapper used by streaming layer
+    void handleInclude();              // wrapper used by streaming layer
+    void handleIfdef(bool wantDefined); // wrapper used by streaming layer
+    // Helpers to break down large directive parsing logic
+    bool handleIfOrElifDirective(const std::string& dir);
+    bool handleUtilityDirective(const std::string& dir);
+    void skipRestOfDirectiveTokens();
+    bool handleSimpleDirective(const std::string& dir);
+    std::vector<PPToken> collectInvocationTokens();
+    void skipToMatchingEndif();
+    bool consumeOptionalWhitespaceBeforeOpenParen();
+    std::optional<std::string> readDirectiveName();
 };
 
 } // namespace wvmcc
