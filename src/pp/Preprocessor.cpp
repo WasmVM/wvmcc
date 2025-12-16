@@ -27,6 +27,7 @@ std::string Preprocessor::phase1to3_process(const std::string& input) {
     enum class State { Normal, InString, InChar, InBlockComment, InLineComment };
     State st = State::Normal;
     bool escape = false;
+    bool comment_space_pending = false; // track placeholder emitted for block comment
 
     // We will iterate input and build output while applying transformations.
     // Maintain logic to handle CR/CRLF normalization on the fly and splicing.
@@ -81,7 +82,14 @@ std::string Preprocessor::phase1to3_process(const std::string& input) {
                         char n = input[i + 1];
                         if (n == '*') {
                             st = State::InBlockComment;
-                            out.push_back(' '); // block comment placeholder
+                            // Emit a single space placeholder only if previous isn't whitespace
+                            if (out.empty() || (out.back() != ' ' && out.back() != '\n' && out.back() != '\t' && out.back() != '\r' && out.back() != '\f' && out.back() != '\v')) {
+                                out.push_back(' ');
+                                comment_space_pending = true;
+                            } else {
+                                // Previous is whitespace; avoid double spacing
+                                comment_space_pending = true;
+                            }
                             ++i; // consume '*'
                         } else if (n == '/') {
                             st = State::InLineComment;
@@ -98,10 +106,13 @@ std::string Preprocessor::phase1to3_process(const std::string& input) {
                         out.pop_back();
                         // skip appending newline (spliced)
                     } else {
+                        // Keep newline even after block comment placeholder
                         out.push_back('\n');
+                        comment_space_pending = false;
                     }
                 } else {
                     out.push_back(c);
+                    comment_space_pending = false;
                 }
                 break;
             }
@@ -135,6 +146,7 @@ std::string Preprocessor::phase1to3_process(const std::string& input) {
                 if (c == '*' && i + 1 < input.size() && input[i + 1] == '/') {
                     st = State::Normal;
                     ++i; // consume '/'
+                    // Keep comment_space_pending true until we see the next non-newline char
                 }
                 // else ignore content
                 break;

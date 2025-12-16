@@ -32,3 +32,13 @@ if(EXISTS ${PP_PHASE3_TEST})
     target_link_libraries(wvmcc-pp-phase3-test PRIVATE ${WASMVM_LIBRARY})
     add_test(NAME pp-phase3 COMMAND wvmcc-pp-phase3-test)
 endif()
+
+# Combined integration test
+set(PP_PHASE_COMBINED_TEST ${TEST_ROOT}/unit/pp_phase_combined_test.cpp)
+if(EXISTS ${PP_PHASE_COMBINED_TEST})
+    add_executable(wvmcc-pp-phase-combined-test ${PP_PHASE_COMBINED_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp)
+    target_include_directories(wvmcc-pp-phase-combined-test PRIVATE ${WASMVM_INCLUDE_DIR} ${SRC_ROOT})
+    target_link_directories(wvmcc-pp-phase-combined-test PRIVATE ${WASMVM_LIBRARY_DIR})
+    target_link_libraries(wvmcc-pp-phase-combined-test PRIVATE ${WASMVM_LIBRARY})
+    add_test(NAME pp-phase-combined COMMAND wvmcc-pp-phase-combined-test)
+endif()
