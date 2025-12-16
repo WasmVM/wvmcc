@@ -2,8 +2,10 @@
 #include <vector>
 #include <string>
 #include <fstream>
+#include <optional>
 
 #include <WasmVM.hpp>
+#include "../pp/Preprocessor.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
     std::ofstream ofs(path, std::ios::binary);
@@ -18,8 +20,9 @@ static bool write_module_to_file(const WasmVM::WasmModule& module, const std::st
 }
 
 int main(int argc, char** argv) {
-    // Minimal CLI: support -o <file> to write encoded module
+    // Minimal CLI: support -o <file> and single input source path
     std::string outPath;
+    std::optional<std::string> inputPath;
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
@@ -33,8 +36,25 @@ int main(int argc, char** argv) {
         }
         if (arg == "-o" && i + 1 < argc) {
             outPath = argv[++i];
+            continue;
         }
-        // Additional args (like input C source) will be wired later
+        // First non-flag arg treated as input C source path
+        if (arg.size() > 0 && arg[0] != '-') {
+            if (!inputPath.has_value()) {
+                inputPath = arg;
+            }
+        }
+    }
+
+    // Preprocess input if provided (passthrough for now)
+    wvmcc::Preprocessor pp;
+    if (inputPath.has_value()) {
+        auto res = pp.run(*inputPath);
+        if (!res.success) {
+            std::cerr << "preprocess error: " << res.errorMsg << std::endl;
+            return 1;
+        }
+        // TODO: feed res.text into frontend once available
     }
 
     WasmVM::WasmModule module;

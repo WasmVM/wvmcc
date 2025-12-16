@@ -34,8 +34,8 @@
   - Custom IR: SSA-like blocks with simple three-address ops for expressions/control flow.
   - Passes: const-fold, copy-prop, dead-code elim (basic), canonicalization.
 - Backend:
-  - Final output is `WasmModule` using `wasmvm_include` headers you provided.
-  - Lower custom IR → WasmVM op set (`i32/i64/f32/f64`), linear memory for aggregates.
+  - Final output is `WasmModule`; lowering to wasm binary is handled by `WasmVM::module_encode`.
+  - Lower custom IR → WasmVM op set (`i32/i64/f32/f64`) mapped into linear memory for aggregates.
   - Calling convention: wasm32-compatible; spill to linear memory as needed.
   - No host imports in M0; expose only minimal module sections.
 
@@ -51,9 +51,9 @@
 - Tree:
   - `src/{lexer,parser,ast,semantics}/`
   - `src/ir/`
+  - `src/pp/` (preprocessor)
   - `src/exec/`
   - `include/` (public headers)
-  - `wasmvm_include/` (WasmVM headers; not vendored by us)
   - `tests/{unit,e2e}/`
 
 ## Milestones
@@ -63,5 +63,6 @@
 
 ## Open Topics
 - Exact mapping of struct/union layout to WasmVM memory: confirm rules against Clang wasm32 and freeze.
-- Module format details: decide whether to emit `.wasm` or a WasmVM-native serialization; wrap with a loader utility.
+- Module format details: emit `.wasm` via `module_encode`; consider WasmVM-native serialization if needed.
+- Dependency integration: WasmVM discovered via `cmake/FindWasmVM.cmake`; keep `#include <WasmVM.hpp>`.
 - CLI flags: `-target wasm32`, `-funsigned-char`, `-fno-long-double`, output selection.
