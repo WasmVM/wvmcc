@@ -82,6 +82,11 @@ private:
     // Collect all tokens from current position until end of logical line (newline).
     // Does not consume the newline. Used by directive parsers.
     std::vector<PPToken> collectLineTokens(Tokenizer& tokenizer);
+
+    // Expand object-like macros in a token stream.
+    // Returns the expanded token list with macro substitutions applied.
+    // Prevents infinite recursion by tracking expanded macro names.
+    std::vector<PPToken> expandMacros(const std::vector<PPToken>& tokens);
 };
 
 } // namespace wvmcc

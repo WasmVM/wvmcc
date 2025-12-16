@@ -23,19 +23,21 @@ static int test_object_macro_simple() {
         return 1;
     }
 
-    // Find the identifier "MAX" in output (should still be there, macro expansion not yet implemented)
-    bool hasMax = false;
+    // After macro expansion, "MAX" should be replaced with "100"
+    bool hasMax = false, has100 = false;
     for (const auto& t : res.tokens) {
-        if (t.lexeme == "MAX") {
-            hasMax = true;
-            break;
-        }
+        if (t.lexeme == "MAX") hasMax = true;
+        if (t.lexeme == "100") has100 = true;
     }
     
-    // For now, macros are parsed but not expanded, so MAX should still be in output
-    if (!hasMax) {
-        std::cerr << "test_object_macro_simple: expected to find MAX identifier in output\n";
+    if (hasMax) {
+        std::cerr << "test_object_macro_simple: MAX should have been expanded\n";
         return 2;
+    }
+    
+    if (!has100) {
+        std::cerr << "test_object_macro_simple: expected to find 100 in output after expansion\n";
+        return 3;
     }
     
     return 0;

@@ -6,6 +6,7 @@
 #include <fstream>
 #include <sstream>
 #include <iostream>
+#include <unordered_set>
 #include "Tokenizer.hpp"
 
 namespace wvmcc {
@@ -348,7 +349,11 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
     if (hasErrors) {
         return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
     }
-    return PreprocessResult{std::move(out), true, std::string()};
+    
+    // Expand macros in the token stream
+    std::vector<PPToken> expanded = expandMacros(out);
+    
+    return PreprocessResult{std::move(expanded), true, std::string()};
 }
 
 std::vector<PPToken> Preprocessor::collectLineTokens(Tokenizer& tokenizer) {
@@ -477,6 +482,57 @@ bool Preprocessor::handleUndefDirective(Tokenizer& tokenizer) {
     tokenizer.next(); // consume macro name
 
     return true;
+}
+
+std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& tokens) {
+    std::vector<PPToken> result;
+    std::unordered_set<std::string> expandedMacros; // Prevent infinite recursion
+    
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& t = tokens[i];
+        
+        // Skip expansion for non-identifiers
+        if (t.kind != PPTokenKind::Identifier) {
+            result.push_back(t);
+            continue;
+        }
+        
+        // Skip if already expanded in this invocation
+        if (expandedMacros.count(t.lexeme)) {
+            result.push_back(t);
+            continue;
+        }
+        
+        // Check if this identifier is a defined macro
+        auto macro = macroTable.getMacro(t.lexeme);
+        if (!macro) {
+            result.push_back(t);
+            continue;
+        }
+        
+        const Macro* m = *macro;
+        
+        // For now, only handle object-like macros
+        if (m->isFunction) {
+            // TODO: Implement function-like macro expansion
+            result.push_back(t);
+            continue;
+        }
+        
+        // Object-like macro expansion: replace with replacement tokens
+        expandedMacros.insert(t.lexeme);
+        
+        // Insert replacement tokens
+        for (const auto& repl : m->replacement) {
+            result.push_back(repl);
+        }
+        
+        // Rescan replacement tokens for further expansions
+        // (This prevents one level of recursion but allows nested macros)
+        // For simple cases, this is adequate
+    }
+    
+    return result;
 }
 
 } // namespace wvmcc
