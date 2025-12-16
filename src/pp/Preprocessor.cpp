@@ -738,7 +738,7 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
             }
 
             // Perform substitution with paint propagation
-            // This handles parameter replacement, stringification (#), and token pasting (##)
+            // Step 1: Replace parameters and handle stringification (#)
             std::vector<PPToken> substituted;
             
             for (size_t rIdx = 0; rIdx < m->replacement.size(); ++rIdx) {
@@ -832,9 +832,46 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
                     substituted.push_back(replToken);
                 }
             }
-
-            // Recursively expand the substituted tokens
-            auto expanded = expandMacros(substituted);
+            
+            // Step 2: Handle token pasting (##) as a post-processing step
+            std::vector<PPToken> afterPasting;
+            for (size_t idx = 0; idx < substituted.size(); ++idx) {
+                const auto& tok = substituted[idx];
+                
+                // Check if current token is ##
+                if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "##") {
+                    // Get previous and next tokens (skipping whitespace)
+                    int prevIdx = idx - 1;
+                    while (prevIdx >= 0 && substituted[prevIdx].kind == PPTokenKind::Whitespace) {
+                        prevIdx--;
+                    }
+                    
+                    int nextIdx = idx + 1;
+                    while (nextIdx < static_cast<int>(substituted.size()) && 
+                           substituted[nextIdx].kind == PPTokenKind::Whitespace) {
+                        nextIdx++;
+                    }
+                    
+                    // Paste tokens if we have both previous and next
+                    if (prevIdx >= 0 && nextIdx < static_cast<int>(substituted.size())) {
+                        // Remove whitespace before paste operator
+                        while (!afterPasting.empty() && afterPasting.back().kind == PPTokenKind::Whitespace) {
+                            afterPasting.pop_back();
+                        }
+                        
+                        // Paste: concatenate previous and next token lexemes
+                        if (!afterPasting.empty()) {
+                            afterPasting.back().lexeme += substituted[nextIdx].lexeme;
+                            idx = nextIdx;  // Skip to next token (## and whitespace already processed)
+                            continue;
+                        }
+                    }
+                }
+                
+                afterPasting.push_back(tok);
+            }
+            
+            std::vector<PPToken> expanded = expandMacros(afterPasting);
             for (const auto& exp : expanded) {
                 result.push_back(exp);
             }

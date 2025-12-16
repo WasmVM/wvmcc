@@ -241,7 +241,89 @@ static int test_stringification_special() {
     return 0;
 }
 
-// Test 8: Undefine macro
+// Test 8: Token pasting operator (##)
+static int test_token_pasting() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_paste.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define CONCAT(a, b) a ## b\n";
+        ofs << "int foobar = CONCAT(foo, bar);\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_token_pasting: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // Verify token pasting: CONCAT(foo, bar) should become foobar
+    bool foundFoobar = false;
+    for (const auto& t : res.tokens) {
+        if (t.kind == wvmcc::PPTokenKind::Identifier && t.lexeme == "foobar") {
+            foundFoobar = true;
+            break;
+        }
+    }
+    
+    if (!foundFoobar) {
+        std::cerr << "test_token_pasting: expected identifier 'foobar' in output\n";
+        std::cerr << "tokens:\n";
+        for (const auto& t : res.tokens) {
+            std::cerr << "  " << t.lexeme << "\n";
+        }
+        return 2;
+    }
+    
+    return 0;
+}
+
+// Test 9: Token pasting with numbers
+static int test_token_pasting_numbers() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_paste_numbers.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define VERSION(major, minor) v ## major ## _ ## minor\n";
+        ofs << "const char* ver = VERSION(1, 2);\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_token_pasting_numbers: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // Verify: VERSION(1, 2) should become v1_2
+    bool foundV1_2 = false;
+    for (const auto& t : res.tokens) {
+        if (t.kind == wvmcc::PPTokenKind::Identifier && t.lexeme == "v1_2") {
+            foundV1_2 = true;
+            break;
+        }
+    }
+    
+    if (!foundV1_2) {
+        std::cerr << "test_token_pasting_numbers: expected identifier 'v1_2' in output\n";
+        std::cerr << "tokens:\n";
+        for (const auto& t : res.tokens) {
+            std::cerr << "  " << t.lexeme << "\n";
+        }
+        return 2;
+    }
+    
+    return 0;
+}
+
+// Test 10: Undefine macro
 static int test_undef_macro() {
     using namespace wvmcc;
     const std::string srcName = "temp_macro_undef.c";
@@ -451,6 +533,18 @@ int main() {
     result = test_stringification_special();
     if (result != 0) {
         std::cerr << "test_stringification_special failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_token_pasting();
+    if (result != 0) {
+        std::cerr << "test_token_pasting failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_token_pasting_numbers();
+    if (result != 0) {
+        std::cerr << "test_token_pasting_numbers failed with code " << result << "\n";
         return result;
     }
 
