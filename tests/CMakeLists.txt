@@ -68,6 +68,22 @@ if(EXISTS ${LEXER_KEYWORD_TEST})
     add_test(NAME lexer-keyword COMMAND wvmcc-lexer-keyword-test)
 endif()
 
+# Lexer identifier classification test
+set(LEXER_IDENTIFIER_TEST ${TEST_ROOT}/unit/lexer_identifier_test.cpp)
+if(EXISTS ${LEXER_IDENTIFIER_TEST})
+    add_executable(wvmcc-lexer-identifier-test ${LEXER_IDENTIFIER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
+    target_include_directories(wvmcc-lexer-identifier-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME lexer-identifier COMMAND wvmcc-lexer-identifier-test)
+endif()
+
+# Lexer punctuator classification test
+set(LEXER_PUNCTUATOR_TEST ${TEST_ROOT}/unit/lexer_punctuator_test.cpp)
+if(EXISTS ${LEXER_PUNCTUATOR_TEST})
+    add_executable(wvmcc-lexer-punctuator-test ${LEXER_PUNCTUATOR_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
+    target_include_directories(wvmcc-lexer-punctuator-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME lexer-punctuator COMMAND wvmcc-lexer-punctuator-test)
+endif()
+
 # Tokenizer istream test
 set(TOKENIZER_ISTREAM_TEST ${TEST_ROOT}/unit/tokenizer_istream_test.cpp)
 if(EXISTS ${TOKENIZER_ISTREAM_TEST})
