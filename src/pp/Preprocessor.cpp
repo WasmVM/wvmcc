@@ -11,10 +11,10 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     if (!ifs) {
         return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cannot open input: ") + inputPath};
     }
-        std::ostringstream oss;
-        oss << ifs.rdbuf();
-        // Single-pass tokenization (phase 1–3 handled inline)
-        auto tokens = Tokenizer::tokenize_with_punctuators(oss.str());
+    std::ostringstream oss;
+    oss << ifs.rdbuf();
+    // Single-pass tokenization (phase 1–3 handled inline)
+    auto tokens = Tokenizer::tokenize(oss.str());
     // Validate tokens for errors (e.g., unterminated string literal)
     for (const auto& t : tokens) {
         if (t.kind == PPTokenKind::StringLiteral) {

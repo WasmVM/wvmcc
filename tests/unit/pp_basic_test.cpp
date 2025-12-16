@@ -13,7 +13,7 @@ struct Case {
 static bool run_case(const Case& c) {
     std::string in(c.input);
         // Single-pass tokenizer: concatenate lexemes to approximate preprocessed stream
-        auto toks = wvmcc::Tokenizer::tokenize_with_punctuators(in);
+        auto toks = wvmcc::Tokenizer::tokenize(in);
         std::string out;
         out.reserve(256);
         for (auto& t : toks) out += t.lexeme;

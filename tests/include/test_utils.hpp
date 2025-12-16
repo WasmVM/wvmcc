@@ -12,7 +12,7 @@ inline bool expectKindsLex(const std::string& name,
                            const std::string& input,
                            const std::vector<wvmcc::PPTokenKind>& kinds,
                            const std::vector<std::string>& lexemes) {
-    auto toks = wvmcc::Tokenizer::tokenize_with_punctuators(input);
+    auto toks = wvmcc::Tokenizer::tokenize(input);
     if (toks.size() != kinds.size() || toks.size() != lexemes.size()) {
         std::cerr << "[FAIL] " << name << ": size mismatch: expected kinds="
                   << kinds.size() << ", lexemes=" << lexemes.size()

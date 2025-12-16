@@ -29,8 +29,31 @@ struct PPToken {
 class Tokenizer {
 public:
     // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
-    static std::vector<PPToken> tokenize_with_punctuators(const std::string& input);
-    // Single-pass tokenizer: performs necessary phase-1–3 handling inline.
+    static std::vector<PPToken> tokenize(const std::string& input);
+};
+
+// Internal: SourceBuffer performs inline phase 1–3 preprocessing while feeding chars
+class SourceBuffer {
+public:
+    explicit SourceBuffer(const std::string& input);
+    bool next_char(char& outCh);
+    void ensure_stream(std::string& stream, std::size_t upto);
+    bool lastWhitespace() const { return lastEmittedWhitespace; }
+    const SourcePos& position() const { return pos; }
+
+private:
+    enum class State { Normal, InString, InChar, InBlockComment, InLineComment };
+    const std::string& inputRef;
+    State st{State::Normal};
+    bool esc{false};
+    std::size_t rawIdx{0};
+    bool lastEmittedWhitespace{false};
+    bool inputEndsWithNewline{false};
+    std::string charBuf;
+    SourcePos pos{0,1,1,0};
+
+    char trigraph_at(std::size_t idx) const;
+    void fill_buffer();
 };
 
 } // namespace wvmcc
