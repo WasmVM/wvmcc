@@ -7,11 +7,11 @@
 static bool expectKinds(const std::string& name, const std::string& input,
                         const std::vector<wvmcc::PPTokenKind>& kinds,
                         const std::vector<std::string>& lexemes) {
-    auto toks = wvmcc::Tokenizer::tokenize_minimal(input);
-    bool ok = toks.size() == kinds.size();
-    if (!ok) {
-        std::cerr << "[FAIL] " << name << ": size mismatch: expected "
-                  << kinds.size() << ", got " << toks.size() << std::endl;
+    auto toks = wvmcc::Tokenizer::tokenize_with_punctuators(input);
+    if (toks.size() != kinds.size() || toks.size() != lexemes.size()) {
+        std::cerr << "[FAIL] " << name << ": size mismatch: expected kinds="
+                  << kinds.size() << ", lexemes=" << lexemes.size()
+                  << ", got tokens=" << toks.size() << std::endl;
         return false;
     }
     for (size_t i = 0; i < kinds.size(); ++i) {
@@ -40,7 +40,7 @@ int main() {
     all_ok &= expectKinds(
         "tabs and punctuation",
         "\t= +\n",
-        {K::Whitespace, K::Other, K::Whitespace, K::Other, K::Newline},
+        {K::Whitespace, K::Punctuator, K::Whitespace, K::Punctuator, K::Newline},
         {"\t", "=", " ", "+", "\n"}
     );
 
@@ -52,6 +52,6 @@ int main() {
     );
 
     if (!all_ok) return 1;
-    std::cout << "pp_tokenizer_min_test: all cases passed" << std::endl;
+    std::cout << "pp_tokenizer_whitespace_test: all cases passed" << std::endl;
     return 0;
 }

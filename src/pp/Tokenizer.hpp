@@ -28,9 +28,6 @@ struct PPToken {
 
 class Tokenizer {
 public:
-    // Tokenize Phase 1–3 processed input into minimal tokens: Whitespace, Newline, Other.
-    static std::vector<PPToken> tokenize_minimal(const std::string& input);
-
     // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
     static std::vector<PPToken> tokenize_with_punctuators(const std::string& input);
 };
