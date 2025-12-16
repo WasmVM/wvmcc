@@ -13,16 +13,15 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     }
     std::ostringstream oss;
     oss << ifs.rdbuf();
-    // Single-pass tokenization (phase 1–3 handled inline)
+    // Single-pass streaming: consume tokens, parse directives (no execution yet), and recognize header-name in #include
     Tokenizer tokenizer(oss.str());
-    std::vector<PPToken> tokens;
-    tokens.reserve(oss.str().size() / 2);
+    std::vector<PPToken> out;
+    out.reserve(oss.str().size() / 2);
     tokenizer.reset();
-    while (auto t = tokenizer.next()) {
-        tokens.push_back(*t);
-    }
-    // Validate tokens for errors (e.g., unterminated string literal)
-    for (const auto& t : tokens) {
+    bool atLineStart = true; // start of file is line start
+    while (auto tokOpt = tokenizer.next()) {
+        PPToken t = *tokOpt;
+        // Basic validation for literals on the fly
         if (t.kind == PPTokenKind::StringLiteral) {
             if (t.lexeme.empty() || t.lexeme.back() != '"') {
                 std::ostringstream em;
@@ -31,59 +30,96 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
                 return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
             }
         } else if (t.kind == PPTokenKind::CharConst) {
-            if (t.lexeme.empty() || t.lexeme.back() != '\'') {
+            if (t.lexeme.empty() || t.lexeme.back() != '\'' ) {
                 std::ostringstream em;
                 em << "unterminated character constant at line " << t.span.begin.line
                    << ", column " << t.span.begin.column;
                 return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
             }
         }
-    }
-    // Post-pass: recognize header-name tokens only within #include
-    std::vector<PPToken> transformed;
-    transformed.reserve(tokens.size());
-    for (size_t i=0;i<tokens.size();) {
-        const auto& t = tokens[i];
-        if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
-            size_t j = i + 1;
-            while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
-            // Leverage Identifier recognition for 'include'
-            if (j < tokens.size() && tokens[j].kind == PPTokenKind::Identifier && tokens[j].lexeme == "include") {
-                transformed.push_back(t);
-                transformed.push_back(tokens[j]);
-                j++;
-                while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
-                if (j < tokens.size()) {
-                    if (tokens[j].kind == PPTokenKind::Punctuator && tokens[j].lexeme == "<") {
-                        SourcePos begin = tokens[j].span.begin;
-                        std::string acc;
-                        size_t k = j + 1;
-                        bool terminated = false;
-                        while (k < tokens.size()) {
-                            if (tokens[k].kind == PPTokenKind::Newline) break;
-                            if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == ">") { terminated = true; break; }
-                            acc += tokens[k].lexeme;
-                            k++;
+
+        if (t.kind == PPTokenKind::Newline) {
+            out.push_back(t);
+            atLineStart = true;
+            continue;
+        }
+        if (atLineStart) {
+            if (t.kind == PPTokenKind::Whitespace) {
+                out.push_back(t);
+                // still at line start until a non-whitespace token
+                continue;
+            }
+            if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
+                // Parse directive keyword
+                out.push_back(t);
+                // Skip spaces (do not emit) between '#' and directive keyword
+                while (auto p = tokenizer.peek()) {
+                    if (p->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
+                    else break;
+                }
+                auto dir = tokenizer.peek();
+                if (dir && dir->kind == PPTokenKind::Identifier) {
+                    // Push directive keyword
+                    out.push_back(*tokenizer.next());
+                    // Special handling for include header-name recognition
+                    if (dir->lexeme == "include") {
+                        // TODO: Execute include: resolve header, push new token source, and continue streaming
+                        // Skip spaces (do not emit) between directive and header name
+                        while (auto w = tokenizer.peek()) {
+                            if (w->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
+                            else break;
                         }
-                        if (terminated) {
-                            SourcePos end = tokens[k].span.end;
-                            transformed.push_back(PPToken{PPTokenKind::HeaderName, SourceSpan{begin, end}, std::string("<") + acc + ">"});
-                            i = k + 1;
-                            continue;
+                        auto h = tokenizer.peek();
+                        if (h && h->kind == PPTokenKind::Punctuator && h->lexeme == "<") {
+                            SourcePos begin = h->span.begin;
+                            // consume '<' but do not emit it; we'll emit a single HeaderName token
+                            tokenizer.next();
+                            std::string acc;
+                            SourcePos end = begin;
+                            bool terminated = false;
+                            while (auto x = tokenizer.peek()) {
+                                if (x->kind == PPTokenKind::Newline) break;
+                                if (x->kind == PPTokenKind::Punctuator && x->lexeme == ">") {
+                                    end = x->span.end;
+                                    tokenizer.next();
+                                    out.push_back(PPToken{PPTokenKind::HeaderName, SourceSpan{begin, end}, std::string("<") + acc + ">"});
+                                    terminated = true;
+                                    break;
+                                }
+                                acc += x->lexeme;
+                                // consume inner tokens without emitting them
+                                tokenizer.next();
+                            }
+                            // If not terminated, leave as-is (no header-name token)
+                        } else if (h && h->kind == PPTokenKind::StringLiteral) {
+                            out.push_back(PPToken{PPTokenKind::HeaderName, h->span, h->lexeme});
+                            tokenizer.next();
                         }
-                    } else if (tokens[j].kind == PPTokenKind::StringLiteral) {
-                        transformed.push_back(PPToken{PPTokenKind::HeaderName, tokens[j].span, tokens[j].lexeme});
-                        i = j + 1;
-                        continue;
+                    } else {
+                        // Other directives: consume until newline but do not execute; emit as-is
+                        // TODO: Parse and store directive arguments for later execution
+                        // TODO: Implement execution for object-like macros (#define/#undef)
+                        // TODO: Implement conditional stack handling (#if/#ifdef/#ifndef/#elif/#else/#endif)
+                        while (auto a = tokenizer.peek()) {
+                            if (a->kind == PPTokenKind::Newline) break;
+                            out.push_back(*tokenizer.next());
+                        }
                     }
                 }
+                // We're in a directive context; remain not at line start until newline
+                atLineStart = false;
+                continue;
             }
+            // Non-directive non-whitespace at line start
+            out.push_back(t);
+            atLineStart = false;
+            continue;
         }
-        transformed.push_back(t);
-        i++;
+        // Normal token outside of line start
+        out.push_back(t);
     }
 
-    return PreprocessResult{std::move(transformed), true, std::string()};
+    return PreprocessResult{std::move(out), true, std::string()};
 }
 
 } // namespace wvmcc
