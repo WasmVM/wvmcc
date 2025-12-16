@@ -200,6 +200,14 @@ bool Tokenizer::is_space(char c) {
     return c == ' ' || c == '\t' || c == '\v' || c == '\f';
 }
 
+bool Tokenizer::is_hex(char c) {
+    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+bool Tokenizer::is_oct(char c) {
+    return c >= '0' && c <= '7';
+}
+
 std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
     // Single-pass: tokenize directly over input without a separate preprocess call
     const std::string& inputRef = input;
@@ -276,8 +284,6 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
             // opening '
             if (j < stream.size() && stream[j] == '\'') { ++j; }
             bool escaped = false;
-            auto is_hex = [](char ch){ return (ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F'); };
-            auto is_oct = [](char ch){ return ch>='0'&&ch<='7'; };
             while (true) {
                 if (j >= stream.size()) feeder.ensure_stream(stream, j);
                 if (j >= stream.size()) break;
@@ -398,8 +404,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
                 if (idx + 6 <= stream.size()) {
                     for (size_t k = idx+2; k < idx+6; ++k) {
                         char ch = stream[k];
-                        bool hex = (ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F');
-                        if (!hex) return false;
+                        if (!is_hex(ch)) return false;
                     }
                     consumed = 6; return true;
                 }
@@ -411,8 +416,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
                 if (idx + 10 <= stream.size()) {
                     for (size_t k = idx+2; k < idx+10; ++k) {
                         char ch = stream[k];
-                        bool hex = (ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F');
-                        if (!hex) return false;
+                        if (!is_hex(ch)) return false;
                     }
                     consumed = 10; return true;
                 }

@@ -35,6 +35,8 @@ private:
     static bool is_digit(char c);
     static bool is_nondigit(char c);
     static bool is_space(char c);
+    static bool is_hex(char c);
+    static bool is_oct(char c);
 };
 
 // Internal: SourceBuffer performs inline phase 1–3 preprocessing while feeding chars
