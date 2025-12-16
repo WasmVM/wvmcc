@@ -1,8 +1,10 @@
 #include "Preprocessor.hpp"
+#include "ConstExprParser.hpp"
 
 #include <fstream>
 #include <sstream>
 #include <filesystem>
+#include <cstdlib>
 #include <fstream>
 #include <sstream>
 #include <iostream>
@@ -447,10 +449,15 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
     if (hasErrors) {
         return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
     }
-    
+
+    // Optional debug path: skip macro expansion when PP_DEBUG_NO_EXPAND is set.
+    if (std::getenv("PP_DEBUG_NO_EXPAND")) {
+        return PreprocessResult{out, true, std::string()};
+    }
+
     // Expand macros in the token stream
     std::vector<PPToken> expanded = expandMacros(out);
-    
+
     return PreprocessResult{std::move(expanded), true, std::string()};
 }
 
@@ -585,55 +592,55 @@ bool Preprocessor::handleUndefDirective(Tokenizer& tokenizer) {
 std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& tokens) {
     std::vector<PPToken> result;
     std::unordered_set<std::string> expandedMacros; // Prevent infinite recursion
-    
+
     for (size_t i = 0; i < tokens.size(); ++i) {
         const auto& t = tokens[i];
-        
+
         // Skip expansion for non-identifiers
         if (t.kind != PPTokenKind::Identifier) {
             result.push_back(t);
             continue;
         }
-        
+
         // Skip if already expanded in this invocation
         if (expandedMacros.count(t.lexeme)) {
             result.push_back(t);
             continue;
         }
-        
+
         // Check if this identifier is a defined macro
         auto macro = macroTable.getMacro(t.lexeme);
         if (!macro) {
             result.push_back(t);
             continue;
         }
-        
+
         const Macro* m = *macro;
-        
+
         if (m->isFunction) {
             // Function-like macro: check if next non-whitespace token is '('
             // Note: In C, there must be no space between macro name and (
             // However, we'll be lenient and allow whitespace for now
             size_t j = i + 1;
-            
+
             // Skip whitespace to find '('
             while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) {
                 j++;
             }
-            
+
             // Check if we have '(' - if not, don't expand
-            if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator || 
+            if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator ||
                 tokens[j].lexeme != "(") {
                 result.push_back(t);
                 continue;
             }
-            
+
             // Collect argument tokens between '(' and ')'
             std::vector<std::vector<PPToken>> args;
             size_t argStart = j + 1;
             int parenDepth = 1;
             size_t k = argStart;
-            
+
             while (k < tokens.size() && parenDepth > 0) {
                 if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == "(") {
                     parenDepth++;
@@ -659,14 +666,14 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
                 }
                 k++;
             }
-            
+
             // Check argument count matches parameter count
             if (args.size() != m->params.size() && !m->variadic) {
                 // Mismatch - don't expand
                 result.push_back(t);
                 continue;
             }
-            
+
             // Perform substitution: replace parameters in replacement with arguments
             std::vector<PPToken> expanded;
             for (const auto& repl : m->replacement) {
@@ -687,429 +694,87 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
                     expanded.push_back(repl);
                 }
             }
-            
+
             // Add expanded tokens to result
             for (const auto& exp : expanded) {
                 result.push_back(exp);
             }
-            
+
             // Move past the closing )
             i = k;
             expandedMacros.insert(t.lexeme);
             continue;
         }
-        
+
         // Object-like macro expansion: replace with replacement tokens
         expandedMacros.insert(t.lexeme);
-        
+
         // Insert replacement tokens
         for (const auto& repl : m->replacement) {
             result.push_back(repl);
         }
     }
-    
+
     return result;
 }
 
 std::optional<int64_t> Preprocessor::evaluateConstantExpression(const std::vector<PPToken>& tokens) {
-    // Expand macros first, then evaluate as integer constant expression (C17 6.6)
-    auto expanded = expandMacros(tokens);
-    
-    // Skip leading/trailing whitespace
-    size_t i = 0;
-    while (i < expanded.size() && expanded[i].kind == PPTokenKind::Whitespace) i++;
-    size_t end = expanded.size();
-    while (end > i && expanded[end - 1].kind == PPTokenKind::Whitespace) end--;
-    
-    if (i >= end) {
-        diagnostics.push_back(Diagnostic{
-            .message = "empty constant expression in #if/#elif",
-            .severity = Diagnostic::Severity::Error,
-            .span = std::nullopt
-        });
-        return std::nullopt;
-    }
-
-    // Simple recursive descent parser for integer expressions with operator precedence
-    // Helper lambda to skip whitespace
-    auto skipWhitespace = [&expanded, &end](size_t& pos) {
-        while (pos < end && expanded[pos].kind == PPTokenKind::Whitespace) pos++;
-    };
-    
-    std::function<std::optional<int64_t>(size_t&)> parseExpr;
-    std::function<std::optional<int64_t>(size_t&)> parseTernary;
-    std::function<std::optional<int64_t>(size_t&)> parseLogicalOr;
-    std::function<std::optional<int64_t>(size_t&)> parseLogicalAnd;
-    std::function<std::optional<int64_t>(size_t&)> parseBitwiseOr;
-    std::function<std::optional<int64_t>(size_t&)> parseBitwiseXor;
-    std::function<std::optional<int64_t>(size_t&)> parseBitwiseAnd;
-    std::function<std::optional<int64_t>(size_t&)> parseEquality;
-    std::function<std::optional<int64_t>(size_t&)> parseRelational;
-    std::function<std::optional<int64_t>(size_t&)> parseShift;
-    std::function<std::optional<int64_t>(size_t&)> parseAdditive;
-    std::function<std::optional<int64_t>(size_t&)> parseMultiplicative;
-    std::function<std::optional<int64_t>(size_t&)> parseUnary;
-    std::function<std::optional<int64_t>(size_t&)> parsePrimary;
-
-    parseExpr = [&](size_t& pos) -> std::optional<int64_t> {
-        return parseTernary(pos);
-    };
-
-    parseTernary = [&](size_t& pos) -> std::optional<int64_t> {
-        skipWhitespace(pos);
-        auto val = parseLogicalOr(pos);
-        if (!val) return std::nullopt;
-        
-        skipWhitespace(pos);
-        if (pos < end && expanded[pos].kind == PPTokenKind::Punctuator && expanded[pos].lexeme == "?") {
-            pos++;
-            auto trueVal = parseExpr(pos);
-            if (!trueVal) return std::nullopt;
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != ":") {
-                diagnostics.push_back(Diagnostic{
-                    .message = "expected ':' in ternary operator",
-                    .severity = Diagnostic::Severity::Error,
-                    .span = (pos < end) ? std::optional<SourceSpan>(expanded[pos].span) : std::optional<SourceSpan>()
-                });
-                return std::nullopt;
-            }
-            pos++;
-            auto falseVal = parseTernary(pos);
-            if (!falseVal) return std::nullopt;
-            return *val ? *trueVal : *falseVal;
-        }
-        return val;
-    };
-
-    parseLogicalOr = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseLogicalAnd(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "||") break;
-            pos++;
-            auto right = parseLogicalAnd(pos);
-            if (!right) return std::nullopt;
-            left = *left || *right;
-        }
-        return left;
-    };
-
-    parseLogicalAnd = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseBitwiseOr(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "&&") break;
-            pos++;
-            auto right = parseBitwiseOr(pos);
-            if (!right) return std::nullopt;
-            left = *left && *right;
-        }
-        return left;
-    };
-
-    parseBitwiseOr = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseBitwiseXor(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "|" ||
-                (pos + 1 < expanded.size() && expanded[pos + 1].lexeme == "|")) break;
-            pos++;
-            auto right = parseBitwiseXor(pos);
-            if (!right) return std::nullopt;
-            left = *left | *right;
-        }
-        return left;
-    };
-
-    parseBitwiseXor = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseBitwiseAnd(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "^") break;
-            pos++;
-            auto right = parseBitwiseAnd(pos);
-            if (!right) return std::nullopt;
-            left = *left ^ *right;
-        }
-        return left;
-    };
-
-    parseBitwiseAnd = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseEquality(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "&" ||
-                (pos + 1 < expanded.size() && expanded[pos + 1].lexeme == "&")) break;
-            pos++;
-            auto right = parseEquality(pos);
-            if (!right) return std::nullopt;
-            left = *left & *right;
-        }
-        return left;
-    };
-
-    parseEquality = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseRelational(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
-                (expanded[pos].lexeme != "==" && expanded[pos].lexeme != "!=")) break;
-            std::string op = expanded[pos].lexeme;
-            pos++;
-            auto right = parseRelational(pos);
-            if (!right) return std::nullopt;
-            left = (op == "==") ? (*left == *right) : (*left != *right);
-        }
-        return left;
-    };
-
-    parseRelational = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseShift(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
-                (expanded[pos].lexeme != "<" && expanded[pos].lexeme != ">" && 
-                 expanded[pos].lexeme != "<=" && expanded[pos].lexeme != ">=")) break;
-            std::string op = expanded[pos].lexeme;
-            pos++;
-            auto right = parseShift(pos);
-            if (!right) return std::nullopt;
-            if (op == "<") left = *left < *right;
-            else if (op == ">") left = *left > *right;
-            else if (op == "<=") left = *left <= *right;
-            else if (op == ">=") left = *left >= *right;
-        }
-        return left;
-    };
-
-    parseShift = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseAdditive(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
-                (expanded[pos].lexeme != "<<" && expanded[pos].lexeme != ">>")) break;
-            std::string op = expanded[pos].lexeme;
-            pos++;
-            auto right = parseAdditive(pos);
-            if (!right) return std::nullopt;
-            left = (op == "<<") ? (*left << *right) : (*left >> *right);
-        }
-        return left;
-    };
-
-    parseAdditive = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseMultiplicative(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
-                (expanded[pos].lexeme != "+" && expanded[pos].lexeme != "-")) break;
-            std::string op = expanded[pos].lexeme;
-            pos++;
-            auto right = parseMultiplicative(pos);
-            if (!right) return std::nullopt;
-            left = (op == "+") ? (*left + *right) : (*left - *right);
-        }
-        return left;
-    };
-
-    parseMultiplicative = [&](size_t& pos) -> std::optional<int64_t> {
-        auto left = parseUnary(pos);
-        if (!left) return std::nullopt;
-        while (true) {
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
-                (expanded[pos].lexeme != "*" && expanded[pos].lexeme != "/" && expanded[pos].lexeme != "%")) break;
-            std::string op = expanded[pos].lexeme;
-            pos++;
-            auto right = parseUnary(pos);
-            if (!right) return std::nullopt;
-            if (op == "*") left = *left * *right;
-            else if (op == "/") {
-                if (*right == 0) {
-                    diagnostics.push_back(Diagnostic{
-                        .message = "division by zero in constant expression",
-                        .severity = Diagnostic::Severity::Error,
-                        .span = expanded[pos - 1].span
-                    });
-                    return std::nullopt;
-                }
-                left = *left / *right;
-            } else if (op == "%") {
-                if (*right == 0) {
-                    diagnostics.push_back(Diagnostic{
-                        .message = "modulo by zero in constant expression",
-                        .severity = Diagnostic::Severity::Error,
-                        .span = expanded[pos - 1].span
-                    });
-                    return std::nullopt;
-                }
-                left = *left % *right;
-            }
-        }
-        return left;
-    };
-
-    parseUnary = [&](size_t& pos) -> std::optional<int64_t> {
-        skipWhitespace(pos);
-        if (pos < end && expanded[pos].kind == PPTokenKind::Punctuator && 
-            (expanded[pos].lexeme == "!" || expanded[pos].lexeme == "~" || 
-             expanded[pos].lexeme == "+" || expanded[pos].lexeme == "-")) {
-            std::string op = expanded[pos].lexeme;
-            pos++;
-            auto val = parseUnary(pos);
-            if (!val) return std::nullopt;
-            if (op == "!") return !*val;
-            else if (op == "~") return ~*val;
-            else if (op == "-") return -*val;
-            else return *val;
-        }
-        return parsePrimary(pos);
-    };
-
-    parsePrimary = [&](size_t& pos) -> std::optional<int64_t> {
-        skipWhitespace(pos);
-        if (pos >= end) {
-            diagnostics.push_back(Diagnostic{
-                .message = "unexpected end of constant expression",
-                .severity = Diagnostic::Severity::Error,
-                .span = std::nullopt
-            });
-            return std::nullopt;
-        }
-
-        const auto& tok = expanded[pos];
-
-        // Integer constant
-        if (tok.kind == PPTokenKind::PPNumber) {
-            try {
-                int64_t val = std::stoll(tok.lexeme, nullptr, 0);
-                pos++;
-                return val;
-            } catch (...) {
-                diagnostics.push_back(Diagnostic{
-                    .message = std::string("invalid integer constant: ") + tok.lexeme,
-                    .severity = Diagnostic::Severity::Error,
-                    .span = tok.span
-                });
-                return std::nullopt;
-            }
-        }
-
-        // Character constant
-        if (tok.kind == PPTokenKind::CharConst) {
-            std::string ch = tok.lexeme;
-            if (ch.size() >= 3 && ch.front() == '\'' && ch.back() == '\'') {
-                ch = ch.substr(1, ch.size() - 2);
-                if (ch.size() == 1) {
-                    pos++;
-                    return (int64_t)(unsigned char)ch[0];
-                }
-            }
-            diagnostics.push_back(Diagnostic{
-                .message = std::string("invalid character constant in expression: ") + tok.lexeme,
-                .severity = Diagnostic::Severity::Error,
-                .span = tok.span
-            });
-            return std::nullopt;
-        }
-
-        // Parenthesized expression
-        if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "(") {
-            pos++;
-            auto val = parseExpr(pos);
-            if (!val) return std::nullopt;
-            skipWhitespace(pos);
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != ")") {
-                diagnostics.push_back(Diagnostic{
-                    .message = "expected ')' after expression",
-                    .severity = Diagnostic::Severity::Error,
-                    .span = (pos < end) ? std::optional<SourceSpan>(expanded[pos].span) : std::optional<SourceSpan>()
-                });
-                return std::nullopt;
-            }
-            pos++;
-            return val;
-        }
-
-        // defined(NAME) operator
+    // First, fold defined-operator operands to 0/1 without expanding the operand macro name.
+    std::vector<PPToken> preprocessed;
+    preprocessed.reserve(tokens.size());
+    for (size_t i = 0; i < tokens.size();) {
+        const auto& tok = tokens[i];
         if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "defined") {
-            pos++;
-            skipWhitespace(pos);
-            if (pos >= end) {
-                diagnostics.push_back(Diagnostic{
-                    .message = "expected '(' or identifier after 'defined'",
-                    .severity = Diagnostic::Severity::Error,
-                    .span = tok.span
-                });
-                return std::nullopt;
-            }
+            size_t j = i + 1;
+            while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
+
             bool hasParens = false;
-            if (expanded[pos].kind == PPTokenKind::Punctuator && expanded[pos].lexeme == "(") {
+            if (j < tokens.size() && tokens[j].kind == PPTokenKind::Punctuator && tokens[j].lexeme == "(") {
                 hasParens = true;
-                pos++;
-                skipWhitespace(pos);
+                ++j;
+                while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
             }
-            if (pos >= end || expanded[pos].kind != PPTokenKind::Identifier) {
+
+            if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Identifier) {
                 diagnostics.push_back(Diagnostic{
                     .message = "expected macro name in 'defined'",
                     .severity = Diagnostic::Severity::Error,
-                    .span = (pos < end) ? expanded[pos].span : tok.span
+                    .span = (j < tokens.size()) ? std::optional<SourceSpan>(tokens[j].span) : std::optional<SourceSpan>()
                 });
                 return std::nullopt;
             }
-            std::string macroName = expanded[pos].lexeme;
-            pos++;
+
+            std::string macroName = tokens[j].lexeme;
+            ++j;
+
             if (hasParens) {
-                skipWhitespace(pos);
-                if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != ")") {
+                while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
+                if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator || tokens[j].lexeme != ")") {
                     diagnostics.push_back(Diagnostic{
                         .message = "expected ')' after macro name in 'defined'",
                         .severity = Diagnostic::Severity::Error,
-                        .span = (pos < end) ? std::optional<SourceSpan>(expanded[pos].span) : std::optional<SourceSpan>()
+                        .span = (j < tokens.size()) ? std::optional<SourceSpan>(tokens[j].span) : std::optional<SourceSpan>()
                     });
                     return std::nullopt;
                 }
-                pos++;
+                ++j;
             }
-            return macroTable.getMacro(macroName) ? 1 : 0;
+
+            PPToken folded = tok;
+            folded.kind = PPTokenKind::PPNumber;
+            folded.lexeme = macroTable.isDefined(macroName) ? "1" : "0";
+            preprocessed.push_back(folded);
+            i = j;
+            continue;
         }
 
-        // Undefined identifier → 0 (preprocessor convention)
-        if (tok.kind == PPTokenKind::Identifier) {
-            pos++;
-            return 0;
-        }
-
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("unexpected token in constant expression: ") + tok.lexeme,
-            .severity = Diagnostic::Severity::Error,
-            .span = tok.span
-        });
-        return std::nullopt;
-    };
-
-    size_t pos = i;
-    auto result = parseExpr(pos);
-    if (result && pos < end) {
-        // Extra tokens after expression
-        diagnostics.push_back(Diagnostic{
-            .message = "unexpected tokens after constant expression",
-            .severity = Diagnostic::Severity::Error,
-            .span = expanded[pos].span
-        });
-        return std::nullopt;
+        preprocessed.push_back(tok);
+        ++i;
     }
-    return result;
+
+    auto expanded = expandMacros(preprocessed);
+    ConstExprParser parser(macroTable, diagnostics);
+    return parser.evaluate(expanded);
 }
 
 bool Preprocessor::handleIfDirective(Tokenizer& tokenizer, const std::vector<PPToken>& dirTokens) {
@@ -1125,7 +790,7 @@ bool Preprocessor::handleIfDirective(Tokenizer& tokenizer, const std::vector<PPT
 }
 
 bool Preprocessor::handleIfdefDirective(const std::string& macroName) {
-    bool isDefined = macroTable.getMacro(macroName) != nullptr;
+    bool isDefined = macroTable.isDefined(macroName);
     ConditionalFrame frame;
     frame.seenTrueBranch = isDefined;
     frame.currentlyActive = isDefined;
@@ -1135,7 +800,11 @@ bool Preprocessor::handleIfdefDirective(const std::string& macroName) {
 }
 
 bool Preprocessor::handleIfndefDirective(const std::string& macroName) {
-    bool isDefined = macroTable.getMacro(macroName) != nullptr;
+    if (std::getenv("PP_DEBUG_IFNDEF")) {
+        std::cerr << "[pp] #ifndef " << macroName << " defined=" << (macroTable.isDefined(macroName) ? "1" : "0")
+                  << " macros=" << macroTable.count() << "\n";
+    }
+    bool isDefined = macroTable.isDefined(macroName);
     ConditionalFrame frame;
     frame.seenTrueBranch = !isDefined;
     frame.currentlyActive = !isDefined;

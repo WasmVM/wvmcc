@@ -163,6 +163,11 @@ static int test_ifndef() {
     }
     if (!hasX) {
         std::cerr << "test_ifndef: expected 'x' in output\n";
+        std::cerr << "tokens:";
+        for (const auto& t : res.tokens) {
+            std::cerr << " [" << t.lexeme << "]";
+        }
+        std::cerr << "\n";
         return 2;
     }
     return 0;

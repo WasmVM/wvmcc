@@ -73,8 +73,8 @@ int main(int argc, char** argv) {
         }
         // Print diagnostics collected during preprocessing
         for (const auto& d : pp.getDiagnostics()) {
-            const char* sev = (d.severity == wvmcc::Preprocessor::Diagnostic::Severity::Error) ? "error" :
-                              (d.severity == wvmcc::Preprocessor::Diagnostic::Severity::Warning) ? "warning" : "info";
+            const char* sev = (d.severity == wvmcc::Diagnostic::Severity::Error) ? "error" :
+                              (d.severity == wvmcc::Diagnostic::Severity::Warning) ? "warning" : "info";
             std::cerr << sev << ": " << d.message << "\n";
         }
         // Report token counts by kind, including punctuators

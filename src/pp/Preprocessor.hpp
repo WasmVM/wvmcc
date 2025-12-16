@@ -6,6 +6,7 @@
 #include <deque>
 #include "Tokenizer.hpp"
 #include "MacroTable.hpp"
+#include "Diagnostics.hpp"
 
 namespace wvmcc {
 
@@ -22,13 +23,6 @@ public:
     void addIncludePath(const std::string& path) { includePaths.push_back(path); }
     void clearIncludePaths() { includePaths.clear(); }
     const std::vector<std::string>& getIncludePaths() const { return includePaths; }
-
-    struct Diagnostic {
-        enum class Severity { Info, Warning, Error };
-        std::string message;
-        Severity severity{Severity::Error};
-        std::optional<SourceSpan> span{};
-    };
 
     const std::vector<Diagnostic>& getDiagnostics() const { return diagnostics; }
 

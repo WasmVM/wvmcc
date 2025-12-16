@@ -165,7 +165,7 @@ static int test_include_cyclic() {
         const auto& diags = pp.getDiagnostics();
         bool hasCycleError = false;
         for (const auto& d : diags) {
-            if (d.severity == wvmcc::Preprocessor::Diagnostic::Severity::Error &&
+            if (d.severity == wvmcc::Diagnostic::Severity::Error &&
                 d.message.find("cyclic") != std::string::npos) {
                 hasCycleError = true;
                 break;
