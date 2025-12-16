@@ -47,21 +47,36 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                 // Resolution: try -I search paths for angle form
                 if (auto resolved = resolveInclude(acc, /*isAngle=*/true, currentDir)) {
                     includeQueue.push_back(*resolved);
-                    // Execute: preprocess included file (supports nested includes) and inline its tokens
-                    Preprocessor child;
-                    child.includePaths = includePaths;
-                    auto childRes = child.run(*resolved);
-                    diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
-                    if (childRes.success) {
-                        for (const auto& tk : childRes.tokens) out.push_back(tk);
-                        return true;
-                    } else {
-                        std::cerr << "error: failed to read include file '" << *resolved << "' for <" << acc << ">\n";
+                    // Check for cyclic include
+                    std::string canonicalResolved = std::filesystem::weakly_canonical(
+                        std::filesystem::absolute(*resolved)).string();
+                    if (isInInclusionStack(canonicalResolved)) {
+                        std::cerr << "error: cyclic include detected: " << canonicalResolved << "\n";
                         diagnostics.push_back(Diagnostic{
-                            .message = std::string("failed to read include file '") + *resolved + "' for <" + acc + ">",
+                            .message = std::string("cyclic include detected: ") + canonicalResolved,
                             .severity = Diagnostic::Severity::Error,
                             .span = SourceSpan{begin, end}
                         });
+                        return false;  // Fail on cycle
+                    } else {
+                        // Execute: preprocess included file (supports nested includes) and inline its tokens
+                        Preprocessor child;
+                        child.includePaths = includePaths;
+                        child.inclusionStack = inclusionStack;  // Share the inclusion stack
+                        auto childRes = child.run(*resolved);
+                        diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+                        if (childRes.success) {
+                            for (const auto& tk : childRes.tokens) out.push_back(tk);
+                            return true;
+                        } else {
+                            std::cerr << "error: failed to read include file '" << *resolved << "' for <" << acc << ">\n";
+                            diagnostics.push_back(Diagnostic{
+                                .message = std::string("failed to read include file '") + *resolved + "' for <" + acc + ">",
+                                .severity = Diagnostic::Severity::Error,
+                                .span = SourceSpan{begin, end}
+                            });
+                            return false;  // Propagate child failure
+                        }
                     }
                 } else {
                     std::cerr << "error: include file not found for <" << acc << "> (searched -I paths)\n";
@@ -92,22 +107,39 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
         }
         if (auto resolved = resolveInclude(header, /*isAngle=*/false, currentDir)) {
             includeQueue.push_back(*resolved);
-            // Execute: preprocess included file (supports nested includes) and inline its tokens
-            Preprocessor child;
-            child.includePaths = includePaths;
-            auto childRes = child.run(*resolved);
-            diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
-            if (childRes.success) {
-                for (const auto& tk : childRes.tokens) out.push_back(tk);
-                tokenizer.next();
-                return true;
-            } else {
-                std::cerr << "error: failed to read include file '" << *resolved << "' for \"" << header << "\"\n";
+            // Check for cyclic include
+            std::string canonicalResolved = std::filesystem::weakly_canonical(
+                std::filesystem::absolute(*resolved)).string();
+            if (isInInclusionStack(canonicalResolved)) {
+                std::cerr << "error: cyclic include detected: " << canonicalResolved << "\n";
                 diagnostics.push_back(Diagnostic{
-                    .message = std::string("failed to read include file '") + *resolved + "' for \"" + header + "\"",
+                    .message = std::string("cyclic include detected: ") + canonicalResolved,
                     .severity = Diagnostic::Severity::Error,
                     .span = h->span
                 });
+                tokenizer.next();
+                return false;  // Fail on cycle
+            } else {
+                // Execute: preprocess included file (supports nested includes) and inline its tokens
+                Preprocessor child;
+                child.includePaths = includePaths;
+                child.inclusionStack = inclusionStack;  // Share the inclusion stack
+                auto childRes = child.run(*resolved);
+                diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+                if (childRes.success) {
+                    for (const auto& tk : childRes.tokens) out.push_back(tk);
+                    tokenizer.next();
+                    return true;
+                } else {
+                    std::cerr << "error: failed to read include file '" << *resolved << "' for \"" << header << "\"\n";
+                    diagnostics.push_back(Diagnostic{
+                        .message = std::string("failed to read include file '") + *resolved + "' for \"" + header + "\"",
+                        .severity = Diagnostic::Severity::Error,
+                        .span = h->span
+                    });
+                    tokenizer.next();
+                    return false;  // Propagate child failure
+                }
             }
         } else {
             std::cerr << "error: include file not found for \"" << header << "\" (searched current dir and -I paths)\n";
@@ -155,11 +187,44 @@ std::optional<std::string> Preprocessor::resolveInclude(const std::string& heade
     return std::nullopt;
 }
 
+bool Preprocessor::isInInclusionStack(const std::string& filePath) const {
+    return std::find(inclusionStack.begin(), inclusionStack.end(), filePath) 
+        != inclusionStack.end();
+}
+
+bool Preprocessor::pushInclusion(const std::string& filePath) {
+    if (isInInclusionStack(filePath)) return false;  // Cycle detected
+    inclusionStack.push_back(filePath);
+    return true;
+}
+
+void Preprocessor::popInclusion() {
+    if (!inclusionStack.empty()) inclusionStack.pop_back();
+}
+
 PreprocessResult Preprocessor::run(const std::string& inputPath) {
     std::ifstream ifs(inputPath);
     if (!ifs) {
         return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cannot open input: ") + inputPath};
     }
+    
+    // Canonicalize path and check for cycles
+    namespace fs = std::filesystem;
+    std::string canonicalPath = fs::weakly_canonical(fs::absolute(inputPath)).string();
+    if (!pushInclusion(canonicalPath)) {
+        // Cycle detected
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("cyclic include detected: ") + canonicalPath,
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cyclic include: ") + canonicalPath};
+    }
+    
+    // Cleanup: pop inclusion on exit
+    auto popGuard = [this]() { popInclusion(); };
+    // Simplified: use a lambda immediately after scope, or just call at the end
+    
     const bool endsWithNewline = file_ends_with_newline(inputPath);
     // Derive current file directory for quote-style includes
     std::filesystem::path inputPathFs(inputPath);
@@ -170,6 +235,7 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
     out.reserve(256);
     tokenizer.reset();
     bool atLineStart = true; // start of file is line start
+    bool hasErrors = false;  // Track errors during preprocessing
     while (auto tokOpt = tokenizer.next()) {
         PPToken t = *tokOpt;
         // Basic validation for literals on the fly
@@ -178,6 +244,7 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                 std::ostringstream em;
                 em << "unterminated string literal at line " << t.span.begin.line
                    << ", column " << t.span.begin.column;
+                popInclusion();
                 return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
             }
         } else if (t.kind == PPTokenKind::CharConst) {
@@ -185,6 +252,7 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                 std::ostringstream em;
                 em << "unterminated character constant at line " << t.span.begin.line
                    << ", column " << t.span.begin.column;
+                popInclusion();
                 return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
             }
         }
@@ -217,9 +285,21 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                         // For executed includes, do not emit '#' or 'include' tokens
                         bool executed = handleIncludeDirective(tokenizer, out, currentDir);
                         if (!executed) {
-                            // Not executed: emit '#' and 'include' as part of directive line
-                            out.push_back(t);
-                            out.push_back(*dir);
+                            // Check if include failed due to error
+                            bool hasErrorDiag = false;
+                            for (const auto& d : diagnostics) {
+                                if (d.severity == Diagnostic::Severity::Error) {
+                                    hasErrorDiag = true;
+                                    break;
+                                }
+                            }
+                            if (hasErrorDiag) {
+                                hasErrors = true;
+                            } else {
+                                // Not executed and no error: emit '#' and 'include' as part of directive line
+                                out.push_back(t);
+                                out.push_back(*dir);
+                            }
                         }
                     } else {
                         // Other directives: consume until newline but do not execute; emit as-is
@@ -251,6 +331,13 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
             .severity = Diagnostic::Severity::Warning,
             .span = std::nullopt
         });
+    }
+    
+    popInclusion();
+    
+    // Return failure if any errors were encountered during preprocessing
+    if (hasErrors) {
+        return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
     }
     return PreprocessResult{std::move(out), true, std::string()};
 }

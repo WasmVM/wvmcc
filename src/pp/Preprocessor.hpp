@@ -36,6 +36,8 @@ private:
     std::vector<std::string> includePaths{};
     // Queue of resolved include file paths to be executed in a later phase
     std::deque<std::string> includeQueue{};
+    // Stack of files currently being processed (for cycle detection)
+    std::vector<std::string> inclusionStack{};
 
     // Structured diagnostics collected during preprocessing
     std::vector<Diagnostic> diagnostics{};
@@ -55,6 +57,15 @@ private:
     std::optional<std::string> resolveInclude(const std::string& header,
                                               bool isAngle,
                                               const std::string& currentDir) const;
+
+    // Check if a file is already in the inclusion stack (cycle detection).
+    bool isInInclusionStack(const std::string& filePath) const;
+
+    // Push file onto inclusion stack; returns false if already present (cycle detected).
+    bool pushInclusion(const std::string& filePath);
+
+    // Pop the current file from inclusion stack.
+    void popInclusion();
 };
 
 } // namespace wvmcc

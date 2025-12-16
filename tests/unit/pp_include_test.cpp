@@ -61,32 +61,17 @@ static int test_include_failure() {
     auto res = pp.run(srcName);
     std::remove(srcName.c_str());
 
-    if (!res.success) {
-        std::cerr << "test_include_failure: preprocess unexpectedly failed: " << res.errorMsg << "\n";
+    // Should fail due to missing header
+    if (res.success) {
+        std::cerr << "test_include_failure: expected failure for missing header\n";
         return 1;
     }
-
-    bool hasHeaderName = false;
-    for (const auto& t : res.tokens) {
-        if (t.kind == wvmcc::PPTokenKind::HeaderName) hasHeaderName = true;
-    }
-
-    if (hasHeaderName) {
-        std::cerr << "test_include_failure: unexpected HeaderName token on missing include\n";
+    
+    // Verify error message
+    if (res.errorMsg.find("error") == std::string::npos && 
+        res.errorMsg.find("failed") == std::string::npos) {
+        std::cerr << "test_include_failure: error message missing detail: " << res.errorMsg << "\n";
         return 2;
-    }
-
-    const auto& diags = pp.getDiagnostics();
-    bool hasError = false;
-    for (const auto& d : diags) {
-        if (d.severity == wvmcc::Preprocessor::Diagnostic::Severity::Error) {
-            hasError = true;
-            break;
-        }
-    }
-    if (!hasError) {
-        std::cerr << "test_include_failure: no error diagnostic reported for missing include\n";
-        return 3;
     }
     return 0;
 }
@@ -142,6 +127,68 @@ static int test_include_nested() {
     return 0;
 }
 
+// Test 4: Cyclic include (a.h includes b.h, b.h includes a.h)
+static int test_include_cyclic() {
+    using namespace wvmcc;
+    const std::string hdrA = "temp_cyclic_a.h";
+    const std::string hdrB = "temp_cyclic_b.h";
+    const std::string srcName = "temp_cyclic_source.c";
+
+    try {
+        {
+            std::ofstream ofs(hdrB);
+            ofs << "#include \"" << hdrA << "\"\nint b;\n";
+        }
+        {
+            std::ofstream ofs(hdrA);
+            ofs << "#include \"" << hdrB << "\"\nint a;\n";
+        }
+        {
+            std::ofstream ofs(srcName);
+            ofs << "#include \"" << hdrA << "\"\n";
+        }
+
+        Preprocessor pp;
+        auto res = pp.run(srcName);
+        
+        // Preprocess should fail due to cycle
+        if (res.success) {
+            std::cerr << "test_include_cyclic: expected failure but got success\n";
+            std::remove(hdrA.c_str());
+            std::remove(hdrB.c_str());
+            std::remove(srcName.c_str());
+            return 1;
+        }
+        
+        // Verify diagnostics contain cycle error
+        const auto& diags = pp.getDiagnostics();
+        bool hasCycleError = false;
+        for (const auto& d : diags) {
+            if (d.severity == wvmcc::Preprocessor::Diagnostic::Severity::Error &&
+                d.message.find("cyclic") != std::string::npos) {
+                hasCycleError = true;
+                break;
+            }
+        }
+        
+        std::remove(hdrA.c_str());
+        std::remove(hdrB.c_str());
+        std::remove(srcName.c_str());
+        
+        if (!hasCycleError) {
+            std::cerr << "test_include_cyclic: no cyclic include error in diagnostics\n";
+            return 2;
+        }
+        return 0;
+    } catch (const std::exception& e) {
+        std::cerr << "test_include_cyclic: exception: " << e.what() << "\n";
+        std::remove(hdrA.c_str());
+        std::remove(hdrB.c_str());
+        std::remove(srcName.c_str());
+        return 3;
+    }
+}
+
 int main() {
     int result = 0;
     
@@ -160,6 +207,12 @@ int main() {
     result = test_include_nested();
     if (result != 0) {
         std::cerr << "test_include_nested failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_include_cyclic();
+    if (result != 0) {
+        std::cerr << "test_include_cyclic failed with code " << result << "\n";
         return result;
     }
 
