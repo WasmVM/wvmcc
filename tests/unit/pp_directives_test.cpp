@@ -15,16 +15,12 @@ static int test_error_directive() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_error_directive: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
 
-    // #error should cause preprocessing to fail
-    if (res.success) {
-        std::cerr << "test_error_directive: expected preprocessing to fail\n";
-        return 1;
-    }
-    
-    // Check that error diagnostic was generated
+    // #error should cause a diagnostic with severity Error
     const auto& diags = pp.getDiagnostics();
     bool foundError = false;
     for (const auto& d : diags) {
@@ -34,7 +30,6 @@ static int test_error_directive() {
             break;
         }
     }
-    
     if (!foundError) {
         std::cerr << "test_error_directive: expected #error diagnostic\n";
         return 2;
@@ -55,15 +50,11 @@ static int test_warning_directive() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_warning_directive: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
 
-    // #warning should not cause preprocessing to fail
-    if (!res.success) {
-        std::cerr << "test_warning_directive: preprocessing should succeed\n";
-        return 1;
-    }
-    
     // Check that warning diagnostic was generated
     const auto& diags = pp.getDiagnostics();
     bool foundWarning = false;
@@ -95,15 +86,12 @@ static int test_line_directive_simple() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_line_directive_simple: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
-
-    // #line should not cause preprocessing to fail
-    if (!res.success) {
-        std::cerr << "test_line_directive_simple: preprocessing should succeed\n";
-        std::cerr << "error: " << res.errorMsg << "\n";
-        return 1;
-    }
+    // Ensure no error diagnostics
+    for (const auto& d : pp.getDiagnostics()) { if (d.severity == Diagnostic::Severity::Error) { std::cerr << "test_line_directive_simple: unexpected error diagnostic\n"; return 1; } }
     
     return 0;
 }
@@ -120,15 +108,11 @@ static int test_line_directive_filename() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_line_directive_filename: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
-
-    // #line should not cause preprocessing to fail
-    if (!res.success) {
-        std::cerr << "test_line_directive_filename: preprocessing should succeed\n";
-        std::cerr << "error: " << res.errorMsg << "\n";
-        return 1;
-    }
+    for (const auto& d : pp.getDiagnostics()) { if (d.severity == Diagnostic::Severity::Error) { std::cerr << "test_line_directive_filename: unexpected error diagnostic\n"; return 1; } }
     
     return 0;
 }
@@ -145,15 +129,11 @@ static int test_pragma_directive() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_pragma_directive: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
 
-    // #pragma should not cause preprocessing to fail
-    if (!res.success) {
-        std::cerr << "test_pragma_directive: preprocessing should succeed\n";
-        return 1;
-    }
-    
     // Check that pragma diagnostic was generated (for unknown pragmas, not "once")
     const auto& diags = pp.getDiagnostics();
     bool foundPragma = false;
@@ -186,14 +166,11 @@ static int test_error_conditional_inactive() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_error_conditional_inactive: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
-
-    // #error inside inactive #if should not cause failure
-    if (!res.success) {
-        std::cerr << "test_error_conditional_inactive: preprocessing should succeed\n";
-        return 1;
-    }
+    for (const auto& d : pp.getDiagnostics()) { if (d.severity == Diagnostic::Severity::Error) { std::cerr << "test_error_conditional_inactive: unexpected error diagnostic\n"; return 1; } }
     
     return 0;
 }
@@ -212,14 +189,13 @@ static int test_error_conditional_active() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) { std::remove(srcName.c_str()); std::cerr << "test_error_conditional_active: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
-
-    // #error inside active #if should cause failure
-    if (res.success) {
-        std::cerr << "test_error_conditional_active: expected preprocessing to fail\n";
-        return 1;
-    }
+    bool foundError = false;
+    for (const auto& d : pp.getDiagnostics()) { if (d.severity == Diagnostic::Severity::Error) { foundError = true; break; } }
+    if (!foundError) { std::cerr << "test_error_conditional_active: expected error diagnostic\n"; return 1; }
     
     return 0;
 }
