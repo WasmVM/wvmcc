@@ -311,6 +311,20 @@ void Preprocessor::handleDirective() {
         }
         handleElseDirective();
         return;
+    } else if (dir == "error" || dir == "warning" || dir == "line" || dir == "pragma") {
+        bool active = checkActiveState();
+        std::vector<PPToken> lineTokens;
+        while (true) {
+            auto t = readRawToken();
+            if (!t || t->kind == PPTokenKind::Newline) break;
+            lineTokens.push_back(*t);
+        }
+        if (!active) return; // skip directive execution when inactive
+        if (dir == "error") { handleErrorDirective(lineTokens); }
+        else if (dir == "warning") { handleWarningDirective(lineTokens); }
+        else if (dir == "line") { handleLineDirective(lineTokens); }
+        else if (dir == "pragma") { handlePragmaDirective(lineTokens); }
+        return;
     } else if (dir == "endif") {
         handleEndifDirective();
         return;
