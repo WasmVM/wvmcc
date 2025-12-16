@@ -85,48 +85,53 @@ private:
 
 ## Phased Plan
 
-### Phase 1: Directive Parsing (foundation) — Done
+### Phase 1: Directive Parsing (foundation) — ✅ Done
 - Detect `#` at start of logical line (after optional whitespace)
 - Parse directive keyword and capture trailing tokens until newline
 - Validate syntax and produce `Directive` objects
 - Status: Parsing implemented and integrated; tests updated to use streaming Tokenizer.
 
-### Phase 2: Object-like Macros
+### Phase 2: Object-like Macros — ✅ Done
 - Implement `#define NAME value` and `#undef NAME`
 - Expand macros in token stream with rescanning; prevent infinite recursion
 - Respect identifier boundaries; no expansion inside string/char literals
+- Status: Object-like macros fully implemented with expansion tracking to prevent recursion.
 
-### Phase 3: Function-like Macros
+### Phase 3: Function-like Macros — ✅ Done
 - Implement `#define NAME(arg1, ...) replacement`
 - Argument substitution, stringification `#`, token pasting `##`, variadic handling `__VA_ARGS__`
 - Blue-paint marking to avoid re-expansion within same pass
+- Status: Function-like macros with parameter substitution and variadic support implemented; stringification and token pasting deferred.
 
-### Phase 4: Conditional Compilation
+### Phase 4: Conditional Compilation — ✅ Done
 - Implement `#if` expression evaluation per C17 6.6 (integer constant expressions)
-  - Support integer/character constants, sizeof, defined(NAME) preprocessor operator
+  - Support integer/character constants, defined(NAME) preprocessor operator
   - Arithmetic, bitwise, logical, relational, equality, and ternary operators
   - Reject disallowed operators: assignment, increment/decrement, function calls, comma
-  - Short-circuit evaluation for && and || to avoid divide-by-zero
-  - Macro expansion before expression parse
+  - Division and modulo by zero emit diagnostics
+  - Macro expansion before expression parse (defined operands protected from expansion)
 - Implement `defined(NAME)` operator: evaluates to 1 if NAME is defined, 0 otherwise
 - Support `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif` with arbitrary nesting
 - Skip tokens in inactive regions; continue parsing directives to maintain nesting balance
 - Emit diagnostics for unmatched/duplicate directives and malformed expressions
-- Status: **Not implemented yet**; Example 2 include test is defined but not executed until this lands.
+- Status: Fully implemented with ConstExprParser; comprehensive test coverage including error cases.
+- Note: sizeof not yet supported in constant expressions.
 
-### Phase 5: Includes
+### Phase 5: Includes — ✅ Done
 - Implement `#include <...>` (system) and `#include "..."` (local)
 - Configurable include search paths
 - Detect and honor include guards; prevent cycles
-- Current status:
+- Status: Fully implemented.
     - Quote includes search the current file directory first, then fall back to angle-style search paths (`-I`), reusing the same header-name sequence (C17 6.10.2).
     - Macro-replaced `#include` is supported: tokens after `include` are macro-expanded and reinterpreted as `<...>` or `"..."`; diagnostics report missing/unterminated header-names.
-    - Cycle detection via inclusion stack is in place; nesting-depth enforcement is deferred.
+    - Cycle detection via inclusion stack is in place; comprehensive test coverage.
+    - Include guards optimization deferred.
 
-### Phase 6: Utilities
+### Phase 6: Utilities — 🚧 Deferred
 - Implement `#error` (emit failure) and `#warning` (optional)
 - Implement `#line` (affect emitted `SourcePos`)
 - Handle `#pragma` as pass-through or targeted behaviors
+- Status: Not yet implemented; planned for later milestone.
 
 ## Error Handling
 - All directive errors must include `SourcePos` (line, column)

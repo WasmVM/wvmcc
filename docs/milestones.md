@@ -20,26 +20,42 @@ This document tracks key milestones achieved so far and the upcoming work items 
   - Identifier (per 6.4.2: ASCII letters/underscore start; digits allowed after; supports UCNs \uXXXX and \UXXXXXXXX)
 - Header-name recognition (6.4.7) in `#include` directives
   - Post-tokenization transform combines `<...>` or "..." into a single `HeaderName`
+- **Preprocessor Phase 4: Complete directive processing and macro expansion**
+  - Object-like and function-like macros (`#define`, `#undef`) with recursion guards
+  - Variadic macros with `__VA_ARGS__` support
+  - Macro expansion with argument substitution
+  - Conditional compilation (`#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`)
+  - Constant expression evaluation (ConstExprParser) with full operator support
+  - `defined()` operator with proper semantics (no operand expansion)
+  - `#include` directives with cycle detection and search path resolution
+  - Macro-replaced includes (expand then reparse header-name)
+  - Nested conditional tracking and inactive region skipping
+  - Structured diagnostics with severity levels and source spans
 - Unit tests
-  - Preprocessor basic tests
+  - Preprocessor: basic, macro expansion, conditionals, includes, constant expressions
   - Tokenizer: whitespace, punctuators, strings, chars, pp-number, identifiers
   - Updated to use range-style iteration over streaming tokenizer
-  - Header-name transform tests
+  - 13 test suites all passing
 
 ## In Progress / Near-Term
-- Macro processing (Phase 4)
-  - `#define`, `#undef` (object-like) in M0; function-like macros, stringizing `#`, token pasting `##`, variadics in M1
-  - Macro substitution rules, argument expansion; recursive expansion guards and ordering
-  - See `docs/preprocessor.md` for architecture and phased plan
-- Additional tokenization refinements
-  - PPNumber corner cases and suffix interactions
-  - Identifier UCN range validation (disallow invalid code points per spec)
-  - Header-name edge cases (whitespace variations, malformed terminators)
-- Single-pass Preprocessor executor
-  - Consume streamed tokens; detect directives at line-start; execute `#include`, object-like macros, and basic conditionals inline.
-  - Gradually expand to function-like macros, `#`, `##`, variadics.
-- Diagnostics and error reporting
-  - Clear messages with spans for unterminated literals and invalid sequences
+- **Parser for translation units (next major milestone)**
+  - Type system foundation (scalar types, pointers, arrays, structs, unions, enums)
+  - Expression parser with operator precedence
+  - Statement parser (compound, if, while, for, do-while, switch, return, break, continue)
+  - Declaration parser with declarators
+  - Function definitions
+  - AST construction with source spans
+- Semantic analysis preparation
+  - Symbol tables and scope management
+  - Type checking and conversions
+  - Constant expression evaluation (semantic, not preprocessor)
+  - Lvalue/rvalue analysis
+- Preprocessor enhancements (deferred)
+  - Stringification `#` operator in macro replacements
+  - Token pasting `##` operator
+  - `#error`, `#warning`, `#line`, `#pragma` directives
+  - Predefined macros (`__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`)
+  - Include guard optimization
 
 ## Later Milestones
 - Parser for translation units (C17 subset initially)
@@ -52,12 +68,12 @@ This document tracks key milestones achieved so far and the upcoming work items 
   - Basic optimization passes
   - Validation against Wasm constraints
 
-## Preprocessor Phases Summary
-- Phase 1–3: Implemented (trigraphs, line splicing, comment removal)
-- Phase 4: Directives and macro expansion (see near-term plan)
-- Phase 5–6: Escapes and adjacent string literal concatenation
-- Phase 7: Token conversion to language tokens
-- Phase 8: Linkage
+## Preprocessor Phases Summary (C17 §5.1.1.2)
+- Phase 1–3: ✅ Implemented (trigraphs, line splicing, comment removal, tokenization)
+- Phase 4: ✅ Implemented (directives, macro expansion, conditionals, includes)
+- Phase 5–6: 🚧 Deferred (escape sequence interpretation, string concatenation handled in parser)
+- Phase 7: 📋 Next (token conversion from preprocessing-tokens to language tokens; parser integration)
+- Phase 8: 📋 Future (linkage and translation unit merging)
 
 ## Notes
 - Freestanding target: no libc/WASI; emit Wasm modules directly.
