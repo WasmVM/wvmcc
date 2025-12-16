@@ -134,11 +134,17 @@ private:
     - Cycle detection via inclusion stack is in place; comprehensive test coverage.
     - Include guards optimization deferred.
 
-### Phase 6: Utilities — 🚧 Deferred
+### Phase 6: Utilities — ✅ Done
 - Implement `#error` (emit failure) and `#warning` (optional)
 - Implement `#line` (affect emitted `SourcePos`)
 - Handle `#pragma` as pass-through or targeted behaviors
-- Status: Not yet implemented; planned for later milestone.
+- Status: Fully implemented.
+  - `#error` directive emits error diagnostic and fails preprocessing
+  - `#warning` directive emits warning diagnostic but continues preprocessing
+  - `#line` directive validates syntax (line number and optional filename) and updates currentLine
+  - `#pragma` directive passes through with diagnostic emission
+  - All directives respect conditional compilation state (only execute in active regions)
+  - Comprehensive test coverage for all utility directives
 
 ### Phase 7 (Enhancement): Macro Replacement Operators — ✅ Done
 - Implement stringification `#` operator (C17 §6.10.3.1) — ✅ Complete
@@ -171,8 +177,8 @@ private:
 | Constant expressions | ✅ | C17 §6.6 (except `sizeof`) |
 | `#include` directives | ✅ | Paths, macros, cycles |
 | Predefined macros | ✅ | `__FILE__`, `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__STDC_HOSTED__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__` |
-| `#error`, `#warning` | ❌ | Phase 6, deferred |
-| `#line`, `#pragma` | ❌ | Phase 6, deferred |
+| `#error`, `#warning` | ✅ | Full support with conditional checks |
+| `#line`, `#pragma` | ✅ | Full support with validation |
 
 ## Error Handling
 - All directive errors must include `SourcePos` (line, column)
