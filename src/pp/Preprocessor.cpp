@@ -69,6 +69,8 @@ bool Preprocessor::pushFile(const std::string& path) {
     ctx.path = path;
     ctx.stream = std::move(ssp);
     ctx.tokenizer = std::move(tz);
+    // Initialize tokenizer state for streaming use
+    ctx.tokenizer->reset();
     ctx.dir = std::filesystem::path(path).parent_path().string();
     // Track inclusion stack for streaming mode and define predefined macros
     namespace fs = std::filesystem;
@@ -122,8 +124,13 @@ bool Preprocessor::pushFile(const std::string& path) {
 std::optional<PPToken> Preprocessor::readRawToken() {
     while (!fileStack.empty()) {
         auto &ctx = fileStack.back();
+    
         auto tok = ctx.tokenizer->next();
-        if (!tok) { fileStack.pop_back(); atLineStart = false; continue; }
+        if (!tok) {
+        
+            fileStack.pop_back(); atLineStart = false; continue;
+        }
+        
         return tok;
     }
     return std::nullopt;
@@ -417,8 +424,36 @@ void Preprocessor::handleInclude() {
             if (std::filesystem::exists(cand)) { resolved = cand.string(); break; }
         }
     }
-    if (!resolved.empty()) pushFile(resolved);
+    // Consume the rest of the include directive line from the current file context
     while (true) { auto t = readRawToken(); if (!t || t->kind == PPTokenKind::Newline) break; }
+    // After consuming the directive, push the included file so its tokens
+    // will be read and emitted by the streaming tokenizer.
+    if (!resolved.empty()) {
+        // Canonicalize and check inclusion stack to detect cycles reliably
+        namespace fs = std::filesystem;
+        std::string canonicalResolved = fs::weakly_canonical(fs::absolute(resolved)).string();
+        if (isInInclusionStack(canonicalResolved)) {
+            diagnostics.push_back(Diagnostic{
+                .message = std::string("cyclic include detected: ") + canonicalResolved,
+                .severity = Diagnostic::Severity::Error,
+                .span = std::nullopt
+            });
+        } else {
+            if (!pushFile(resolved)) {
+                diagnostics.push_back(Diagnostic{
+                    .message = std::string("cyclic include detected: ") + resolved,
+                    .severity = Diagnostic::Severity::Error,
+                    .span = std::nullopt
+                });
+            }
+        }
+    } else {
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("include file not found: ") + header,
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+    }
 }
 
 void Preprocessor::handleIfdef(bool wantDefined) {
@@ -1078,11 +1113,6 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
         return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
     }
 
-    // Optional debug path: skip macro expansion when PP_DEBUG_NO_EXPAND is set.
-    if (std::getenv("PP_DEBUG_NO_EXPAND")) {
-        return PreprocessResult{out, true, std::string()};
-    }
-
     // Expand macros in the token stream
     std::vector<PPToken> expanded = expandMacros(out);
 
@@ -1718,10 +1748,6 @@ bool Preprocessor::handleIfdefDirective(const std::string& macroName) {
 }
 
 bool Preprocessor::handleIfndefDirective(const std::string& macroName) {
-    if (std::getenv("PP_DEBUG_IFNDEF")) {
-        std::cerr << "[pp] #ifndef " << macroName << " defined=" << (macroTable.isDefined(macroName) ? "1" : "0")
-                  << " macros=" << macroTable.count() << "\n";
-    }
     bool isDefined = macroTable.isDefined(macroName);
     ConditionalFrame frame;
     frame.seenTrueBranch = !isDefined;

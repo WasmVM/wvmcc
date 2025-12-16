@@ -20,21 +20,26 @@ static int test_include_success() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
-    
+    (void)hdrName; (void)srcName;
+    auto absSrc = std::filesystem::absolute(srcName).string();
+    if (!pp.open(absSrc)) { std::remove(hdrName.c_str()); std::remove(srcName.c_str()); std::cerr << "test_include_success: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+
     bool hasHeaderName = false, hasInt = false, hasX = false, hasSemi = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.kind == wvmcc::PPTokenKind::HeaderName) hasHeaderName = true;
         if (t.lexeme == "int") hasInt = true;
         if (t.lexeme == "x") hasX = true;
         if (t.kind == wvmcc::PPTokenKind::Punctuator && t.lexeme == ";") hasSemi = true;
     }
 
+    (void)pp;
     std::remove(hdrName.c_str());
     std::remove(srcName.c_str());
 
-    if (!res.success) {
-        std::cerr << "test_include_success: preprocess failed: " << res.errorMsg << "\n";
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
+        std::cerr << "test_include_success: unexpected error diagnostics\n";
         return 1;
     }
     if (hasHeaderName) {
@@ -43,6 +48,9 @@ static int test_include_success() {
     }
     if (!(hasInt && hasX && hasSemi)) {
         std::cerr << "test_include_success: missing expected tokens (int/x/;)\n";
+        std::cerr << "tokens:";
+        for (const auto &t : tokens) std::cerr << " [" << t.lexeme << "]";
+        std::cerr << "\n";
         return 3;
     }
     return 0;
@@ -59,20 +67,18 @@ static int test_include_failure() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(std::filesystem::absolute(srcName).string())) { std::remove(srcName.c_str()); std::cerr << "test_include_failure: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
     std::remove(srcName.c_str());
 
-    // Should fail due to missing header
-    if (res.success) {
-        std::cerr << "test_include_failure: expected failure for missing header\n";
-        return 1;
+    bool hasError = false;
+    for (const auto& d : pp.getDiagnostics()) {
+        if (d.severity == Diagnostic::Severity::Error) { hasError = true; break; }
     }
-    
-    // Verify error message
-    if (res.errorMsg.find("error") == std::string::npos && 
-        res.errorMsg.find("failed") == std::string::npos) {
-        std::cerr << "test_include_failure: error message missing detail: " << res.errorMsg << "\n";
-        return 2;
+    if (!hasError) {
+        std::cerr << "test_include_failure: expected failure for missing header (no error diagnostic)\n";
+        return 1;
     }
     return 0;
 }
@@ -98,12 +104,14 @@ static int test_include_nested() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
-    
+    if (!pp.open(std::filesystem::absolute(srcName).string())) { std::remove(hdrB.c_str()); std::remove(hdrA.c_str()); std::remove(srcName.c_str()); std::cerr << "test_include_nested: failed to open input\n"; return 1; }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+
     bool hasY = false, hasX = false;
     int yPos = -1, xPos = -1;
     size_t idx = 0;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "y") { hasY = true; yPos = idx; }
         if (t.lexeme == "x") { hasX = true; xPos = idx; }
         ++idx;
@@ -113,10 +121,7 @@ static int test_include_nested() {
     std::remove(hdrA.c_str());
     std::remove(srcName.c_str());
 
-    if (!res.success) {
-        std::cerr << "test_include_nested: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
+    for (const auto& d : pp.getDiagnostics()) { if (d.severity == Diagnostic::Severity::Error) { std::cerr << "test_include_nested: unexpected error diagnostic\n"; return 1; } }
     if (!(hasX && hasY)) {
         std::cerr << "test_include_nested: missing expected identifiers (x and y)\n";
         return 2;
@@ -150,17 +155,10 @@ static int test_include_cyclic() {
         }
 
         Preprocessor pp;
-        auto res = pp.run(srcName);
-        
-        // Preprocess should fail due to cycle
-        if (res.success) {
-            std::cerr << "test_include_cyclic: expected failure but got success\n";
-            std::remove(hdrA.c_str());
-            std::remove(hdrB.c_str());
-            std::remove(srcName.c_str());
-            return 1;
-        }
-        
+        if (!pp.open(std::filesystem::absolute(srcName).string())) { std::remove(hdrA.c_str()); std::remove(hdrB.c_str()); std::remove(srcName.c_str()); std::cerr << "test_include_cyclic: failed to open input\n"; return 1; }
+        std::vector<PPToken> tokens;
+        while (auto t = pp.next()) tokens.push_back(*t);
+
         // Verify diagnostics contain cycle error
         const auto& diags = pp.getDiagnostics();
         bool hasCycleError = false;
