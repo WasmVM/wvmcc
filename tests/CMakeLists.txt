@@ -99,3 +99,11 @@ if(EXISTS ${PP_CONDITIONAL_TEST})
     target_include_directories(wvmcc-pp-conditional-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
     add_test(NAME pp-conditional COMMAND wvmcc-pp-conditional-test)
 endif()
+
+# Constant expression parser tests
+set(PP_CONSTEXPR_TEST ${TEST_ROOT}/unit/pp_constexpr_test.cpp)
+if(EXISTS ${PP_CONSTEXPR_TEST})
+    add_executable(wvmcc-pp-constexpr-test ${PP_CONSTEXPR_TEST} ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-constexpr-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-constexpr COMMAND wvmcc-pp-constexpr-test)
+endif()
