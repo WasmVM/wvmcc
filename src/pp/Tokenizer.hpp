@@ -54,6 +54,7 @@ private:
 class Tokenizer {
 public:
     explicit Tokenizer(const std::string& input);
+        explicit Tokenizer(std::istream& in);
     
     // Streaming API: read next token; returns std::nullopt at EOF
     std::optional<PPToken> next();

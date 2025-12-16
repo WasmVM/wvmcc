@@ -220,6 +220,12 @@ bool Tokenizer::is_oct(char c) {
 
 Tokenizer::Tokenizer(const std::string& input) : input(input), feeder(input) {}
 
+Tokenizer::Tokenizer(std::istream& in) : input(stream), feeder(stream) {
+    std::ostringstream oss;
+    oss << in.rdbuf();
+    stream = oss.str();
+}
+
 void Tokenizer::emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end) {
     tokens.push_back(PPToken{kind, SourceSpan{begin, end}, lexeme});
 }
