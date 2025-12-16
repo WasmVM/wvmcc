@@ -323,7 +323,64 @@ static int test_token_pasting_numbers() {
     return 0;
 }
 
-// Test 10: Undefine macro
+// Test 11: Predefined macros
+static int test_predefined_macros() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_predefined.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "const char* file = __FILE__;\n";
+        ofs << "const char* date = __DATE__;\n";
+        ofs << "const char* time = __TIME__;\n";
+        ofs << "int stdc = __STDC__;\n";
+        ofs << "int version = __STDC_VERSION__;\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_predefined_macros: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // Verify all predefined macros are present
+    bool foundFile = false, foundDate = false, foundTime = false;
+    bool foundStdc = false, foundVersion = false;
+    
+    for (const auto& t : res.tokens) {
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme.find("temp_macro_predefined.c") != std::string::npos) {
+            foundFile = true;
+        }
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme.find(" 20") != std::string::npos) {
+            // DATE contains year like 2025
+            foundDate = true;
+        }
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme.find(":") != std::string::npos) {
+            // TIME contains colons HH:MM:SS
+            foundTime = true;
+        }
+        if (t.kind == wvmcc::PPTokenKind::PPNumber && t.lexeme == "1") {
+            foundStdc = true;
+        }
+        if (t.kind == wvmcc::PPTokenKind::PPNumber && t.lexeme == "201710L") {
+            foundVersion = true;
+        }
+    }
+    
+    if (!foundFile || !foundDate || !foundTime || !foundStdc || !foundVersion) {
+        std::cerr << "test_predefined_macros: missing predefined macros\n";
+        std::cerr << "found: file=" << foundFile << " date=" << foundDate << " time=" << foundTime
+                  << " stdc=" << foundStdc << " version=" << foundVersion << "\n";
+        return 2;
+    }
+    
+    return 0;
+}
+
+// Test 12: Undefine macro
 static int test_undef_macro() {
     using namespace wvmcc;
     const std::string srcName = "temp_macro_undef.c";
@@ -421,7 +478,7 @@ static int test_variadic_multiple() {
     return 0;
 }
 
-// Test 7: Object-like macro with complex replacement
+// Test 13: Object-like macro with complex replacement
 static int test_macro_complex_replacement() {
     using namespace wvmcc;
     const std::string srcName = "temp_macro_complex.c";
@@ -444,7 +501,7 @@ static int test_macro_complex_replacement() {
     return 0;
 }
 
-// Test 8: Macro redefinition (should succeed - replaces previous definition)
+// Test 14: Macro redefinition (should succeed - replaces previous definition)
 static int test_macro_redefinition() {
     using namespace wvmcc;
     const std::string srcName = "temp_macro_redef.c";
@@ -468,7 +525,7 @@ static int test_macro_redefinition() {
     return 0;
 }
 
-// Test 9: Macro with leading/trailing whitespace in replacement
+// Test 15: Macro with leading/trailing whitespace in replacement
 static int test_macro_whitespace() {
     using namespace wvmcc;
     const std::string srcName = "temp_macro_ws.c";
@@ -545,6 +602,12 @@ int main() {
     result = test_token_pasting_numbers();
     if (result != 0) {
         std::cerr << "test_token_pasting_numbers failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_predefined_macros();
+    if (result != 0) {
+        std::cerr << "test_predefined_macros failed with code " << result << "\n";
         return result;
     }
 

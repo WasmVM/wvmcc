@@ -2,6 +2,7 @@
 #include "ConstExprParser.hpp"
 
 #include <cstdlib>
+#include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -238,6 +239,131 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
             .span = std::nullopt
         });
         return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cyclic include: ") + canonicalPath};
+    }
+    
+    // Initialize predefined macros for this file (only once per run)
+    if (inclusionStack.size() == 1) {
+        // __FILE__ macro - current source file
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::StringLiteral,
+                .span = {},
+                .lexeme = "\"" + canonicalPath + "\"",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__FILE__", replacement);
+        }
+        
+        // __LINE__ macro - current line (will be handled specially during expansion)
+        // For now, we'll leave __LINE__ to be a placeholder
+        // In practice, __LINE__ needs special handling during expansion
+        
+        // __DATE__ macro - compilation date
+        {
+            auto now = std::time(nullptr);
+            auto tm = *std::localtime(&now);
+            char dateStr[32];
+            std::strftime(dateStr, sizeof(dateStr), "%b %d %Y", &tm);
+            
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::StringLiteral,
+                .span = {},
+                .lexeme = "\"" + std::string(dateStr) + "\"",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__DATE__", replacement);
+        }
+        
+        // __TIME__ macro - compilation time
+        {
+            auto now = std::time(nullptr);
+            auto tm = *std::localtime(&now);
+            char timeStr[32];
+            std::strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &tm);
+            
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::StringLiteral,
+                .span = {},
+                .lexeme = "\"" + std::string(timeStr) + "\"",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__TIME__", replacement);
+        }
+        
+        // __STDC__ macro - ISO C compliance (set to 1)
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = {},
+                .lexeme = "1",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__STDC__", replacement);
+        }
+        
+        // __STDC_VERSION__ macro - C standard version (C17 = 201710L)
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = {},
+                .lexeme = "201710L",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__STDC_VERSION__", replacement);
+        }
+        
+        // __STDC_HOSTED__ macro - freestanding implementation (0 = freestanding, 1 = hosted)
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = {},
+                .lexeme = "0",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__STDC_HOSTED__", replacement);
+        }
+        
+        // __STDC_NO_ATOMICS__ macro - no atomic support
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = {},
+                .lexeme = "1",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__STDC_NO_ATOMICS__", replacement);
+        }
+        
+        // __STDC_NO_COMPLEX__ macro - no complex number support
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = {},
+                .lexeme = "1",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__STDC_NO_COMPLEX__", replacement);
+        }
+        
+        // __STDC_NO_THREADS__ macro - no threading support
+        {
+            std::vector<PPToken> replacement;
+            replacement.push_back(PPToken{
+                .kind = PPTokenKind::PPNumber,
+                .span = {},
+                .lexeme = "1",
+                .paintedMacros = {}
+            });
+            macroTable.defineObjectMacro("__STDC_NO_THREADS__", replacement);
+        }
     }
     
     // Cleanup: pop inclusion on exit
