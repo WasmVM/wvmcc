@@ -69,6 +69,42 @@ public:
         return streamPos >= stream.size();
     }
 
+    // Range-style iteration support (consuming iterator)
+    class Iterator {
+    public:
+        using iterator_category = std::input_iterator_tag;
+        using value_type = PPToken;
+        using difference_type = std::ptrdiff_t;
+        using pointer = const PPToken*;
+        using reference = const PPToken&;
+
+        Iterator() = default;
+        explicit Iterator(Tokenizer* tz) : tz(tz) {
+            advance();
+        }
+
+        reference operator*() const { return *current; }
+        pointer operator->() const { return &(*current); }
+
+        Iterator& operator++() { advance(); return *this; }
+        Iterator operator++(int) { Iterator tmp = *this; advance(); return tmp; }
+
+        bool operator==(const Iterator& other) const {
+            if (eof && other.eof) return true;
+            return tz == other.tz && eof == other.eof;
+        }
+        bool operator!=(const Iterator& other) const { return !(*this == other); }
+
+    private:
+        void advance();
+        Tokenizer* tz{nullptr};
+        bool eof{true};
+        std::optional<PPToken> current;
+    };
+
+    Iterator begin();
+    Iterator end();
+
 private:
     static bool is_digit(char c);
     static bool is_nondigit(char c);

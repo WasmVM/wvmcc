@@ -306,6 +306,22 @@ std::optional<PPToken> Tokenizer::peek() {
     return lookahead;
 }
 
+void Tokenizer::Iterator::advance() {
+    if (!tz) { eof = true; current.reset(); return; }
+    auto nextTok = tz->next();
+    if (!nextTok.has_value()) { eof = true; current.reset(); }
+    else { eof = false; current = nextTok; }
+}
+
+Tokenizer::Iterator Tokenizer::begin() {
+    reset();
+    return Iterator(this);
+}
+
+Tokenizer::Iterator Tokenizer::end() {
+    return Iterator();
+}
+
 bool Tokenizer::readNextToken(PPToken& out) {
     feeder.ensure_stream(stream, streamPos);
     if (streamPos >= stream.size()) return false;
