@@ -35,6 +35,15 @@ private:
     std::optional<int64_t> parseMultiplicative(const std::vector<PPToken>& tokens, size_t end, size_t& pos);
     std::optional<int64_t> parseUnary(const std::vector<PPToken>& tokens, size_t end, size_t& pos);
     std::optional<int64_t> parsePrimary(const std::vector<PPToken>& tokens, size_t end, size_t& pos);
+    
+    // Helper methods for parsePrimary
+    std::optional<int64_t> tryParsePPNumber(const PPToken& tok, size_t& pos);
+    std::optional<int64_t> tryParseCharConst(const PPToken& tok, size_t& pos);
+    std::optional<int64_t> tryParseParenExpr(const std::vector<PPToken>& tokens, size_t end, size_t& pos);
+    std::optional<int64_t> tryParseDefined(const std::vector<PPToken>& tokens, size_t end, size_t& pos);
+    bool parseDefinedMacroName(const std::vector<PPToken>& tokens, size_t end, size_t& pos,
+                               const SourceSpan& tokSpan, std::string& macroName);
+    bool checkDefinedCloseParen(const std::vector<PPToken>& tokens, size_t end, size_t& pos);
 
     MacroTable& macroTable;
     std::vector<Diagnostic>& diagnostics;

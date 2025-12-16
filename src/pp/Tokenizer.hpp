@@ -82,6 +82,17 @@ private:
     void fill_buffer();
     void ensure_input(std::size_t upto);
     void account_consumed(char ch);
+    
+    // Helper methods for fill_buffer complexity reduction
+    bool handlePendingSpace();
+    bool handleCarriageReturn();
+    bool processNormalState(char c);
+    bool tryProcessComment(char c);
+    bool tryProcessLineSplicing(char c);
+    bool processStringState(char c);
+    bool processCharState(char c);
+    bool processBlockCommentState(char c);
+    bool processLineCommentState(char c);
 };
 
 class Tokenizer {
@@ -164,6 +175,29 @@ private:
     bool tryReadIdentifier(PPToken& out, char c, const SourcePos& begin);
     bool tryReadPunctuator(PPToken& out, const SourcePos& begin);
     void readOtherToken(PPToken& out, const SourcePos& begin);
+    
+    // Helper methods for tryReadCharConstant - escape sequence processing
+    bool processEscapeHex(std::string& lex, bool& escaped);
+    bool processEscapeUnicode(std::string& lex, bool& escaped, int count);
+    bool processEscapeOctal(std::string& lex, bool& escaped);
+    bool processEscapedChar(char d, std::string& lex, bool& escaped);
+    
+    // Helper methods for tryReadPPNumber
+    bool tryConsumeInitialDot(std::string& lex);
+    bool tryConsumeInitialDigit(std::string& lex);
+    bool processExponentNotation(char d, std::string& lex);
+    void consumeDigitsAfterExponent(std::string& lex);
+    
+    // Helper methods for tryReadIdentifier
+    bool canStartIdentifier(char c);
+    bool tryConsumeIdentifierStart(char c, std::string& lex);
+    bool consumeUCN(std::string& lex);
+    void consumeIdentifierContinuation(std::string& lex);
+    
+    // Helper methods for tryReadStringLiteral
+    void consumeStringPrefix(std::string& lex, size_t prefixLen);
+    void consumeOpeningQuote(std::string& lex);
+    void processStringContent(std::string& lex);
 };
 
 } // namespace wvmcc

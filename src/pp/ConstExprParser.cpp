@@ -265,6 +265,134 @@ std::optional<int64_t> ConstExprParser::parseUnary(const std::vector<PPToken>& t
     return parsePrimary(tokens, end, pos);
 }
 
+std::optional<int64_t> ConstExprParser::tryParsePPNumber(const PPToken& tok, size_t& pos) {
+    if (tok.kind != PPTokenKind::PPNumber) return std::nullopt;
+    
+    try {
+        int64_t val = std::stoll(tok.lexeme, nullptr, 0);
+        pos++;
+        return val;
+    } catch (...) {
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("invalid integer constant: ") + tok.lexeme,
+            .severity = Diagnostic::Severity::Error,
+            .span = tok.span
+        });
+        return std::nullopt;
+    }
+}
+
+std::optional<int64_t> ConstExprParser::tryParseCharConst(const PPToken& tok, size_t& pos) {
+    if (tok.kind != PPTokenKind::CharConst) return std::nullopt;
+    
+    std::string ch = tok.lexeme;
+    if (ch.size() >= 3 && ch.front() == '\'' && ch.back() == '\'') {
+        ch = ch.substr(1, ch.size() - 2);
+        if (ch.size() == 1) {
+            pos++;
+            return static_cast<int64_t>(static_cast<unsigned char>(ch[0]));
+        }
+    }
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("invalid character constant in expression: ") + tok.lexeme,
+        .severity = Diagnostic::Severity::Error,
+        .span = tok.span
+    });
+    return std::nullopt;
+}
+
+std::optional<int64_t> ConstExprParser::tryParseParenExpr(const std::vector<PPToken>& tokens,
+                                                          size_t end, size_t& pos) {
+    if (pos >= end || tokens[pos].kind != PPTokenKind::Punctuator || tokens[pos].lexeme != "(") {
+        return std::nullopt;
+    }
+    
+    pos++;
+    auto val = parseExpr(tokens, end, pos);
+    if (!val) return std::nullopt;
+    
+    skipWhitespace(tokens, end, pos);
+    if (pos >= end || tokens[pos].kind != PPTokenKind::Punctuator || tokens[pos].lexeme != ")") {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected ')' after expression",
+            .severity = Diagnostic::Severity::Error,
+            .span = (pos < end) ? std::optional<SourceSpan>(tokens[pos].span) : std::optional<SourceSpan>()
+        });
+        return std::nullopt;
+    }
+    pos++;
+    return val;
+}
+
+bool ConstExprParser::parseDefinedMacroName(const std::vector<PPToken>& tokens, size_t end,
+                                            size_t& pos, const SourceSpan& tokSpan,
+                                            std::string& macroName) {
+    if (pos >= end || tokens[pos].kind != PPTokenKind::Identifier) {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected macro name in 'defined'",
+            .severity = Diagnostic::Severity::Error,
+            .span = (pos < end) ? tokens[pos].span : tokSpan
+        });
+        return false;
+    }
+    macroName = tokens[pos].lexeme;
+    pos++;
+    return true;
+}
+
+bool ConstExprParser::checkDefinedCloseParen(const std::vector<PPToken>& tokens,
+                                              size_t end, size_t& pos) {
+    skipWhitespace(tokens, end, pos);
+    if (pos >= end || tokens[pos].kind != PPTokenKind::Punctuator || tokens[pos].lexeme != ")") {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected ')' after macro name in 'defined'",
+            .severity = Diagnostic::Severity::Error,
+            .span = (pos < end) ? std::optional<SourceSpan>(tokens[pos].span) : std::optional<SourceSpan>()
+        });
+        return false;
+    }
+    pos++;
+    return true;
+}
+
+std::optional<int64_t> ConstExprParser::tryParseDefined(const std::vector<PPToken>& tokens,
+                                                        size_t end, size_t& pos) {
+    if (pos >= end || tokens[pos].kind != PPTokenKind::Identifier || tokens[pos].lexeme != "defined") {
+        return std::nullopt;
+    }
+    
+    const auto& tok = tokens[pos];
+    pos++;
+    skipWhitespace(tokens, end, pos);
+    
+    if (pos >= end) {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected '(' or identifier after 'defined'",
+            .severity = Diagnostic::Severity::Error,
+            .span = tok.span
+        });
+        return std::nullopt;
+    }
+    
+    bool hasParens = false;
+    if (tokens[pos].kind == PPTokenKind::Punctuator && tokens[pos].lexeme == "(") {
+        hasParens = true;
+        pos++;
+        skipWhitespace(tokens, end, pos);
+    }
+    
+    std::string macroName;
+    if (!parseDefinedMacroName(tokens, end, pos, tok.span, macroName)) {
+        return std::nullopt;
+    }
+    
+    if (hasParens && !checkDefinedCloseParen(tokens, end, pos)) {
+        return std::nullopt;
+    }
+    
+    return macroTable.getMacro(macroName) ? 1 : 0;
+}
+
 std::optional<int64_t> ConstExprParser::parsePrimary(const std::vector<PPToken>& tokens, size_t end, size_t& pos) {
     skipWhitespace(tokens, end, pos);
     if (pos >= end) {
@@ -278,97 +406,11 @@ std::optional<int64_t> ConstExprParser::parsePrimary(const std::vector<PPToken>&
 
     const auto& tok = tokens[pos];
 
-    if (tok.kind == PPTokenKind::PPNumber) {
-        try {
-            int64_t val = std::stoll(tok.lexeme, nullptr, 0);
-            pos++;
-            return val;
-        } catch (...) {
-            diagnostics.push_back(Diagnostic{
-                .message = std::string("invalid integer constant: ") + tok.lexeme,
-                .severity = Diagnostic::Severity::Error,
-                .span = tok.span
-            });
-            return std::nullopt;
-        }
-    }
-
-    if (tok.kind == PPTokenKind::CharConst) {
-        std::string ch = tok.lexeme;
-        if (ch.size() >= 3 && ch.front() == '\'' && ch.back() == '\'') {
-            ch = ch.substr(1, ch.size() - 2);
-            if (ch.size() == 1) {
-                pos++;
-                return static_cast<int64_t>(static_cast<unsigned char>(ch[0]));
-            }
-        }
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("invalid character constant in expression: ") + tok.lexeme,
-            .severity = Diagnostic::Severity::Error,
-            .span = tok.span
-        });
-        return std::nullopt;
-    }
-
-    if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "(") {
-        pos++;
-        auto val = parseExpr(tokens, end, pos);
-        if (!val) return std::nullopt;
-        skipWhitespace(tokens, end, pos);
-        if (pos >= end || tokens[pos].kind != PPTokenKind::Punctuator || tokens[pos].lexeme != ")") {
-            diagnostics.push_back(Diagnostic{
-                .message = "expected ')' after expression",
-                .severity = Diagnostic::Severity::Error,
-                .span = (pos < end) ? std::optional<SourceSpan>(tokens[pos].span) : std::optional<SourceSpan>()
-            });
-            return std::nullopt;
-        }
-        pos++;
-        return val;
-    }
-
-    if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "defined") {
-        pos++;
-        skipWhitespace(tokens, end, pos);
-        if (pos >= end) {
-            diagnostics.push_back(Diagnostic{
-                .message = "expected '(' or identifier after 'defined'",
-                .severity = Diagnostic::Severity::Error,
-                .span = tok.span
-            });
-            return std::nullopt;
-        }
-        bool hasParens = false;
-        if (tokens[pos].kind == PPTokenKind::Punctuator && tokens[pos].lexeme == "(") {
-            hasParens = true;
-            pos++;
-            skipWhitespace(tokens, end, pos);
-        }
-        if (pos >= end || tokens[pos].kind != PPTokenKind::Identifier) {
-            diagnostics.push_back(Diagnostic{
-                .message = "expected macro name in 'defined'",
-                .severity = Diagnostic::Severity::Error,
-                .span = (pos < end) ? tokens[pos].span : tok.span
-            });
-            return std::nullopt;
-        }
-        std::string macroName = tokens[pos].lexeme;
-        pos++;
-        if (hasParens) {
-            skipWhitespace(tokens, end, pos);
-            if (pos >= end || tokens[pos].kind != PPTokenKind::Punctuator || tokens[pos].lexeme != ")") {
-                diagnostics.push_back(Diagnostic{
-                    .message = "expected ')' after macro name in 'defined'",
-                    .severity = Diagnostic::Severity::Error,
-                    .span = (pos < end) ? std::optional<SourceSpan>(tokens[pos].span) : std::optional<SourceSpan>()
-                });
-                return std::nullopt;
-            }
-            pos++;
-        }
-        return macroTable.getMacro(macroName) ? 1 : 0;
-    }
-
+    if (auto val = tryParsePPNumber(tok, pos)) return val;
+    if (auto val = tryParseCharConst(tok, pos)) return val;
+    if (auto val = tryParseParenExpr(tokens, end, pos)) return val;
+    if (auto val = tryParseDefined(tokens, end, pos)) return val;
+    
     if (tok.kind == PPTokenKind::Identifier) {
         pos++;
         return 0;

@@ -2,67 +2,26 @@
 #include <cstring>
 #include <istream>
 #include <deque>
+#include <regex>
 
 namespace wvmcc {
 
-// Helper to check multi-character punctuator sequences
-static bool matches_at(const std::string& s, size_t i, const char* pattern) {
-    size_t plen = std::strlen(pattern);
-    if (i + plen > s.size()) return false;
-    return s.substr(i, plen) == pattern;
-}
-
+// Regex-based punctuator matcher - CCN 3, matches C punctuators greedily by length
 static size_t match_punct(const std::string& s, size_t i) {
     if (i >= s.size()) return 0;
     
-    const char c = s[i];
+    // Pattern ordered by length (4→3→2→1 char) for greedy matching
+    static const std::regex punct_re(
+        R"(^(%:%:|[<>]{2}=|\.\.\.|%[:>=]|<[:<%<=]|>[>=]|:>|##|->|-[-=]|\+[\+=]|&[&=]|\|[\|=]|[!=\*/^]=|[%<>:#\-+&|*/^!=.\[\](){}~,;?]))"
+    );
     
-    // Check 4-character operators first
-    if (matches_at(s, i, "%:%:")) return 4;
+    std::smatch m;
+    std::string tail_str(s.data() + i, s.size() - i);
     
-    // Check 3-character operators
-    if (matches_at(s, i, "<<=")) return 3;
-    if (matches_at(s, i, ">>=")) return 3;
-    if (matches_at(s, i, "...")) return 3;
-    
-    // Check 2-character operators
-    if (matches_at(s, i, "%:")) return 2;
-    if (matches_at(s, i, "%>")) return 2;
-    if (matches_at(s, i, "%=")) return 2;
-    if (matches_at(s, i, "<:")) return 2;
-    if (matches_at(s, i, "<%")) return 2;
-    if (matches_at(s, i, "<<")) return 2;
-    if (matches_at(s, i, "<=")) return 2;
-    if (matches_at(s, i, ">>")) return 2;
-    if (matches_at(s, i, ">=")) return 2;
-    if (matches_at(s, i, ":>")) return 2;
-    if (matches_at(s, i, "##")) return 2;
-    if (matches_at(s, i, "->")) return 2;
-    if (matches_at(s, i, "--")) return 2;
-    if (matches_at(s, i, "-=")) return 2;
-    if (matches_at(s, i, "++")) return 2;
-    if (matches_at(s, i, "+=")) return 2;
-    if (matches_at(s, i, "&&")) return 2;
-    if (matches_at(s, i, "&=")) return 2;
-    if (matches_at(s, i, "||")) return 2;
-    if (matches_at(s, i, "|=")) return 2;
-    if (matches_at(s, i, "*=")) return 2;
-    if (matches_at(s, i, "/=")) return 2;
-    if (matches_at(s, i, "^=")) return 2;
-    if (matches_at(s, i, "!=")) return 2;
-    if (matches_at(s, i, "==")) return 2;
-    
-    // Check 1-character punctuators
-    switch (c) {
-        case '%': case '<': case '>': case ':': case '#':
-        case '-': case '+': case '&': case '|': case '*':
-        case '/': case '^': case '!': case '=': case '.':
-        case '[': case ']': case '(': case ')': case '{': case '}':
-        case ',': case ';': case '~': case '?':
-            return 1;
-        default:
-            return 0;
+    if (std::regex_search(tail_str, m, punct_re)) {
+        return m[0].length();
     }
+    return 0;
 }
 
 SourceBuffer::SourceBuffer(std::istream& in) : inStream(in) {
@@ -86,88 +45,186 @@ char SourceBuffer::trigraph_at(std::size_t idx) const {
     return 0;
 }
 
+bool SourceBuffer::handlePendingSpace() {
+    if (!pendingSpace) return false;
+    if (!lastOutputWasWhitespace) {
+        charBuf.push_back(' ');
+        lastOutputWasWhitespace = true;
+    }
+    pendingSpace = false;
+    return true;
+}
+
+bool SourceBuffer::handleCarriageReturn() {
+    char c = inputAccum[rawIdx];
+    if (c != '\r') return false;
+    
+    if (rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '\n') {
+        rawIdx += 2;
+    } else {
+        ++rawIdx;
+    }
+    charBuf.push_back('\n');
+    lastOutputWasWhitespace = true;
+    return true;
+}
+
+bool SourceBuffer::tryProcessComment(char c) {
+    if (c != '/' || rawIdx + 1 >= inputAccum.size()) return false;
+    
+    char n = inputAccum[rawIdx+1];
+    if (n == '*') {
+        st = State::InBlockComment;
+        rawIdx += 2;
+        return true;
+    }
+    if (n == '/') {
+        st = State::InLineComment;
+        rawIdx += 2;
+        return true;
+    }
+    return false;
+}
+
+bool SourceBuffer::tryProcessLineSplicing(char c) {
+    if (c != '\\' || rawIdx + 1 >= inputAccum.size()) return false;
+    
+    if (inputAccum[rawIdx+1] == '\n') {
+        rawIdx += 2;
+        return true;
+    }
+    if (inputAccum[rawIdx+1] == '\r') {
+        if (rawIdx + 2 < inputAccum.size() && inputAccum[rawIdx+2] == '\n') {
+            rawIdx += 3;
+        } else {
+            rawIdx += 2;
+        }
+        return true;
+    }
+    return false;
+}
+
+bool SourceBuffer::processNormalState(char c) {
+    // trigraphs
+    char tr = trigraph_at(rawIdx);
+    if (tr) {
+        rawIdx += 3;
+        charBuf.push_back(tr);
+        return true;
+    }
+    
+    // enter string/char literals
+    if (c == '"') {
+        charBuf.push_back(c);
+        lastOutputWasWhitespace = false;
+        ++rawIdx;
+        st = State::InString;
+        esc = false;
+        return true;
+    }
+    if (c == '\'') {
+        charBuf.push_back(c);
+        lastOutputWasWhitespace = false;
+        ++rawIdx;
+        st = State::InChar;
+        esc = false;
+        return true;
+    }
+    
+    // comments
+    if (tryProcessComment(c)) return false;
+    
+    // line splicing
+    if (tryProcessLineSplicing(c)) return false;
+    
+    // normal emission
+    charBuf.push_back(c);
+    lastOutputWasWhitespace = (c == ' ' || c == '\t' || c == '\v' || c == '\f');
+    ++rawIdx;
+    return true;
+}
+
+bool SourceBuffer::processStringState(char c) {
+    charBuf.push_back(c);
+    lastOutputWasWhitespace = false;
+    ++rawIdx;
+    
+    if (!esc) {
+        if (c == '\\') {
+            esc = true;
+        } else if (c == '"') {
+            st = State::Normal;
+        }
+    } else {
+        esc = false;
+    }
+    return true;
+}
+
+bool SourceBuffer::processCharState(char c) {
+    charBuf.push_back(c);
+    lastOutputWasWhitespace = false;
+    ++rawIdx;
+    
+    if (!esc) {
+        if (c == '\\') {
+            esc = true;
+        } else if (c == '\'') {
+            st = State::Normal;
+        }
+    } else {
+        esc = false;
+    }
+    return true;
+}
+
+bool SourceBuffer::processBlockCommentState(char c) {
+    if (c == '*' && rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '/') {
+        rawIdx += 2;
+        st = State::Normal;
+        pendingSpace = true;
+        return true;
+    }
+    ++rawIdx;
+    return false; // continue outer loop
+}
+
+bool SourceBuffer::processLineCommentState(char c) {
+    if (c == '\n') {
+        ++rawIdx;
+        charBuf.push_back('\n');
+        lastOutputWasWhitespace = true;
+        st = State::Normal;
+        return true;
+    }
+    ++rawIdx;
+    return false; // continue outer loop
+}
+
 void SourceBuffer::fill_buffer() {
     while (charBuf.empty()) {
         ensure_input(rawIdx + 3);
         if (rawIdx >= inputAccum.size()) break;
+        
         char c = inputAccum[rawIdx];
-        // If a pending separating space is requested, emit exactly one space
-        // Skip inserting if we already emitted whitespace just before
-        if (pendingSpace) {
-            if (!lastOutputWasWhitespace) {
-                charBuf.push_back(' ');
-                lastOutputWasWhitespace = true;
-            }
-            pendingSpace = false;
-            break;
-        }
-        // EOL normalize
-        if (c == '\r') {
-            if (rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '\n') { rawIdx += 2; charBuf.push_back('\n'); }
-            else { ++rawIdx; charBuf.push_back('\n'); }
-            lastOutputWasWhitespace = true;
-            break;
-        }
+        
+        if (handlePendingSpace()) break;
+        if (handleCarriageReturn()) break;
+        
+        bool shouldBreak = false;
         if (st == State::Normal) {
-            // trigraphs
-            char tr = trigraph_at(rawIdx);
-            if (tr) { rawIdx += 3; charBuf.push_back(tr); break; }
-            // enter string/char literals
-            if (c == '"') { charBuf.push_back(c); lastOutputWasWhitespace = false; ++rawIdx; st = State::InString; esc = false; break; }
-            if (c == '\'') { charBuf.push_back(c); lastOutputWasWhitespace = false; ++rawIdx; st = State::InChar; esc = false; break; }
-            // comments
-            if (c == '/' && rawIdx + 1 < inputAccum.size()) {
-                char n = inputAccum[rawIdx+1];
-                if (n == '*') { st = State::InBlockComment; rawIdx += 2; continue; }
-                if (n == '/') { st = State::InLineComment; rawIdx += 2; continue; }
-            }
-            // line splicing (remove backslash-newline without inserting space)
-            if (c == '\\') {
-                if (rawIdx + 1 < inputAccum.size()) {
-                    if (inputAccum[rawIdx+1] == '\n') { rawIdx += 2; continue; }
-                    if (inputAccum[rawIdx+1] == '\r') {
-                        if (rawIdx + 2 < inputAccum.size() && inputAccum[rawIdx+2] == '\n') { rawIdx += 3; continue; }
-                        rawIdx += 2; continue;
-                    }
-                }
-            }
-            // normal emission
-            charBuf.push_back(c);
-            lastOutputWasWhitespace = (c == ' ' || c == '\t' || c == '\v' || c == '\f');
-            ++rawIdx;
-            break;
+            shouldBreak = processNormalState(c);
         } else if (st == State::InString) {
-            charBuf.push_back(c);
-            lastOutputWasWhitespace = false;
-            ++rawIdx;
-            if (!esc) { if (c == '\\') esc = true; else if (c == '"') st = State::Normal; }
-            else { esc = false; }
-            break;
+            shouldBreak = processStringState(c);
         } else if (st == State::InChar) {
-            charBuf.push_back(c);
-            lastOutputWasWhitespace = false;
-            ++rawIdx;
-            if (!esc) { if (c == '\\') esc = true; else if (c == '\'') st = State::Normal; }
-            else { esc = false; }
-            break;
+            shouldBreak = processCharState(c);
         } else if (st == State::InBlockComment) {
-            if (c == '*' && rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '/') {
-                rawIdx += 2;
-                st = State::Normal;
-                // Always insert a single separating space after removing a block comment
-                pendingSpace = true;
-                break;
-            }
-            ++rawIdx; continue;
+            shouldBreak = processBlockCommentState(c);
         } else if (st == State::InLineComment) {
-            if (c == '\n') { ++rawIdx; charBuf.push_back('\n'); lastOutputWasWhitespace = true; st = State::Normal; break; }
-            ++rawIdx; continue;
+            shouldBreak = processLineCommentState(c);
         }
-    }
-    // At end of raw input and no buffered output, stop; do not synthesize final newline.
-    if (rawIdx >= inputAccum.size() && charBuf.empty()) {
-        if (!eof) return; // more input may still arrive
-        return; // true EOF reached
+        
+        if (shouldBreak) break;
     }
 }
 
@@ -380,6 +437,51 @@ bool Tokenizer::readNextToken(PPToken& out) {
     return true;
 }
 
+bool Tokenizer::tryConsumeInitialDot(std::string& lex) {
+    auto c1 = feeder.peek(1);
+    if (c1.has_value() && is_digit(c1.value())) {
+        feeder.consume(1);
+        lex.push_back('.');
+        return true;
+    }
+    return false;
+}
+
+bool Tokenizer::tryConsumeInitialDigit(std::string& lex) {
+    auto d0 = feeder.peek(0);
+    if (d0.has_value() && is_digit(d0.value())) {
+        lex.push_back(d0.value());
+        feeder.consume(1);
+        return true;
+    }
+    return false;
+}
+
+void Tokenizer::consumeDigitsAfterExponent(std::string& lex) {
+    while (true) {
+        auto nd = feeder.peek(0);
+        if (nd.has_value() && is_digit(nd.value())) {
+            lex.push_back(nd.value());
+            feeder.consume(1);
+        } else break;
+    }
+}
+
+bool Tokenizer::processExponentNotation(char d, std::string& lex) {
+    if (d != 'e' && d != 'E' && d != 'p' && d != 'P') {
+        return false;
+    }
+    feeder.consume(1);
+    lex.push_back(d);
+    auto sign = feeder.peek(0);
+    if (sign.has_value() && (sign.value() == '+' || sign.value() == '-')) {
+        lex.push_back(sign.value());
+        feeder.consume(1);
+    }
+    consumeDigitsAfterExponent(lex);
+    return true;
+}
+
 bool Tokenizer::tryReadPPNumber(PPToken& out, char c, const SourcePos& begin) {
     auto c1 = feeder.peek(1);
     bool isPPNumber = (c == '.' && c1.has_value() && is_digit(c1.value())) || is_digit(c);
@@ -387,40 +489,18 @@ bool Tokenizer::tryReadPPNumber(PPToken& out, char c, const SourcePos& begin) {
 
     std::string lex;
     if (c == '.') {
-        feeder.consume(1);
-        lex.push_back('.');
+        tryConsumeInitialDot(lex);
     }
-    
-    auto d0 = feeder.peek(0);
-    if (d0.has_value() && is_digit(d0.value())) {
-        lex.push_back(d0.value());
-        feeder.consume(1);
-    }
+    tryConsumeInitialDigit(lex);
     
     while (true) {
         auto dopt = feeder.peek(0);
         if (!dopt.has_value()) break;
         char d = dopt.value();
         
-        // Handle exponent notation
-        if (d == 'e' || d == 'E' || d == 'p' || d == 'P') {
-            feeder.consume(1);
-            lex.push_back(d);
-            auto sign = feeder.peek(0);
-            if (sign.has_value() && (sign.value() == '+' || sign.value() == '-')) {
-                lex.push_back(sign.value());
-                feeder.consume(1);
-            }
-            while (true) {
-                auto nd = feeder.peek(0);
-                if (nd.has_value() && is_digit(nd.value())) {
-                    lex.push_back(nd.value());
-                    feeder.consume(1);
-                } else break;
-            }
+        if (processExponentNotation(d, lex)) {
             continue;
         }
-        
         if (is_digit(d) || is_nondigit(d)) {
             lex.push_back(d);
             feeder.consume(1);
@@ -435,6 +515,60 @@ bool Tokenizer::tryReadPPNumber(PPToken& out, char c, const SourcePos& begin) {
     }
     
     out = PPToken{PPTokenKind::PPNumber, SourceSpan{begin, feeder.position()}, lex};
+    return true;
+}
+
+bool Tokenizer::processEscapeHex(std::string& lex, bool& escaped) {
+    auto ch = feeder.get();
+    if (ch) lex.push_back(ch.value());
+    while (true) {
+        auto hx = feeder.peek(0);
+        if (hx && is_hex(hx.value())) {
+            auto cc = feeder.get();
+            if (cc) lex.push_back(cc.value());
+        } else break;
+    }
+    escaped = false;
+    return true;
+}
+
+bool Tokenizer::processEscapeUnicode(std::string& lex, bool& escaped, int count) {
+    auto ch = feeder.get();
+    if (ch) lex.push_back(ch.value());
+    for (int k = 0; k < count; ++k) {
+        auto hx = feeder.peek(0);
+        if (hx && is_hex(hx.value())) {
+            auto cc = feeder.get();
+            if (cc) lex.push_back(cc.value());
+        }
+    }
+    escaped = false;
+    return true;
+}
+
+bool Tokenizer::processEscapeOctal(std::string& lex, bool& escaped) {
+    auto ch = feeder.get();
+    if (ch) lex.push_back(ch.value());
+    for (int k = 1; k < 3; ++k) {
+        auto oc = feeder.peek(0);
+        if (oc && is_oct(oc.value())) {
+            auto cc = feeder.get();
+            if (cc) lex.push_back(cc.value());
+        }
+    }
+    escaped = false;
+    return true;
+}
+
+bool Tokenizer::processEscapedChar(char d, std::string& lex, bool& escaped) {
+    if (d == 'x') return processEscapeHex(lex, escaped);
+    if (d == 'u') return processEscapeUnicode(lex, escaped, 4);
+    if (d == 'U') return processEscapeUnicode(lex, escaped, 8);
+    if (is_oct(d)) return processEscapeOctal(lex, escaped);
+    
+    auto ch2 = feeder.get();
+    if (ch2) lex.push_back(ch2.value());
+    escaped = false;
     return true;
 }
 
@@ -473,61 +607,7 @@ bool Tokenizer::tryReadCharConstant(PPToken& out, const SourcePos& begin) {
             auto ch = feeder.get();
             if (ch) lex.push_back(ch.value());
         } else {
-            if (d == 'x') {
-                auto ch = feeder.get();
-                if (ch) lex.push_back(ch.value());
-                while (true) {
-                    auto hx = feeder.peek(0);
-                    if (hx && is_hex(hx.value())) {
-                        auto cc = feeder.get();
-                        if (cc) lex.push_back(cc.value());
-                    } else break;
-                }
-                escaped = false;
-                continue;
-            }
-            if (d == 'u') {
-                auto ch = feeder.get();
-                if (ch) lex.push_back(ch.value());
-                for (int k = 0; k < 4; ++k) {
-                    auto hx = feeder.peek(0);
-                    if (hx && is_hex(hx.value())) {
-                        auto cc = feeder.get();
-                        if (cc) lex.push_back(cc.value());
-                    }
-                }
-                escaped = false;
-                continue;
-            }
-            if (d == 'U') {
-                auto ch = feeder.get();
-                if (ch) lex.push_back(ch.value());
-                for (int k = 0; k < 8; ++k) {
-                    auto hx = feeder.peek(0);
-                    if (hx && is_hex(hx.value())) {
-                        auto cc = feeder.get();
-                        if (cc) lex.push_back(cc.value());
-                    }
-                }
-                escaped = false;
-                continue;
-            }
-            if (is_oct(d)) {
-                auto ch = feeder.get();
-                if (ch) lex.push_back(ch.value());
-                for (int k = 1; k < 3; ++k) {
-                    auto oc = feeder.peek(0);
-                    if (oc && is_oct(oc.value())) {
-                        auto cc = feeder.get();
-                        if (cc) lex.push_back(cc.value());
-                    }
-                }
-                escaped = false;
-                continue;
-            }
-            auto ch2 = feeder.get();
-            if (ch2) lex.push_back(ch2.value());
-            escaped = false;
+            processEscapedChar(d, lex, escaped);
         }
     }
     
@@ -535,19 +615,19 @@ bool Tokenizer::tryReadCharConstant(PPToken& out, const SourcePos& begin) {
     return true;
 }
 
-bool Tokenizer::tryReadStringLiteral(PPToken& out, const SourcePos& begin) {
-    size_t prefixLen = 0;
-    if (!starts_string(0, prefixLen)) return false;
-
-    std::string lex;
+void Tokenizer::consumeStringPrefix(std::string& lex, size_t prefixLen) {
     for (size_t k = 0; k < prefixLen; ++k) {
         auto ch = feeder.get();
         if (ch) lex.push_back(ch.value());
     }
-    
+}
+
+void Tokenizer::consumeOpeningQuote(std::string& lex) {
     auto q = feeder.get();
     if (q) lex.push_back(q.value());
-    
+}
+
+void Tokenizer::processStringContent(std::string& lex) {
     bool escaped = false;
     while (true) {
         auto dopt = feeder.peek(0);
@@ -575,6 +655,16 @@ bool Tokenizer::tryReadStringLiteral(PPToken& out, const SourcePos& begin) {
             escaped = false;
         }
     }
+}
+
+bool Tokenizer::tryReadStringLiteral(PPToken& out, const SourcePos& begin) {
+    size_t prefixLen = 0;
+    if (!starts_string(0, prefixLen)) return false;
+
+    std::string lex;
+    consumeStringPrefix(lex, prefixLen);
+    consumeOpeningQuote(lex);
+    processStringContent(lex);
     
     out = PPToken{PPTokenKind::StringLiteral, SourceSpan{begin, feeder.position()}, lex};
     return true;
@@ -604,35 +694,36 @@ bool Tokenizer::tryReadWhitespace(PPToken& out, char c, const SourcePos& begin) 
     return true;
 }
 
-bool Tokenizer::tryReadIdentifier(PPToken& out, char c, const SourcePos& begin) {
+bool Tokenizer::canStartIdentifier(char c) {
     auto n1 = feeder.peek(1);
-    bool canBeIdentifier = is_nondigit(c) || 
-                          (c == '\\' && n1.has_value() && 
-                           (n1.value() == 'u' || n1.value() == 'U'));
-    if (!canBeIdentifier) return false;
+    return is_nondigit(c) || (c == '\\' && n1.has_value() && 
+                              (n1.value() == 'u' || n1.value() == 'U'));
+}
 
-    bool validStart = false;
-    std::string lex;
+bool Tokenizer::consumeUCN(std::string& lex) {
+    size_t u = 0;
+    if (!try_ucn(0, u)) return false;
     
+    for (size_t k = 0; k < u; ++k) {
+        auto ch = feeder.get();
+        if (ch) lex.push_back(ch.value());
+    }
+    return true;
+}
+
+bool Tokenizer::tryConsumeIdentifierStart(char c, std::string& lex) {
     if (is_nondigit(c)) {
         auto ch = feeder.get();
         if (ch) {
             lex.push_back(ch.value());
-            validStart = true;
+            return true;
         }
-    } else {
-        size_t u = 0;
-        if (try_ucn(0, u)) {
-            for (size_t k = 0; k < u; ++k) {
-                auto ch2 = feeder.get();
-                if (ch2) lex.push_back(ch2.value());
-            }
-            validStart = true;
-        }
+        return false;
     }
-    
-    if (!validStart) return false;
-    
+    return consumeUCN(lex);
+}
+
+void Tokenizer::consumeIdentifierContinuation(std::string& lex) {
     while (true) {
         auto p = feeder.peek(0);
         if (!p.has_value()) break;
@@ -644,16 +735,20 @@ bool Tokenizer::tryReadIdentifier(PPToken& out, char c, const SourcePos& begin) 
             continue;
         }
         
-        size_t u = 0;
-        if (try_ucn(0, u)) {
-            for (size_t k = 0; k < u; ++k) {
-                auto ch4 = feeder.get();
-                if (ch4) lex.push_back(ch4.value());
-            }
+        if (consumeUCN(lex)) {
             continue;
         }
         break;
     }
+}
+
+bool Tokenizer::tryReadIdentifier(PPToken& out, char c, const SourcePos& begin) {
+    if (!canStartIdentifier(c)) return false;
+
+    std::string lex;
+    if (!tryConsumeIdentifierStart(c, lex)) return false;
+    
+    consumeIdentifierContinuation(lex);
     
     out = PPToken{PPTokenKind::Identifier, SourceSpan{begin, feeder.position()}, lex};
     return true;

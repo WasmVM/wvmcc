@@ -27,79 +27,342 @@ static bool file_ends_with_newline(const std::string& path) {
     return last == '\n';
 }
 
-bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
-                                          std::vector<PPToken>& out,
-                                          const std::string& currentDir) {
-    auto executeInclude = [&](const std::string& header, bool isAngle, std::optional<SourceSpan> span) -> bool {
-        if (auto resolved = resolveInclude(header, isAngle, currentDir)) {
-            // #pragma once optimization: skip if already processed
-            if (pragmaOnceFiles.count(*resolved) > 0) {
-                return true; // File has #pragma once and was already included, skip it
-            }
-            
-            Preprocessor child;
-            child.includePaths = includePaths;
-            child.inclusionStack = inclusionStack;
-            child.pragmaOnceFiles = pragmaOnceFiles;  // Share pragma once info
-            auto childRes = child.run(*resolved);
-            diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
-            
-            // Merge back pragma once files from child
-            for (const auto& file : child.pragmaOnceFiles) {
-                pragmaOnceFiles.insert(file);
-            }
-            
-            if (childRes.success) {
-                for (const auto& tk : childRes.tokens) out.push_back(tk);
-                return true;
-            }
-            diagnostics.push_back(Diagnostic{
-                .message = std::string("failed to read include file '") + *resolved + "'",
-                .severity = Diagnostic::Severity::Error,
-                .span = span
-            });
+bool Preprocessor::validateLiteralToken(const PPToken& t, std::string& errMsg) const {
+    if (t.kind == PPTokenKind::StringLiteral) {
+        if (t.lexeme.empty() || t.lexeme.back() != '"') {
+            std::ostringstream em;
+            em << "unterminated string literal at line " << t.span.begin.line
+               << ", column " << t.span.begin.column;
+            errMsg = em.str();
             return false;
         }
+    } else if (t.kind == PPTokenKind::CharConst) {
+        if (t.lexeme.empty() || t.lexeme.back() != '\'' ) {
+            std::ostringstream em;
+            em << "unterminated character constant at line " << t.span.begin.line
+               << ", column " << t.span.begin.column;
+            errMsg = em.str();
+            return false;
+        }
+    }
+    return true;
+}
+
+void Preprocessor::emitIfActive(const PPToken& t, std::vector<PPToken>& out) const {
+    if (conditionalStack.empty() || conditionalStack.back().currentlyActive) {
+        out.push_back(t);
+    }
+}
+
+void Preprocessor::consumeToEndOfLine(Tokenizer& tokenizer) {
+    while (auto a = tokenizer.peek()) { if (a->kind == PPTokenKind::Newline) break; tokenizer.next(); }
+}
+
+bool Preprocessor::handleDirectiveIfdef(Tokenizer& tokenizer, bool& hasErrors) {
+    auto lineTokens = collectLineTokens(tokenizer);
+    if (lineTokens.empty()) {
+        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifdef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
+        return true;
+    }
+    std::string macroName;
+    for (const auto& lt : lineTokens) { if (lt.kind == PPTokenKind::Identifier) { macroName = lt.lexeme; break; } }
+    if (macroName.empty()) {
+        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifdef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
+        return true;
+    }
+    if (!handleIfdefDirective(macroName)) hasErrors = true;
+    return true;
+}
+
+bool Preprocessor::handleDirectiveIfndef(Tokenizer& tokenizer, bool& hasErrors) {
+    auto lineTokens = collectLineTokens(tokenizer);
+    if (lineTokens.empty()) {
+        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifndef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
+        return true;
+    }
+    std::string macroName;
+    for (const auto& lt : lineTokens) { if (lt.kind == PPTokenKind::Identifier) { macroName = lt.lexeme; break; } }
+    if (macroName.empty()) {
+        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifndef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
+        return true;
+    }
+    if (!handleIfndefDirective(macroName)) hasErrors = true;
+    return true;
+}
+
+bool Preprocessor::handleDirectiveConditional(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
+    auto lineTokens = collectLineTokens(tokenizer);
+    if (dirLexeme == "if") {
+        if (!handleIfDirective(tokenizer, lineTokens)) hasErrors = true;
+    } else if (dirLexeme == "elif") {
+        if (!handleElifDirective(tokenizer, lineTokens)) hasErrors = true;
+    }
+    return true;
+}
+
+bool Preprocessor::handleDirectiveMessage(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
+    auto lt = collectLineTokens(tokenizer);
+    if (dirLexeme == "error") {
+        if (!handleErrorDirective(lt)) hasErrors = true;
+    } else if (dirLexeme == "warning") {
+        if (!handleWarningDirective(lt)) hasErrors = true;
+    }
+    return true;
+}
+
+bool Preprocessor::handleDirectiveInclude(Tokenizer& tokenizer, const PPToken& hashTok, 
+                                          const PPToken& dirToken, std::vector<PPToken>& out,
+                                          const std::string& currentDir, bool& hasErrors) {
+    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+    bool executed = active && handleIncludeDirective(tokenizer, out, currentDir);
+    if (executed) return true;
+    if (active) { hasErrors = true; return true; }
+    bool hasErr = false;
+    for (const auto& d : diagnostics) { if (d.severity == Diagnostic::Severity::Error) { hasErr = true; break; } }
+    if (hasErr) { hasErrors = true; } else { out.push_back(hashTok); out.push_back(dirToken); }
+    return true;
+}
+
+bool Preprocessor::handleDirectiveDefineUndef(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
+    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+    if (dirLexeme == "define") {
+        if (active && !handleDefineDirective(tokenizer)) hasErrors = true;
+        if (!active) consumeToEndOfLine(tokenizer);
+    } else if (dirLexeme == "undef") {
+        if (active && !handleUndefDirective(tokenizer)) hasErrors = true;
+        if (!active) consumeToEndOfLine(tokenizer);
+    }
+    return true;
+}
+
+bool Preprocessor::handleDirectiveLine(Tokenizer& tokenizer, bool& hasErrors) {
+    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+    if (active) { auto lt = collectLineTokens(tokenizer); if (!handleLineDirective(lt)) hasErrors = true; }
+    else { consumeToEndOfLine(tokenizer); }
+    return true;
+}
+
+bool Preprocessor::handleDirectivePragma(Tokenizer& tokenizer, bool& hasErrors) {
+    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+    if (active) { auto lt = collectLineTokens(tokenizer); if (!handlePragmaDirective(lt)) hasErrors = true; }
+    else { consumeToEndOfLine(tokenizer); }
+    return true;
+}
+
+bool Preprocessor::handleDirectiveConditionalsGroup(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
+    if (dirLexeme == "if" || dirLexeme == "elif") return handleDirectiveConditional(tokenizer, dirLexeme, hasErrors);
+    if (dirLexeme == "ifdef") return handleDirectiveIfdef(tokenizer, hasErrors);
+    if (dirLexeme == "ifndef") return handleDirectiveIfndef(tokenizer, hasErrors);
+    if (dirLexeme == "else") { if (!handleElseDirective()) hasErrors = true; return true; }
+    if (dirLexeme == "endif") { if (!handleEndifDirective()) hasErrors = true; return true; }
+    return false;
+}
+
+void Preprocessor::skipDirectiveWhitespace(Tokenizer& tokenizer) {
+    while (auto p = tokenizer.peek()) {
+        if (p->kind != PPTokenKind::Whitespace) break;
+        tokenizer.next();
+    }
+}
+
+bool Preprocessor::checkActiveState() {
+    return conditionalStack.empty() || conditionalStack.back().currentlyActive;
+}
+
+void Preprocessor::consumeUnknownDirective(Tokenizer& tokenizer, std::vector<PPToken>& out) {
+    while (auto a = tokenizer.peek()) {
+        if (a->kind == PPTokenKind::Newline) break;
+        out.push_back(*tokenizer.next());
+    }
+}
+
+bool Preprocessor::routeDirective(Tokenizer& tokenizer, const PPToken& hashTok, const PPToken& dir,
+                                  std::vector<PPToken>& out, const std::string& currentDir, bool& hasErrors) {
+    const std::string& dirName = dir.lexeme;
+    bool active = checkActiveState();
+
+    if (dirName == "include") return handleDirectiveInclude(tokenizer, hashTok, dir, out, currentDir, hasErrors);
+    if (dirName == "define" || dirName == "undef") return handleDirectiveDefineUndef(tokenizer, dirName, hasErrors);
+    if (handleDirectiveConditionalsGroup(tokenizer, dirName, hasErrors)) return true;
+    if (dirName == "error" || dirName == "warning") {
+        if (!active) { consumeToEndOfLine(tokenizer); return true; }
+        return handleDirectiveMessage(tokenizer, dirName, hasErrors);
+    }
+    if (dirName == "line") return handleDirectiveLine(tokenizer, hasErrors);
+    if (dirName == "pragma") return handleDirectivePragma(tokenizer, hasErrors);
+    return false;
+}
+
+bool Preprocessor::processDirective(Tokenizer& tokenizer,
+                                    const PPToken& hashTok,
+                                    std::vector<PPToken>& out,
+                                    const std::string& currentDir,
+                                    bool& hasErrors) {
+    skipDirectiveWhitespace(tokenizer);
+    auto dir = tokenizer.peek();
+    if (!dir || dir->kind != PPTokenKind::Identifier) return false;
+
+    tokenizer.next();
+    
+    if (routeDirective(tokenizer, hashTok, *dir, out, currentDir, hasErrors)) {
+        return true;
+    }
+    
+    consumeUnknownDirective(tokenizer, out);
+    return true;
+}
+
+bool Preprocessor::processLineStartToken(Tokenizer& tokenizer,
+                                         const PPToken& t,
+                                         std::vector<PPToken>& out,
+                                         const std::string& currentDir,
+                                         bool& hasErrors,
+                                         bool& atLineStart) {
+    if (t.kind == PPTokenKind::Whitespace) {
+        out.push_back(t);
+        return true; // remain at line start until non-whitespace
+    }
+    if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
+        bool handled = processDirective(tokenizer, t, out, currentDir, hasErrors);
+        atLineStart = false;
+        return handled; // handled directive or unknown
+    }
+    emitIfActive(t, out);
+    atLineStart = false;
+    return true;
+}
+
+bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
+                                   std::optional<SourceSpan> span,
+                                   std::vector<PPToken>& out,
+                                   const std::string& currentDir) {
+    if (auto resolved = resolveInclude(header, isAngle, currentDir)) {
+        if (pragmaOnceFiles.count(*resolved) > 0) {
+            return true; // Already included with #pragma once
+        }
+        
+        Preprocessor child;
+        child.includePaths = includePaths;
+        child.inclusionStack = inclusionStack;
+        child.pragmaOnceFiles = pragmaOnceFiles;
+        auto childRes = child.run(*resolved);
+        diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+        
+        for (const auto& file : child.pragmaOnceFiles) {
+            pragmaOnceFiles.insert(file);
+        }
+        
+        if (childRes.success) {
+            for (const auto& tk : childRes.tokens) out.push_back(tk);
+            return true;
+        }
         diagnostics.push_back(Diagnostic{
-            .message = std::string("include file not found: ") + header,
+            .message = std::string("failed to read include file '") + *resolved + "'",
             .severity = Diagnostic::Severity::Error,
             .span = span
         });
         return false;
-    };
-
-    // Skip spaces after include
-    while (auto w = tokenizer.peek()) {
-        if (w->kind == PPTokenKind::Whitespace) tokenizer.next();
-        else break;
     }
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("include file not found: ") + header,
+        .severity = Diagnostic::Severity::Error,
+        .span = span
+    });
+    return false;
+}
 
+bool Preprocessor::processAngleBracketInclude(Tokenizer& tokenizer,
+                                               std::vector<PPToken>& out,
+                                               const std::string& currentDir) {
     auto tok = tokenizer.peek();
-    if (tok && tok->kind == PPTokenKind::Punctuator && tok->lexeme == "<") {
+    if (!tok || tok->kind != PPTokenKind::Punctuator || tok->lexeme != "<") {
+        return false;
+    }
+    
+    tokenizer.next();
+    std::string header;
+    auto begin = tok->span.begin;
+    SourcePos end = tok->span.end;
+    while (auto t = tokenizer.peek()) {
+        if (t->kind == PPTokenKind::Punctuator && t->lexeme == ">") {
+            end = t->span.end;
+            tokenizer.next();
+            break;
+        }
+        if (t->kind == PPTokenKind::Newline) break;
+        header += t->lexeme;
         tokenizer.next();
-        std::string header;
-        auto begin = tok->span.begin;
-        SourcePos end = tok->span.end;
-        while (auto t = tokenizer.peek()) {
-            if (t->kind == PPTokenKind::Punctuator && t->lexeme == ">") { end = t->span.end; tokenizer.next(); break; }
-            if (t->kind == PPTokenKind::Newline) break;
-            header += t->lexeme; tokenizer.next();
-        }
-        return executeInclude(header, /*isAngle=*/true, SourceSpan{begin, end});
     }
+    executeInclude(header, /*isAngle=*/true, SourceSpan{begin, end}, out, currentDir);
+    return true;
+}
 
-    if (tok && tok->kind == PPTokenKind::StringLiteral) {
-        auto lit = *tokenizer.next();
-        std::string header = lit.lexeme;
-        if (header.size() >= 2 && header.front() == '"' && header.back() == '"') {
-            header = header.substr(1, header.size() - 2);
-        }
-        // First: quote search, then fallback to angle with same sequence
-        if (executeInclude(header, /*isAngle=*/false, lit.span)) return true;
-        return executeInclude(header, /*isAngle=*/true, lit.span);
+bool Preprocessor::processStringLiteralInclude(Tokenizer& tokenizer,
+                                                std::vector<PPToken>& out,
+                                                const std::string& currentDir) {
+    auto tok = tokenizer.peek();
+    if (!tok || tok->kind != PPTokenKind::StringLiteral) {
+        return false;
     }
+    
+    auto lit = *tokenizer.next();
+    std::string header = lit.lexeme;
+    if (header.size() >= 2 && header.front() == '"' && header.back() == '"') {
+        header = header.substr(1, header.size() - 2);
+    }
+    if (executeInclude(header, /*isAngle=*/false, lit.span, out, currentDir)) return true;
+    return executeInclude(header, /*isAngle=*/true, lit.span, out, currentDir);
+}
 
-    // Macro-replaced include: collect, expand, then parse header-name
+bool Preprocessor::parseExpandedAngleBracket(const std::vector<PPToken>& expanded,
+                                              size_t i,
+                                              std::vector<PPToken>& out,
+                                              const std::string& currentDir) {
+    std::string header;
+    size_t j = i + 1;
+    int depth = 1;
+    SourcePos begin = expanded[i].span.begin;
+    SourcePos end = expanded[i].span.end;
+    
+    for (; j < expanded.size(); ++j) {
+        if (expanded[j].kind == PPTokenKind::Punctuator && expanded[j].lexeme == "<") {
+            depth++;
+        } else if (expanded[j].kind == PPTokenKind::Punctuator && expanded[j].lexeme == ">") {
+            if (--depth == 0) {
+                end = expanded[j].span.end;
+                break;
+            }
+        } else if (expanded[j].kind != PPTokenKind::Newline) {
+            header += expanded[j].lexeme;
+        }
+    }
+    
+    if (depth == 0) {
+        return executeInclude(header, /*isAngle=*/true, SourceSpan{begin, end}, out, currentDir);
+    }
+    
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("unterminated header-name in macro-expanded #include"),
+        .severity = Diagnostic::Severity::Error,
+        .span = SourceSpan{begin, expanded.back().span.end}
+    });
+    return false;
+}
+
+bool Preprocessor::parseExpandedStringLiteral(const PPToken& lit,
+                                               std::vector<PPToken>& out,
+                                               const std::string& currentDir) {
+    std::string header = lit.lexeme;
+    if (header.size() >= 2 && header.front() == '"' && header.back() == '"') {
+        header = header.substr(1, header.size() - 2);
+    }
+    if (executeInclude(header, /*isAngle=*/false, lit.span, out, currentDir)) return true;
+    return executeInclude(header, /*isAngle=*/true, lit.span, out, currentDir);
+}
+
+bool Preprocessor::processMacroExpandedInclude(Tokenizer& tokenizer,
+                                                std::vector<PPToken>& out,
+                                                const std::string& currentDir) {
     auto tail = collectLineTokens(tokenizer);
     auto expanded = expandMacros(tail);
     size_t i = 0;
@@ -115,35 +378,11 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
     }
 
     if (expanded[i].kind == PPTokenKind::Punctuator && expanded[i].lexeme == "<") {
-        std::string header; size_t j = i + 1; int depth = 1;
-        SourcePos begin = expanded[i].span.begin; SourcePos end = expanded[i].span.end;
-        for (; j < expanded.size(); ++j) {
-            if (expanded[j].kind == PPTokenKind::Punctuator && expanded[j].lexeme == "<") depth++;
-            else if (expanded[j].kind == PPTokenKind::Punctuator && expanded[j].lexeme == ">") {
-                if (--depth == 0) { end = expanded[j].span.end; break; }
-            } else if (expanded[j].kind != PPTokenKind::Newline) {
-                header += expanded[j].lexeme;
-            }
-        }
-        if (depth == 0) {
-            return executeInclude(header, /*isAngle=*/true, SourceSpan{begin, end});
-        }
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("unterminated header-name in macro-expanded #include"),
-            .severity = Diagnostic::Severity::Error,
-            .span = SourceSpan{begin, expanded.back().span.end}
-        });
-        return false;
+        return parseExpandedAngleBracket(expanded, i, out, currentDir);
     }
 
     if (expanded[i].kind == PPTokenKind::StringLiteral) {
-        auto lit = expanded[i];
-        std::string header = lit.lexeme;
-        if (header.size() >= 2 && header.front() == '"' && header.back() == '"') {
-            header = header.substr(1, header.size() - 2);
-        }
-        if (executeInclude(header, /*isAngle=*/false, lit.span)) return true;
-        return executeInclude(header, /*isAngle=*/true, lit.span);
+        return parseExpandedStringLiteral(expanded[i], out, currentDir);
     }
 
     diagnostics.push_back(Diagnostic{
@@ -152,6 +391,20 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
         .span = expanded[i].span
     });
     return false;
+}
+
+bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
+                                          std::vector<PPToken>& out,
+                                          const std::string& currentDir) {
+    // Skip spaces after include
+    while (auto w = tokenizer.peek()) {
+        if (w->kind == PPTokenKind::Whitespace) tokenizer.next();
+        else break;
+    }
+
+    if (processAngleBracketInclude(tokenizer, out, currentDir)) return true;
+    if (processStringLiteralInclude(tokenizer, out, currentDir)) return true;
+    return processMacroExpandedInclude(tokenizer, out, currentDir);
 }
 
 std::optional<std::string> Preprocessor::resolveInclude(const std::string& header,
@@ -360,253 +613,22 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
     bool hasErrors = false;  // Track errors during preprocessing
     while (auto tokOpt = tokenizer.next()) {
         PPToken t = *tokOpt;
-        // Basic validation for literals on the fly
-        if (t.kind == PPTokenKind::StringLiteral) {
-            if (t.lexeme.empty() || t.lexeme.back() != '"') {
-                std::ostringstream em;
-                em << "unterminated string literal at line " << t.span.begin.line
-                   << ", column " << t.span.begin.column;
-                popInclusion();
-                return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
-            }
-        } else if (t.kind == PPTokenKind::CharConst) {
-            if (t.lexeme.empty() || t.lexeme.back() != '\'' ) {
-                std::ostringstream em;
-                em << "unterminated character constant at line " << t.span.begin.line
-                   << ", column " << t.span.begin.column;
-                popInclusion();
-                return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
-            }
+        std::string errMsg;
+        if (!validateLiteralToken(t, errMsg)) {
+            popInclusion();
+            return PreprocessResult{std::vector<PPToken>{}, false, errMsg};
         }
 
         if (t.kind == PPTokenKind::Newline) {
-            // Emit newlines even in inactive regions to maintain line count
             out.push_back(t);
             atLineStart = true;
             continue;
         }
-        if (atLineStart) {
-            if (t.kind == PPTokenKind::Whitespace) {
-                // Emit whitespace at line start regardless of conditional state
-                out.push_back(t);
-                // still at line start until a non-whitespace token
-                continue;
-            }
-            if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
-                // Don't push '#' yet; we'll decide later if this is a recognized directive
-                // Skip spaces (do not emit) between '#' and directive keyword
-                while (auto p = tokenizer.peek()) {
-                    if (p->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
-                    else break;
-                }
-                auto dir = tokenizer.peek();
-                if (dir && dir->kind == PPTokenKind::Identifier) {
-                    // Consume directive keyword (don't push yet)
-                    tokenizer.next();
-                    // Special handling for include header-name recognition
-                    if (dir->lexeme == "include") {
-                        // For executed includes, do not emit '#' or 'include' tokens
-                        // Only execute includes if we're in an active conditional region
-                        bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                        bool executed = shouldExecute && handleIncludeDirective(tokenizer, out, currentDir);
-                        if (!executed) {
-                            // Check if include failed due to error
-                            bool hasErrorDiag = false;
-                            for (const auto& d : diagnostics) {
-                                if (d.severity == Diagnostic::Severity::Error) {
-                                    hasErrorDiag = true;
-                                    break;
-                                }
-                            }
-                            if (hasErrorDiag) {
-                                hasErrors = true;
-                            } else {
-                                // Not executed and no error: emit '#' and 'include' as part of directive line
-                                out.push_back(t);
-                                out.push_back(*dir);
-                            }
-                        }
-                    } else {
-                        // Other directives: parse and execute
-                        if (dir->lexeme == "define") {
-                            // Only execute #define if in active region
-                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                            if (shouldExecute) {
-                                if (!handleDefineDirective(tokenizer)) {
-                                    hasErrors = true;
-                                }
-                            } else {
-                                // Skip directive in inactive region
-                                while (auto a = tokenizer.peek()) {
-                                    if (a->kind == PPTokenKind::Newline) break;
-                                    tokenizer.next();
-                                }
-                            }
-                        } else if (dir->lexeme == "undef") {
-                            // Only execute #undef if in active region
-                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                            if (shouldExecute) {
-                                if (!handleUndefDirective(tokenizer)) {
-                                    hasErrors = true;
-                                }
-                            } else {
-                                // Skip directive in inactive region
-                                while (auto a = tokenizer.peek()) {
-                                    if (a->kind == PPTokenKind::Newline) break;
-                                    tokenizer.next();
-                                }
-                            }
-                        } else if (dir->lexeme == "if") {
-                            auto lineTokens = collectLineTokens(tokenizer);
-                            if (!handleIfDirective(tokenizer, lineTokens)) {
-                                hasErrors = true;
-                            }
-                        } else if (dir->lexeme == "ifdef") {
-                            auto lineTokens = collectLineTokens(tokenizer);
-                            if (lineTokens.empty()) {
-                                diagnostics.push_back(Diagnostic{
-                                    .message = "expected macro name after #ifdef",
-                                    .severity = Diagnostic::Severity::Error,
-                                    .span = std::nullopt
-                                });
-                                hasErrors = true;
-                            } else {
-                                // Find identifier in line tokens (skip whitespace)
-                                std::string macroName;
-                                for (const auto& lt : lineTokens) {
-                                    if (lt.kind == PPTokenKind::Identifier) {
-                                        macroName = lt.lexeme;
-                                        break;
-                                    }
-                                }
-                                if (macroName.empty()) {
-                                    diagnostics.push_back(Diagnostic{
-                                        .message = "expected macro name after #ifdef",
-                                        .severity = Diagnostic::Severity::Error,
-                                        .span = std::nullopt
-                                    });
-                                    hasErrors = true;
-                                } else {
-                                    if (!handleIfdefDirective(macroName)) {
-                                        hasErrors = true;
-                                    }
-                                }
-                            }
-                        } else if (dir->lexeme == "ifndef") {
-                            auto lineTokens = collectLineTokens(tokenizer);
-                            if (lineTokens.empty()) {
-                                diagnostics.push_back(Diagnostic{
-                                    .message = "expected macro name after #ifndef",
-                                    .severity = Diagnostic::Severity::Error,
-                                    .span = std::nullopt
-                                });
-                                hasErrors = true;
-                            } else {
-                                // Find identifier in line tokens (skip whitespace)
-                                std::string macroName;
-                                for (const auto& lt : lineTokens) {
-                                    if (lt.kind == PPTokenKind::Identifier) {
-                                        macroName = lt.lexeme;
-                                        break;
-                                    }
-                                }
-                                if (macroName.empty()) {
-                                    diagnostics.push_back(Diagnostic{
-                                        .message = "expected macro name after #ifndef",
-                                        .severity = Diagnostic::Severity::Error,
-                                        .span = std::nullopt
-                                    });
-                                    hasErrors = true;
-                                } else {
-                                    if (!handleIfndefDirective(macroName)) {
-                                        hasErrors = true;
-                                    }
-                                }
-                            }
-                        } else if (dir->lexeme == "elif") {
-                            auto lineTokens = collectLineTokens(tokenizer);
-                            if (!handleElifDirective(tokenizer, lineTokens)) {
-                                hasErrors = true;
-                            }
-                        } else if (dir->lexeme == "else") {
-                            if (!handleElseDirective()) {
-                                hasErrors = true;
-                            }
-                        } else if (dir->lexeme == "endif") {
-                            if (!handleEndifDirective()) {
-                                hasErrors = true;
-                            }
-                        } else if (dir->lexeme == "error") {
-                            // Only execute #error if in active region
-                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                            if (shouldExecute) {
-                                auto lineTokens = collectLineTokens(tokenizer);
-                                if (!handleErrorDirective(lineTokens)) {
-                                    hasErrors = true;
-                                }
-                            } else {
-                                // Consume tokens but don't execute
-                                collectLineTokens(tokenizer);
-                            }
-                        } else if (dir->lexeme == "warning") {
-                            // Only execute #warning if in active region
-                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                            if (shouldExecute) {
-                                auto lineTokens = collectLineTokens(tokenizer);
-                                if (!handleWarningDirective(lineTokens)) {
-                                    hasErrors = true;
-                                }
-                            } else {
-                                // Consume tokens but don't execute
-                                collectLineTokens(tokenizer);
-                            }
-                        } else if (dir->lexeme == "line") {
-                            // Only execute #line if in active region
-                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                            if (shouldExecute) {
-                                auto lineTokens = collectLineTokens(tokenizer);
-                                if (!handleLineDirective(lineTokens)) {
-                                    hasErrors = true;
-                                }
-                            } else {
-                                // Consume tokens but don't execute
-                                collectLineTokens(tokenizer);
-                            }
-                        } else if (dir->lexeme == "pragma") {
-                            // Only execute #pragma if in active region
-                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-                            if (shouldExecute) {
-                                auto lineTokens = collectLineTokens(tokenizer);
-                                if (!handlePragmaDirective(lineTokens)) {
-                                    hasErrors = true;
-                                }
-                            } else {
-                                // Consume tokens but don't execute
-                                collectLineTokens(tokenizer);
-                            }
-                        } else {
-                            // Unknown directive: consume until newline but emit as-is
-                            while (auto a = tokenizer.peek()) {
-                                if (a->kind == PPTokenKind::Newline) break;
-                                out.push_back(*tokenizer.next());
-                            }
-                        }
-                    }
-                }
-                // We're in a directive context; remain not at line start until newline
-                atLineStart = false;
-                continue;
-            }
-            // Non-directive non-whitespace at line start
-            if (conditionalStack.empty() || conditionalStack.back().currentlyActive) {
-                out.push_back(t);
-            }
+
+        if (!processLineStartToken(tokenizer, t, out, currentDir, hasErrors, atLineStart)) {
+            // If not handled as a line-start special case, emit normally if active
+            emitIfActive(t, out);
             atLineStart = false;
-            continue;
-        }
-        // Normal token outside of line start
-        if (conditionalStack.empty() || conditionalStack.back().currentlyActive) {
-            out.push_back(t);
         }
     }
 
@@ -660,11 +682,73 @@ std::vector<PPToken> Preprocessor::collectLineTokens(Tokenizer& tokenizer) {
     return tokens;
 }
 
+void Preprocessor::skipToCloseParen(Tokenizer& tokenizer) {
+    while (auto p = tokenizer.peek()) {
+        if (p->kind == PPTokenKind::Whitespace) {
+            tokenizer.next();
+        } else break;
+    }
+    if (auto close = tokenizer.peek()) {
+        if (close->kind == PPTokenKind::Punctuator && close->lexeme == ")") {
+            tokenizer.next();
+        }
+    }
+}
+
+bool Preprocessor::handleVariadicParameter(Tokenizer& tokenizer, bool& variadic) {
+    variadic = true;
+    tokenizer.next();
+    skipToCloseParen(tokenizer);
+    return true;
+}
+
+bool Preprocessor::parseMacroParameters(Tokenizer& tokenizer, std::vector<std::string>& params,
+                                        bool& variadic) {
+    while (auto param = tokenizer.peek()) {
+        if (param->kind == PPTokenKind::Punctuator && param->lexeme == ")") {
+            tokenizer.next();
+            return true;
+        }
+        if (param->kind == PPTokenKind::Whitespace) {
+            tokenizer.next();
+            continue;
+        }
+        if (param->kind == PPTokenKind::Punctuator && param->lexeme == ",") {
+            tokenizer.next();
+            continue;
+        }
+        if (param->kind == PPTokenKind::Punctuator && param->lexeme == "...") {
+            return handleVariadicParameter(tokenizer, variadic);
+        }
+        if (param->kind == PPTokenKind::Identifier) {
+            params.push_back(param->lexeme);
+            tokenizer.next();
+        } else {
+            diagnostics.push_back(Diagnostic{
+                .message = "invalid parameter in function-like macro",
+                .severity = Diagnostic::Severity::Error,
+            });
+            return false;
+        }
+    }
+    return true;
+}
+
+void Preprocessor::trimReplacementWhitespace(std::vector<PPToken>& replacement) {
+    while (!replacement.empty() && replacement.front().kind == PPTokenKind::Whitespace) {
+        replacement.erase(replacement.begin());
+    }
+    while (!replacement.empty() && replacement.back().kind == PPTokenKind::Whitespace) {
+        replacement.pop_back();
+    }
+}
+
 bool Preprocessor::handleDefineDirective(Tokenizer& tokenizer) {
     // Skip whitespace after 'define' keyword
     while (auto w = tokenizer.peek()) {
-        if (w->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
-        else break;
+        if (w->kind == PPTokenKind::Whitespace) {
+            tokenizer.next();
+        } else break;
     }
 
     auto macroName = tokenizer.peek();
@@ -677,74 +761,24 @@ bool Preprocessor::handleDefineDirective(Tokenizer& tokenizer) {
     }
 
     std::string name = macroName->lexeme;
-    tokenizer.next(); // consume macro name
+    tokenizer.next();
 
-    // Check if this is a function-like or object-like macro
-    auto next = tokenizer.peek();
     bool isFunction = false;
     std::vector<std::string> params;
     bool variadic = false;
 
+    auto next = tokenizer.peek();
     if (next && next->kind == PPTokenKind::Punctuator && next->lexeme == "(") {
-        // Function-like macro: #define NAME(params) replacement
-        // Note: no space between NAME and (
         isFunction = true;
-        tokenizer.next(); // consume '('
-
-        // Parse parameter list
-        while (auto param = tokenizer.peek()) {
-            if (param->kind == PPTokenKind::Punctuator && param->lexeme == ")") {
-                tokenizer.next(); // consume ')'
-                break;
-            }
-            if (param->kind == PPTokenKind::Whitespace) {
-                tokenizer.next();
-                continue;
-            }
-            if (param->kind == PPTokenKind::Punctuator && param->lexeme == ",") {
-                tokenizer.next();
-                continue;
-            }
-            if (param->kind == PPTokenKind::Punctuator && param->lexeme == "...") {
-                variadic = true;
-                tokenizer.next();
-                // consume trailing ) for variadic
-                while (auto p = tokenizer.peek()) {
-                    if (p->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
-                    else break;
-                }
-                if (auto close = tokenizer.peek()) {
-                    if (close->kind == PPTokenKind::Punctuator && close->lexeme == ")") {
-                        tokenizer.next();
-                    }
-                }
-                break;
-            }
-            if (param->kind == PPTokenKind::Identifier) {
-                params.push_back(param->lexeme);
-                tokenizer.next();
-            } else {
-                diagnostics.push_back(Diagnostic{
-                    .message = "invalid parameter in function-like macro",
-                    .severity = Diagnostic::Severity::Error,
-                });
-                return false;
-            }
+        tokenizer.next();
+        if (!parseMacroParameters(tokenizer, params, variadic)) {
+            return false;
         }
     }
 
-    // Collect replacement tokens until end of line
     std::vector<PPToken> replacement = collectLineTokens(tokenizer);
+    trimReplacementWhitespace(replacement);
 
-    // Remove leading/trailing whitespace from replacement
-    while (!replacement.empty() && replacement.front().kind == PPTokenKind::Whitespace) {
-        replacement.erase(replacement.begin());
-    }
-    while (!replacement.empty() && replacement.back().kind == PPTokenKind::Whitespace) {
-        replacement.pop_back();
-    }
-
-    // Store macro definition
     if (isFunction) {
         macroTable.defineFunctionMacro(name, params, replacement, variadic);
     } else {
@@ -811,60 +845,171 @@ std::string Preprocessor::stringifyTokens(const std::vector<PPToken>& tokens) {
     return result;
 }
 
+void Preprocessor::handleOpenParen(std::vector<PPToken>& currentArg, const PPToken& tok, int& parenDepth) {
+    parenDepth++;
+    currentArg.push_back(tok);
+}
+
+bool Preprocessor::handleCloseParen(std::vector<PPToken>& currentArg, std::vector<std::vector<PPToken>>& args,
+                                    const PPToken& tok, int& parenDepth, size_t& endIdx, size_t k) {
+    parenDepth--;
+    if (parenDepth == 0) {
+        if (!currentArg.empty() || args.empty()) {
+            args.push_back(currentArg);
+        }
+        endIdx = k;
+        return true;
+    }
+    currentArg.push_back(tok);
+    return false;
+}
+
+void Preprocessor::handleComma(std::vector<PPToken>& currentArg, std::vector<std::vector<PPToken>>& args) {
+    args.push_back(currentArg);
+    currentArg.clear();
+}
+
+void Preprocessor::collectVariadicArgs(std::vector<std::vector<PPToken>>& args, const Macro* m) {
+    if (!m->variadic || args.size() < m->params.size()) return;
+    
+    std::vector<PPToken> variadicArg;
+    for (size_t vIdx = m->params.size(); vIdx < args.size(); ++vIdx) {
+        if (vIdx > m->params.size()) {
+            variadicArg.push_back(PPToken{
+                .kind = PPTokenKind::Punctuator,
+                .lexeme = ",",
+                .span = {}
+            });
+        }
+        for (const auto& tok : args[vIdx]) {
+            variadicArg.push_back(tok);
+        }
+    }
+    args.resize(m->params.size());
+    args.push_back(variadicArg);
+}
+
 std::vector<std::vector<PPToken>> Preprocessor::collectMacroArguments(
     const std::vector<PPToken>& tokens, size_t startIdx, size_t& endIdx, const Macro* m) {
     
     std::vector<std::vector<PPToken>> args;
     std::vector<PPToken> currentArg;
-    int parenDepth = 1;  // Start with depth 1 since we're already inside the opening '('
+    int parenDepth = 1;
     
     for (size_t k = startIdx; k < tokens.size(); ++k) {
         const auto& tok = tokens[k];
         
         if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "(") {
-            parenDepth++;
-            currentArg.push_back(tok);
+            handleOpenParen(currentArg, tok, parenDepth);
         } else if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == ")") {
-            parenDepth--;
-            if (parenDepth == 0) {
-                // End of arguments
-                if (!currentArg.empty() || args.empty()) {
-                    args.push_back(currentArg);
-                }
-                endIdx = k;
+            if (handleCloseParen(currentArg, args, tok, parenDepth, endIdx, k)) {
                 break;
-            } else {
-                currentArg.push_back(tok);
             }
         } else if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "," && parenDepth == 1) {
-            // Argument separator at the top level
-            args.push_back(currentArg);
-            currentArg.clear();
+            handleComma(currentArg, args);
         } else if (tok.kind != PPTokenKind::Whitespace || !currentArg.empty()) {
             currentArg.push_back(tok);
         }
     }
     
-    // Handle variadic macros - collect remaining args as __VA_ARGS__
-    if (m->variadic && args.size() >= m->params.size()) {
-        std::vector<PPToken> variadicArg;
-        for (size_t vIdx = m->params.size(); vIdx < args.size(); ++vIdx) {
-            if (vIdx > m->params.size()) {
-                variadicArg.push_back(PPToken{
-                    .kind = PPTokenKind::Punctuator,
-                    .lexeme = ",",
-                    .span = {}
-                });
-            }
-            for (const auto& tok : args[vIdx]) {
-                variadicArg.push_back(tok);
-            }
+    collectVariadicArgs(args, m);
+    return args;
+}
+
+int Preprocessor::findParamIndex(const Macro* m, const PPToken& tok, bool& isVarargs) {
+    isVarargs = (m->variadic && tok.kind == PPTokenKind::Identifier && 
+                tok.lexeme == "__VA_ARGS__");
+    
+    if (isVarargs) return -1;
+    
+    for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+        if (tok.kind == PPTokenKind::Identifier && tok.lexeme == m->params[pIdx]) {
+            return pIdx;
         }
-        args.resize(m->params.size());
-        args.push_back(variadicArg);
+    }
+    return -1;
+}
+
+std::vector<PPToken> Preprocessor::getArgumentToStringify(const Macro* m, int paramIdx, bool isVarargs,
+                                                          const std::vector<std::vector<PPToken>>& args) {
+    if (isVarargs && args.size() > m->params.size()) {
+        return args[m->params.size()];
+    }
+    if (paramIdx >= 0 && paramIdx < static_cast<int>(args.size())) {
+        return args[paramIdx];
+    }
+    return {};
+}
+
+bool Preprocessor::tryProcessStringification(const Macro* m, size_t& rIdx,
+                                             const std::vector<std::vector<PPToken>>& args,
+                                             std::vector<PPToken>& substituted) {
+    const auto& repl = m->replacement[rIdx];
+    if (repl.kind != PPTokenKind::Punctuator || repl.lexeme != "#") {
+        return false;
     }
     
-    return args;
+    size_t nextIdx = rIdx + 1;
+    while (nextIdx < m->replacement.size() && 
+           m->replacement[nextIdx].kind == PPTokenKind::Whitespace) {
+        nextIdx++;
+    }
+    
+    if (nextIdx >= m->replacement.size()) return false;
+    
+    const auto& nextTok = m->replacement[nextIdx];
+    bool isVarargs = false;
+    int paramIdx = findParamIndex(m, nextTok, isVarargs);
+    
+    if (paramIdx < 0 && !isVarargs) return false;
+    
+    auto argToStringify = getArgumentToStringify(m, paramIdx, isVarargs, args);
+    std::string stringified = stringifyTokens(argToStringify);
+    
+    PPToken strToken{
+        .kind = PPTokenKind::StringLiteral,
+        .span = repl.span,
+        .lexeme = stringified,
+        .paintedMacros = {}
+    };
+    strToken.paint(m->name);
+    substituted.push_back(strToken);
+    rIdx = nextIdx;
+    return true;
+}
+
+bool Preprocessor::tryProcessVarArgs(const Macro* m, const PPToken& repl,
+                                     const std::vector<std::vector<PPToken>>& args,
+                                     std::vector<PPToken>& substituted) {
+    if (!m->variadic || repl.kind != PPTokenKind::Identifier || 
+        repl.lexeme != "__VA_ARGS__") {
+        return false;
+    }
+    
+    if (args.size() > m->params.size()) {
+        for (auto vaToken : args[m->params.size()]) {
+            vaToken.paint(m->name);
+            substituted.push_back(vaToken);
+        }
+    }
+    return true;
+}
+
+bool Preprocessor::tryProcessRegularParam(const Macro* m, const PPToken& repl,
+                                          const std::vector<std::vector<PPToken>>& args,
+                                          std::vector<PPToken>& substituted) {
+    for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+        if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
+            if (pIdx < args.size()) {
+                for (auto arg : args[pIdx]) {
+                    arg.paint(m->name);
+                    substituted.push_back(arg);
+                }
+            }
+            return true;
+        }
+    }
+    return false;
 }
 
 std::vector<PPToken> Preprocessor::substituteParameters(
@@ -874,93 +1019,18 @@ std::vector<PPToken> Preprocessor::substituteParameters(
     
     for (size_t rIdx = 0; rIdx < m->replacement.size(); ++rIdx) {
         const auto& repl = m->replacement[rIdx];
-        bool handled = false;
         
-        // Handle stringification operator (#)
-        if (repl.kind == PPTokenKind::Punctuator && repl.lexeme == "#") {
-            size_t nextIdx = rIdx + 1;
-            while (nextIdx < m->replacement.size() && 
-                   m->replacement[nextIdx].kind == PPTokenKind::Whitespace) {
-                nextIdx++;
-            }
-            
-            if (nextIdx < m->replacement.size()) {
-                const auto& nextTok = m->replacement[nextIdx];
-                int paramIdx = -1;
-                bool isVarargs = (m->variadic && nextTok.kind == PPTokenKind::Identifier && 
-                                 nextTok.lexeme == "__VA_ARGS__");
-                
-                if (!isVarargs) {
-                    for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-                        if (nextTok.kind == PPTokenKind::Identifier && 
-                            nextTok.lexeme == m->params[pIdx]) {
-                            paramIdx = pIdx;
-                            break;
-                        }
-                    }
-                }
-                
-                if (paramIdx >= 0 || isVarargs) {
-                    std::vector<PPToken> argToStringify;
-                    if (isVarargs && args.size() > m->params.size()) {
-                        argToStringify = args[m->params.size()];
-                    } else if (paramIdx >= 0 && paramIdx < static_cast<int>(args.size())) {
-                        argToStringify = args[paramIdx];
-                    }
-                    
-                    std::string stringified = stringifyTokens(argToStringify);
-                    PPToken strToken{
-                        .kind = PPTokenKind::StringLiteral,
-                        .span = repl.span,
-                        .lexeme = stringified,
-                        .paintedMacros = {}
-                    };
-                    strToken.paint(m->name);
-                    substituted.push_back(strToken);
-                    rIdx = nextIdx;
-                    handled = true;
-                }
-            }
-        }
-        
-        // Handle __VA_ARGS__
-        if (!handled && m->variadic && repl.kind == PPTokenKind::Identifier && 
-            repl.lexeme == "__VA_ARGS__") {
-            if (args.size() > m->params.size()) {
-                for (auto vaToken : args[m->params.size()]) {
-                    vaToken.paint(m->name);
-                    substituted.push_back(vaToken);
-                }
-            }
-            handled = true;
-        }
-        
-        // Handle regular parameters
-        if (!handled) {
-            for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-                if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
-                    if (pIdx < args.size()) {
-                        for (auto arg : args[pIdx]) {
-                            arg.paint(m->name);
-                            substituted.push_back(arg);
-                        }
-                    }
-                    handled = true;
-                    break;
-                }
-            }
-        }
+        if (tryProcessStringification(m, rIdx, args, substituted)) continue;
+        if (tryProcessVarArgs(m, repl, args, substituted)) continue;
+        if (tryProcessRegularParam(m, repl, args, substituted)) continue;
         
         // Not a parameter - copy token and paint it
-        if (!handled) {
-            auto replToken = repl;
-            replToken.paint(m->name);
-            // Special handling for __LINE__: update span to invocation site
-            if (replToken.kind == PPTokenKind::Identifier && replToken.lexeme == "__LINE__") {
-                replToken.span = invocationToken.span;
-            }
-            substituted.push_back(replToken);
+        auto replToken = repl;
+        replToken.paint(m->name);
+        if (replToken.kind == PPTokenKind::Identifier && replToken.lexeme == "__LINE__") {
+            replToken.span = invocationToken.span;
         }
+        substituted.push_back(replToken);
     }
     
     return substituted;
@@ -1126,57 +1196,80 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
     return result;
 }
 
+size_t Preprocessor::skipWhitespaceTokens(const std::vector<PPToken>& tokens, size_t start) {
+    while (start < tokens.size() && tokens[start].kind == PPTokenKind::Whitespace) {
+        start++;
+    }
+    return start;
+}
+
+std::optional<std::string> Preprocessor::parseDefinedMacroName(const std::vector<PPToken>& tokens, size_t& j, bool hasParens) {
+    if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Identifier) {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected macro name in 'defined'",
+            .severity = Diagnostic::Severity::Error,
+            .span = (j < tokens.size()) ? std::optional<SourceSpan>(tokens[j].span) : std::optional<SourceSpan>()
+        });
+        return std::nullopt;
+    }
+    std::string macroName = tokens[j].lexeme;
+    ++j;
+    return macroName;
+}
+
+bool Preprocessor::validateDefinedCloseParen(const std::vector<PPToken>& tokens, size_t& j) {
+    j = skipWhitespaceTokens(tokens, j);
+    if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator || tokens[j].lexeme != ")") {
+        diagnostics.push_back(Diagnostic{
+            .message = "expected ')' after macro name in 'defined'",
+            .severity = Diagnostic::Severity::Error,
+            .span = (j < tokens.size()) ? std::optional<SourceSpan>(tokens[j].span) : std::optional<SourceSpan>()
+        });
+        return false;
+    }
+    ++j;
+    return true;
+}
+
+bool Preprocessor::tryParseDefinedOperator(const std::vector<PPToken>& tokens, size_t& i, std::vector<PPToken>& preprocessed) {
+    const auto& tok = tokens[i];
+    if (tok.kind != PPTokenKind::Identifier || tok.lexeme != "defined") {
+        return false;
+    }
+
+    size_t j = skipWhitespaceTokens(tokens, i + 1);
+    bool hasParens = false;
+    if (j < tokens.size() && tokens[j].kind == PPTokenKind::Punctuator && tokens[j].lexeme == "(") {
+        hasParens = true;
+        ++j;
+        j = skipWhitespaceTokens(tokens, j);
+    }
+
+    auto macroName = parseDefinedMacroName(tokens, j, hasParens);
+    if (!macroName.has_value()) {
+        return false;
+    }
+
+    if (hasParens && !validateDefinedCloseParen(tokens, j)) {
+        return false;
+    }
+
+    PPToken folded = tok;
+    folded.kind = PPTokenKind::PPNumber;
+    folded.lexeme = macroTable.isDefined(*macroName) ? "1" : "0";
+    preprocessed.push_back(folded);
+    i = j;
+    return true;
+}
+
 std::optional<int64_t> Preprocessor::evaluateConstantExpression(const std::vector<PPToken>& tokens) {
-    // First, fold defined-operator operands to 0/1 without expanding the operand macro name.
     std::vector<PPToken> preprocessed;
     preprocessed.reserve(tokens.size());
     for (size_t i = 0; i < tokens.size();) {
-        const auto& tok = tokens[i];
-        if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "defined") {
-            size_t j = i + 1;
-            while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
-
-            bool hasParens = false;
-            if (j < tokens.size() && tokens[j].kind == PPTokenKind::Punctuator && tokens[j].lexeme == "(") {
-                hasParens = true;
-                ++j;
-                while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
-            }
-
-            if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Identifier) {
-                diagnostics.push_back(Diagnostic{
-                    .message = "expected macro name in 'defined'",
-                    .severity = Diagnostic::Severity::Error,
-                    .span = (j < tokens.size()) ? std::optional<SourceSpan>(tokens[j].span) : std::optional<SourceSpan>()
-                });
-                return std::nullopt;
-            }
-
-            std::string macroName = tokens[j].lexeme;
-            ++j;
-
-            if (hasParens) {
-                while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
-                if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator || tokens[j].lexeme != ")") {
-                    diagnostics.push_back(Diagnostic{
-                        .message = "expected ')' after macro name in 'defined'",
-                        .severity = Diagnostic::Severity::Error,
-                        .span = (j < tokens.size()) ? std::optional<SourceSpan>(tokens[j].span) : std::optional<SourceSpan>()
-                    });
-                    return std::nullopt;
-                }
-                ++j;
-            }
-
-            PPToken folded = tok;
-            folded.kind = PPTokenKind::PPNumber;
-            folded.lexeme = macroTable.isDefined(macroName) ? "1" : "0";
-            preprocessed.push_back(folded);
-            i = j;
+        if (tryParseDefinedOperator(tokens, i, preprocessed)) {
             continue;
         }
-
-        preprocessed.push_back(tok);
+        preprocessed.push_back(tokens[i]);
         ++i;
     }
 
@@ -1403,33 +1496,29 @@ bool Preprocessor::handleLineDirective(const std::vector<PPToken>& tokens) {
     return true;
 }
 
-bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
-    // #pragma directive: implementation-defined behavior
-    // Special handling for #pragma once
+bool Preprocessor::isPragmaOnceDirective(const std::vector<PPToken>& tokens) {
+    if (tokens.empty()) return false;
     
-    // Check if this is #pragma once
-    bool isPragmaOnce = false;
-    if (!tokens.empty()) {
-        size_t idx = 0;
-        // Skip leading whitespace
-        while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++;
-        
-        if (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Identifier && 
-            tokens[idx].lexeme == "once") {
-            // Check there's nothing after "once" (except whitespace)
-            idx++;
-            while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++;
-            
-            if (idx >= tokens.size()) {
-                isPragmaOnce = true;
-                // Mark current file as having #pragma once
-                if (!inclusionStack.empty()) {
-                    pragmaOnceFiles.insert(inclusionStack.back());
-                }
-            }
-        }
+    size_t idx = 0;
+    while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++;
+    
+    if (idx >= tokens.size() || tokens[idx].kind != PPTokenKind::Identifier || 
+        tokens[idx].lexeme != "once") {
+        return false;
     }
     
+    idx++;
+    while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++;
+    
+    if (idx < tokens.size()) return false;
+    
+    if (!inclusionStack.empty()) {
+        pragmaOnceFiles.insert(inclusionStack.back());
+    }
+    return true;
+}
+
+std::string Preprocessor::buildPragmaContent(const std::vector<PPToken>& tokens) {
     std::string pragmaContent;
     for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Whitespace) {
@@ -1440,22 +1529,30 @@ bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
             pragmaContent += tok.lexeme;
         }
     }
-    
-    // Trim trailing whitespace
-    while (!pragmaContent.empty() && (pragmaContent.back() == ' ' || pragmaContent.back() == '\t')) {
-        pragmaContent.pop_back();
+    return pragmaContent;
+}
+
+void Preprocessor::trimTrailingWhitespace(std::string& content) {
+    while (!content.empty() && (content.back() == ' ' || content.back() == '\t')) {
+        content.pop_back();
     }
+}
+
+bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
+    bool isPragmaOnce = isPragmaOnceDirective(tokens);
     
-    // Emit a diagnostic about the pragma (only if not pragma once, which is handled silently)
     if (!isPragmaOnce) {
+        std::string pragmaContent = buildPragmaContent(tokens);
+        trimTrailingWhitespace(pragmaContent);
+        
         diagnostics.push_back(Diagnostic{
             .message = std::string("#pragma: ") + (pragmaContent.empty() ? "(empty)" : pragmaContent),
-            .severity = Diagnostic::Severity::Warning, // Use warning level for visibility
+            .severity = Diagnostic::Severity::Warning,
             .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
         });
     }
     
-    return true; // #pragma does not cause preprocessing to fail
+    return true;
 }
 
 } // namespace wvmcc
