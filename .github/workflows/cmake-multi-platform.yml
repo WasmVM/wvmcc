@@ -9,8 +9,11 @@ jobs:
   build:
     runs-on: ${{ matrix.os }}
     name: Build & Test
+    concurrency:
+      group: cmake-build-${{ github.ref }}-${{ matrix.os }}-${{ matrix.build_type }}
+      cancel-in-progress: true
     strategy:
-      fail-fast: true
+      fail-fast: false
 
       matrix:
         os: [ubuntu-latest, macos-14]
@@ -35,6 +38,31 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Cache ccache
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.ccache
+        key: ${{ runner.os }}-ccache-${{ matrix.cpp_compiler }}-${{ matrix.c_compiler }}-${{ hashFiles('**/CMakeLists.txt') }}
+
+    - name: Cache CMake build dir
+      uses: actions/cache@v4
+      with:
+        path: ${{ github.workspace }}/build
+        key: ${{ runner.os }}-cmake-build-${{ matrix.build_type }}-${{ hashFiles('**/CMakeLists.txt') }}
+
+    - name: Install minimal build tools
+      run: |
+        if [[ "${{ runner.os }}" == "Linux" ]]; then
+          sudo apt-get update
+          sudo apt-get install -y ccache cmake ninja-build build-essential
+        elif [[ "${{ runner.os }}" == "macOS" ]]; then
+          brew update
+          brew install ccache cmake ninja || true
+        fi
 
     - name: Set reusable strings
       id: strings
@@ -54,6 +82,8 @@ jobs:
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+        -DCMAKE_C_COMPILER_LAUNCHER=ccache
+        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         -S ${{ github.workspace }}
 
     - name: Build
@@ -61,4 +91,11 @@ jobs:
 
     - name: Test
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --build-config ${{ matrix.build_type }}
+      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure
+
+    - name: Upload build/test artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-artifacts-${{ matrix.os }}-${{ matrix.build_type }}
+        path: ${{ steps.strings.outputs.build-output-dir }}
