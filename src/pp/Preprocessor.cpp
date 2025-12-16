@@ -14,7 +14,8 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     oss << ifs.rdbuf();
     std::string phase1 = phase1_normalize(oss.str());
     std::string phase2 = phase2_line_splice(phase1);
-    return PreprocessResult{phase2, true, std::string()};
+    std::string phase3 = phase3_strip_comments(phase2);
+    return PreprocessResult{phase3, true, std::string()};
 }
 
 // Phase 1 implementation: trigraphs, EOL normalization, final newline
@@ -89,6 +90,97 @@ std::string Preprocessor::phase2_line_splice(const std::string& input) {
             out.push_back('\n');
         } else {
             out.push_back(c);
+        }
+    }
+
+    return out;
+}
+
+// Phase 3 implementation: strip comments replacing them with a single space.
+// - "/* ... */" comments may span lines; replaced by one space.
+// - "// ...\n" comments run to end of line; replaced by nothing but the retained newline.
+// - Do not treat sequences inside character or string literals as comments.
+std::string Preprocessor::phase3_strip_comments(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+
+    enum class State { Normal, InString, InChar, InBlockComment, InLineComment };
+    State st = State::Normal;
+    bool escape = false;
+
+    for (size_t i = 0; i < input.size(); ++i) {
+        char c = input[i];
+
+        switch (st) {
+            case State::Normal: {
+                if (c == '"') {
+                    st = State::InString;
+                    out.push_back(c);
+                    escape = false;
+                } else if (c == '\'') {
+                    st = State::InChar;
+                    out.push_back(c);
+                    escape = false;
+                } else if (c == '/') {
+                    if (i + 1 < input.size()) {
+                        char n = input[i + 1];
+                        if (n == '*') {
+                            // enter block comment, emit single space placeholder
+                            st = State::InBlockComment;
+                            out.push_back(' ');
+                            ++i; // consume '*'
+                        } else if (n == '/') {
+                            st = State::InLineComment;
+                            ++i; // consume second '/'
+                            // do not emit anything for the comment content
+                        } else {
+                            out.push_back(c);
+                        }
+                    } else {
+                        out.push_back(c);
+                    }
+                    break;
+                } else {
+                    out.push_back(c);
+                }
+                break;
+            }
+            case State::InString: {
+                out.push_back(c);
+                if (escape) {
+                    escape = false;
+                } else {
+                    if (c == '\\') escape = true;
+                    else if (c == '"') st = State::Normal;
+                }
+                break;
+            }
+            case State::InChar: {
+                out.push_back(c);
+                if (escape) {
+                    escape = false;
+                } else {
+                    if (c == '\\') escape = true;
+                    else if (c == '\'') st = State::Normal;
+                }
+                break;
+            }
+            case State::InBlockComment: {
+                if (c == '*' && i + 1 < input.size() && input[i + 1] == '/') {
+                    st = State::Normal;
+                    ++i; // consume '/'
+                }
+                // otherwise ignore comment content
+                break;
+            }
+            case State::InLineComment: {
+                if (c == '\n') {
+                    st = State::Normal;
+                    out.push_back('\n'); // retain newline per phase 3 rules
+                }
+                // else ignore until newline
+                break;
+            }
         }
     }
 
