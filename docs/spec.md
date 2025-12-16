@@ -127,6 +127,7 @@ using PPTokenStream = std::vector<PPToken>;
 
 - Phase 4: Directives + macro expansion
   - Implement `#define/#undef/#include/#if/#ifdef/#ifndef/#elif/#else/#endif`, `_Pragma` later; expand object/function-like macros; delete directives; includes processed recursively (phases 1–4).
+  - See `docs/preprocessor.md` for detailed directive architecture, data structures, phased plan, and testing strategy.
 - Phase 5: Char constants and strings
   - Convert escapes to execution set (UTF-8 initially).
 - Phase 6: Adjacent string literal concatenation
@@ -157,9 +158,9 @@ using PPTokenStream = std::vector<PPToken>;
 
 ## Milestones
 - M0: Parse/type-check core C; IR gen for expressions/statements; lower to minimal `WasmModule`; run pure computation programs in WasmVM.
-  - Preprocessor M0: implement phases 1–3 fully; phase 4 with `#include`, object-like `#define`, basic `#ifdef` family.
+  - Preprocessor M0: implement phases 1–3 fully; phase 4 with `#include`, object-like `#define`, basic `#ifdef` family. See `docs/preprocessor.md` for specifics.
 - M1: Initializers/aggregates/struct layout tests; function calls across files; basic diagnostics.
-  - Preprocessor M1: full macro expansion (function-like, `#`, `##`), `_Pragma`, `#line`, precise whitespace rules.
+  - Preprocessor M1: full macro expansion (function-like, `#`, `##`), `_Pragma`, `#line`, precise whitespace rules. See `docs/preprocessor.md`.
 - M2: Variadics, `_Alignof/_Static_assert`, bitfields; improved IR passes.
 
 ## Open Topics

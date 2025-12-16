@@ -26,9 +26,9 @@ This document tracks key milestones achieved so far and the upcoming work items 
 
 ## In Progress / Near-Term
 - Macro processing (Phase 4)
-  - `#define`, `#undef`, object-like and function-like macros
-  - Macro substitution rules, argument expansion, stringizing `#`, token pasting `##`
-  - Recursive expansion guards and ordering
+  - `#define`, `#undef` (object-like) in M0; function-like macros, stringizing `#`, token pasting `##`, variadics in M1
+  - Macro substitution rules, argument expansion; recursive expansion guards and ordering
+  - See `docs/preprocessor.md` for architecture and phased plan
 - Additional tokenization refinements
   - PPNumber corner cases and suffix interactions
   - Identifier UCN range validation (disallow invalid code points per spec)
@@ -46,6 +46,13 @@ This document tracks key milestones achieved so far and the upcoming work items 
 - Optimizations and verification
   - Basic optimization passes
   - Validation against Wasm constraints
+
+## Preprocessor Phases Summary
+- Phase 1–3: Implemented (trigraphs, line splicing, comment removal)
+- Phase 4: Directives and macro expansion (see near-term plan)
+- Phase 5–6: Escapes and adjacent string literal concatenation
+- Phase 7: Token conversion to language tokens
+- Phase 8: Linkage
 
 ## Notes
 - Freestanding target: no libc/WASI; emit Wasm modules directly.
