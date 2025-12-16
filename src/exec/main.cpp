@@ -127,13 +127,14 @@ int main(int argc, char** argv) {
     }
     
     if (args.inputPath.has_value()) {
-        auto res = pp.run(*args.inputPath);
-        if (!res.success) {
-            std::cerr << "preprocess error: " << res.errorMsg << std::endl;
+        if (!pp.open(*args.inputPath)) {
+            std::cerr << "preprocess error: failed to open input" << std::endl;
             return 1;
         }
+        std::vector<wvmcc::PPToken> tokens;
+        while (auto t = pp.next()) tokens.push_back(*t);
         printDiagnostics(pp.getDiagnostics());
-        printTokenStats(res.tokens);
+        printTokenStats(tokens);
     }
 
     WasmVM::WasmModule module;

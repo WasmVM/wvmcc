@@ -15,16 +15,10 @@
 
 namespace wvmcc {
 
-struct PreprocessResult {
-    std::vector<PPToken> tokens;
-    bool success{true};
-    std::string errorMsg;
-};
-
 class Preprocessor {
 public:
-    PreprocessResult run(const std::string& inputPath);
-    // Streaming interface: treat Preprocessor as a live token stream
+    // Streaming interface only: treat Preprocessor as a live token stream
+    // Previously there was a non-streaming `run()` API; removed in favor of streaming.
     bool open(const std::string& inputPath);
     std::optional<PPToken> peek();
     std::optional<PPToken> next();

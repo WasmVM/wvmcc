@@ -71,7 +71,10 @@ public:
 
 class Preprocessor {
 public:
-    PreprocessResult run(const std::string& inputPath);
+  // Streaming-only API: open a file and consume tokens via next()/peek()
+  bool open(const std::string& inputPath);
+  std::optional<PPToken> peek();
+  std::optional<PPToken> next();
 private:
     MacroTable macros;
     ConditionalState cond;

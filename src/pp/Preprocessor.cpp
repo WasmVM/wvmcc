@@ -78,7 +78,7 @@ bool Preprocessor::pushFile(const std::string& path) {
     if (!pushInclusion(canonicalPath)) {
         return false; // cycle detected
     }
-
+    (void)canonicalPath;
     fileStack.push_back(std::move(ctx));
     atLineStart = true;
 
@@ -127,10 +127,15 @@ std::optional<PPToken> Preprocessor::readRawToken() {
     
         auto tok = ctx.tokenizer->next();
         if (!tok) {
-        
-            fileStack.pop_back(); atLineStart = false; continue;
+            // End of current file: pop file context and corresponding inclusion stack entry
+            fileStack.pop_back();
+            popInclusion();
+            // After returning from an included file, we are at the start of the next line
+            atLineStart = true;
+            continue;
         }
         
+        (void)ctx; (void)tok;
         return tok;
     }
     return std::nullopt;
@@ -397,6 +402,7 @@ void Preprocessor::handleInclude() {
     auto tok = readRawToken();
     while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
     if (!tok) return;
+    (void)tok;
     std::string header;
     if (tok->kind == PPTokenKind::HeaderName) {
         header = tok->lexeme;
@@ -409,7 +415,53 @@ void Preprocessor::handleInclude() {
         if (!s.empty() && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size()-2);
         header = s;
     } else {
-        skipLineFromToken(*tok);
+        // Possibly a macro-expanded include: collect the rest of the line (including this token)
+        std::vector<PPToken> tail;
+        tail.push_back(*tok);
+        while (true) {
+            auto t = readRawToken();
+            if (!t || t->kind == PPTokenKind::Newline) break;
+            tail.push_back(*t);
+        }
+
+        // Expand macros in the collected tail tokens
+        auto expanded = expandMacros(tail);
+        // Find first non-whitespace
+        size_t i = 0;
+        while (i < expanded.size() && expanded[i].kind == PPTokenKind::Whitespace) ++i;
+        if (i >= expanded.size()) {
+            diagnostics.push_back(Diagnostic{
+                .message = std::string("invalid #include after macro expansion: missing header-name"),
+                .severity = Diagnostic::Severity::Error,
+                .span = std::nullopt
+            });
+            return;
+        }
+
+        std::string currentDir = fileStack.empty() ? std::string() : fileStack.back().dir;
+        std::vector<PPToken> tempOut;
+        if (expanded[i].kind == PPTokenKind::Punctuator && expanded[i].lexeme == "<") {
+            if (parseExpandedAngleBracket(expanded, i, tempOut, currentDir)) {
+                for (const auto &tk : tempOut) outBuffer.push_back(tk);
+            }
+            return;
+        }
+
+        if (expanded[i].kind == PPTokenKind::StringLiteral) {
+            // strip quotes and execute include into tempOut, then push to outBuffer
+            std::string header = expanded[i].lexeme;
+            if (header.size() >= 2 && header.front() == '"' && header.back() == '"') header = header.substr(1, header.size()-2);
+            if (executeInclude(header, /*isAngle=*/false, expanded[i].span, tempOut, currentDir)) {
+                for (const auto &tk : tempOut) outBuffer.push_back(tk);
+            }
+            return;
+        }
+
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("invalid #include after macro expansion: expected <header> or \"header\""),
+            .severity = Diagnostic::Severity::Error,
+            .span = expanded[i].span
+        });
         return;
     }
 
@@ -424,6 +476,7 @@ void Preprocessor::handleInclude() {
             if (std::filesystem::exists(cand)) { resolved = cand.string(); break; }
         }
     }
+    (void)header; (void)resolved;
     // Consume the rest of the include directive line from the current file context
     while (true) { auto t = readRawToken(); if (!t || t->kind == PPTokenKind::Newline) break; }
     // After consuming the directive, push the included file so its tokens
@@ -432,6 +485,11 @@ void Preprocessor::handleInclude() {
         // Canonicalize and check inclusion stack to detect cycles reliably
         namespace fs = std::filesystem;
         std::string canonicalResolved = fs::weakly_canonical(fs::absolute(resolved)).string();
+        // If this file was already marked with #pragma once, skip re-including it
+        if (pragmaOnceFiles.count(canonicalResolved) > 0) {
+            return;
+        }
+
         if (isInInclusionStack(canonicalResolved)) {
             diagnostics.push_back(Diagnostic{
                 .message = std::string("cyclic include detected: ") + canonicalResolved,
@@ -698,23 +756,27 @@ bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
         child.includePaths = includePaths;
         child.inclusionStack = inclusionStack;
         child.pragmaOnceFiles = pragmaOnceFiles;
-        auto childRes = child.run(*resolved);
+        // Use streaming API on child to collect tokens from included file
+        if (!child.open(*resolved)) {
+            diagnostics.push_back(Diagnostic{
+                .message = std::string("failed to open include file '") + *resolved + "'",
+                .severity = Diagnostic::Severity::Error,
+                .span = span
+            });
+            return false;
+        }
+        std::vector<PPToken> childTokens;
+        while (auto t = child.next()) childTokens.push_back(*t);
         diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+
         
+
         for (const auto& file : child.pragmaOnceFiles) {
             pragmaOnceFiles.insert(file);
         }
-        
-        if (childRes.success) {
-            for (const auto& tk : childRes.tokens) out.push_back(tk);
-            return true;
-        }
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("failed to read include file '") + *resolved + "'",
-            .severity = Diagnostic::Severity::Error,
-            .span = span
-        });
-        return false;
+
+        for (const auto& tk : childTokens) out.push_back(tk);
+        return true;
     }
     diagnostics.push_back(Diagnostic{
         .message = std::string("include file not found: ") + header,
@@ -904,220 +966,13 @@ bool Preprocessor::pushInclusion(const std::string& filePath) {
 }
 
 void Preprocessor::popInclusion() {
-    if (!inclusionStack.empty()) inclusionStack.pop_back();
+    if (!inclusionStack.empty()) {
+        (void)inclusionStack.back();
+        inclusionStack.pop_back();
+    }
 }
 
-PreprocessResult Preprocessor::run(const std::string& inputPath) {
-    std::ifstream ifs(inputPath);
-    if (!ifs) {
-        return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cannot open input: ") + inputPath};
-    }
-    
-    // Canonicalize path and check for cycles
-    namespace fs = std::filesystem;
-    std::string canonicalPath = fs::weakly_canonical(fs::absolute(inputPath)).string();
-    if (!pushInclusion(canonicalPath)) {
-        // Cycle detected
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("cyclic include detected: ") + canonicalPath,
-            .severity = Diagnostic::Severity::Error,
-            .span = std::nullopt
-        });
-        return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cyclic include: ") + canonicalPath};
-    }
-    
-    // Initialize predefined macros for this file (only once per run)
-    if (inclusionStack.size() == 1) {
-        // __FILE__ macro - current source file
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::StringLiteral,
-                .span = {},
-                .lexeme = "\"" + canonicalPath + "\"",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__FILE__", replacement);
-        }
-        
-        // __LINE__ macro is handled dynamically during expansion (not predefined)
-        
-        // __DATE__ macro - compilation date
-        {
-            auto now = std::time(nullptr);
-            auto tm = *std::localtime(&now);
-            char dateStr[32];
-            std::strftime(dateStr, sizeof(dateStr), "%b %d %Y", &tm);
-            
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::StringLiteral,
-                .span = {},
-                .lexeme = "\"" + std::string(dateStr) + "\"",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__DATE__", replacement);
-        }
-        
-        // __TIME__ macro - compilation time
-        {
-            auto now = std::time(nullptr);
-            auto tm = *std::localtime(&now);
-            char timeStr[32];
-            std::strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &tm);
-            
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::StringLiteral,
-                .span = {},
-                .lexeme = "\"" + std::string(timeStr) + "\"",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__TIME__", replacement);
-        }
-        
-        // __STDC__ macro - ISO C compliance (set to 1)
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC__", replacement);
-        }
-        
-        // __STDC_VERSION__ macro - C standard version (C17 = 201710L)
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "201710L",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_VERSION__", replacement);
-        }
-        
-        // __STDC_HOSTED__ macro - freestanding implementation (0 = freestanding, 1 = hosted)
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "0",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_HOSTED__", replacement);
-        }
-        
-        // __STDC_NO_ATOMICS__ macro - no atomic support
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_NO_ATOMICS__", replacement);
-        }
-        
-        // __STDC_NO_COMPLEX__ macro - no complex number support
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_NO_COMPLEX__", replacement);
-        }
-        
-        // __STDC_NO_THREADS__ macro - no threading support
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_NO_THREADS__", replacement);
-        }
-    }
-    
-    // Cleanup: pop inclusion on exit
-    auto popGuard = [this]() { popInclusion(); };
-    // Simplified: use a lambda immediately after scope, or just call at the end
-    
-    const bool endsWithNewline = file_ends_with_newline(inputPath);
-    // Derive current file directory for quote-style includes
-    std::filesystem::path inputPathFs(inputPath);
-    std::string currentDir = inputPathFs.has_parent_path() ? inputPathFs.parent_path().string() : std::string();
-    // Single-pass streaming: consume tokens, parse directives and includes
-    Tokenizer tokenizer(ifs);
-    std::vector<PPToken> out;
-    out.reserve(256);
-    tokenizer.reset();
-    bool atLineStart = true; // start of file is line start
-    bool hasErrors = false;  // Track errors during preprocessing
-    while (auto tokOpt = tokenizer.next()) {
-        PPToken t = *tokOpt;
-        std::string errMsg;
-        if (!validateLiteralToken(t, errMsg)) {
-            popInclusion();
-            return PreprocessResult{std::vector<PPToken>{}, false, errMsg};
-        }
-
-        if (t.kind == PPTokenKind::Newline) {
-            out.push_back(t);
-            atLineStart = true;
-            continue;
-        }
-
-        if (!processLineStartToken(tokenizer, t, out, currentDir, hasErrors, atLineStart)) {
-            // If not handled as a line-start special case, emit normally if active
-            emitIfActive(t, out);
-            atLineStart = false;
-        }
-    }
-
-    if (!endsWithNewline) {
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("input file '") + inputPath + "' does not end with a newline",
-            .severity = Diagnostic::Severity::Warning,
-            .span = std::nullopt
-        });
-    }
-    
-    // Check for unclosed conditional directives
-    if (!conditionalStack.empty()) {
-        diagnostics.push_back(Diagnostic{
-            .message = "#if/#ifdef/#ifndef without matching #endif",
-            .severity = Diagnostic::Severity::Error,
-            .span = std::nullopt
-        });
-        hasErrors = true;
-    }
-    
-    // TODO: Include guard detection will be implemented properly
-    // For now, the optimization is disabled to avoid incorrect behavior
-    
-    popInclusion();
-    
-    // Return failure if any errors were encountered during preprocessing
-    if (hasErrors) {
-        return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
-    }
-
-    // Expand macros in the token stream
-    std::vector<PPToken> expanded = expandMacros(out);
-
-    return PreprocessResult{std::move(expanded), true, std::string()};
-}
+// Non-streaming `run()` removed: use streaming interface (`open()` + `next()`) instead.
 
 std::vector<PPToken> Preprocessor::collectLineTokens(Tokenizer& tokenizer) {
     std::vector<PPToken> tokens;
@@ -1957,6 +1812,7 @@ bool Preprocessor::isPragmaOnceDirective(const std::vector<PPToken>& tokens) {
     
     if (!inclusionStack.empty()) {
         pragmaOnceFiles.insert(inclusionStack.back());
+        (void)inclusionStack.back();
     }
     return true;
 }

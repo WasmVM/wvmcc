@@ -215,19 +215,27 @@ static int test_include_macro_replaced() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) {
+        std::remove(hdr1.c_str());
+        std::remove(hdr2.c_str());
+        std::remove(srcName.c_str());
+        std::cerr << "test_include_macro_replaced: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
 
     std::remove(hdr1.c_str());
     std::remove(hdr2.c_str());
     std::remove(srcName.c_str());
 
-    if (!res.success) {
-        std::cerr << "test_include_macro_replaced: preprocess failed: " << res.errorMsg << "\n";
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
+        std::cerr << "test_include_macro_replaced: preprocess failed (diagnostic)\n";
         return 1;
     }
 
     bool hasV2 = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "v2") { hasV2 = true; break; }
     }
     if (!hasV2) {
@@ -259,19 +267,27 @@ static int test_include_quote_to_angle_fallback() {
 
     Preprocessor pp;
     pp.addIncludePath(incDir); // only available via -I (angle-style) search
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) {
+        std::remove(srcName.c_str());
+        std::remove(hdr.c_str());
+        fs::remove(incDir);
+        std::cerr << "test_include_quote_to_angle_fallback: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
 
     std::remove(srcName.c_str());
     std::remove(hdr.c_str());
     fs::remove(incDir);
 
-    if (!res.success) {
-        std::cerr << "test_include_quote_to_angle_fallback: preprocess failed: " << res.errorMsg << "\n";
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
+        std::cerr << "test_include_quote_to_angle_fallback: preprocess failed (diagnostic)\n";
         return 1;
     }
 
     bool hasQ2A = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "q2a") { hasQ2A = true; break; }
     }
     if (!hasQ2A) {
@@ -299,18 +315,25 @@ static int test_include_macro_simple() {
     }
 
     Preprocessor pp;
-    auto res = pp.run(srcName);
+    if (!pp.open(srcName)) {
+        std::remove(hdr.c_str());
+        std::remove(srcName.c_str());
+        std::cerr << "test_include_macro_simple: failed to open input\n";
+        return 1;
+    }
+    std::vector<PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
 
     std::remove(hdr.c_str());
     std::remove(srcName.c_str());
 
-    if (!res.success) {
-        std::cerr << "test_include_macro_simple: preprocess failed: " << res.errorMsg << "\n";
+    if (pp.getDiagnostics().end() != std::find_if(pp.getDiagnostics().begin(), pp.getDiagnostics().end(), [](const Diagnostic& d){ return d.severity==Diagnostic::Severity::Error; })) {
+        std::cerr << "test_include_macro_simple: preprocess failed (diagnostic)\n";
         return 1;
     }
 
     bool hasMs = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "ms") { hasMs = true; break; }
     }
     if (!hasMs) {
