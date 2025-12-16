@@ -176,7 +176,7 @@ private:
 | Conditional directives | ✅ | All variants |
 | Constant expressions | ✅ | C17 §6.6 (except `sizeof`) |
 | `#include` directives | ✅ | Paths, macros, cycles |
-| Predefined macros | ✅ | `__FILE__`, `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__STDC_HOSTED__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__` |
+| Predefined macros | ✅ | `__FILE__`, `__LINE__` (dynamic), `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__STDC_HOSTED__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__` |
 | `#error`, `#warning` | ✅ | Full support with conditional checks |
 | `#line`, `#pragma` | ✅ | Full support with validation |
 
@@ -199,12 +199,9 @@ Tokenizer-focused tests use range-style iteration to verify phases 1–3 and lit
 - Avoid quadratic behavior in macro substitution by linear passes with markers
 
 ## Future Extensions
-- `__LINE__` macro with dynamic line tracking (currently not supported)
-- `#pragma once` fast-path support via include handler
-- Diagnostic directives: `#error`, `#warning`
-- Line information: `#line` directive
-- Utilities: `#pragma` extended handling
+- Include guard optimization (complex pattern detection needed during directive processing)
+- `#pragma once` fast-path support via include handler  
 - Configurable predefined macros by target/flags
 - File-level preprocessing API (beyond path-based run)
-- Include guard optimization
+- Advanced diagnostic formatting and source tracking
 
