@@ -57,6 +57,8 @@ public:
     
     // Streaming API: read next token; returns std::nullopt at EOF
     std::optional<PPToken> next();
+    // Lookahead: peek next token without consuming; std::nullopt at EOF
+    std::optional<PPToken> peek();
     // Reset tokenizer state to the beginning of input
     void reset();
     
@@ -80,6 +82,7 @@ private:
     std::vector<PPToken> tokens;
     std::string stream;
     size_t streamPos;
+    std::optional<PPToken> lookahead;
 
     void emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end);
     bool try_ucn(size_t idx, size_t& consumed);

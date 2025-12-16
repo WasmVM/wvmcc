@@ -284,12 +284,26 @@ void Tokenizer::reset() {
     stream.reserve(input.size());
     streamPos = 0;
     tokens.clear();
+    lookahead.reset();
 }
 
 std::optional<PPToken> Tokenizer::next() {
+    if (lookahead.has_value()) {
+        PPToken tok = *lookahead;
+        lookahead.reset();
+        return tok;
+    }
     PPToken tok;
     if (!readNextToken(tok)) return std::nullopt;
     return tok;
+}
+
+std::optional<PPToken> Tokenizer::peek() {
+    if (lookahead.has_value()) return lookahead;
+    PPToken tok;
+    if (!readNextToken(tok)) return std::nullopt;
+    lookahead = tok;
+    return lookahead;
 }
 
 bool Tokenizer::readNextToken(PPToken& out) {
