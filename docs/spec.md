@@ -113,6 +113,23 @@
   - Extended characters: allowed via UTF-8 and universal character names (UCNs) in identifiers/literals; mapping to execution set is UTF-8 in M0.
   - Escape processing applied per phases 5–6; UCNs supported in literals/identifiers as per later milestone.
 
+### Trigraph Sequences (C17 §5.2.1.1)
+Replacement is done in Phase 1, before any other processing:
+
+| Trigraph | Replaces |
+| - | - |
+| `??=` | `#` |
+| `??(` | `[` |
+| `??/` | `\\` |
+| `??)` | `]` |
+| `??'` | `^` |
+| `??<` | `{` |
+| `??!` | `|` |
+| `??>` | `}` |
+| `??-` | `~` |
+
+Any `?` not starting one of the above trigraphs is left unchanged.
+
 - `_Bool`:
   - Size: 1 byte; `true` = 1, `false` = 0; non-zero converts to 1.
 - Pointers:
