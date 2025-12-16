@@ -4,6 +4,7 @@
 #include <optional>
 #include <deque>
 #include <istream>
+#include <unordered_set>
 
 namespace wvmcc {
 
@@ -26,6 +27,24 @@ struct PPToken {
     PPTokenKind kind;
     SourceSpan span;
     std::string lexeme;
+    std::unordered_set<std::string> paintedMacros;  // Paint semantics: macros that have tried to expand this token
+    
+    // Check if this token is painted with a given macro name
+    bool isPainted(const std::string& macroName) const {
+        return paintedMacros.count(macroName) > 0;
+    }
+    
+    // Mark this token as painted with a macro name
+    void paint(const std::string& macroName) {
+        paintedMacros.insert(macroName);
+    }
+    
+    // Copy paint set from another token
+    void copyPaint(const PPToken& other) {
+        for (const auto& m : other.paintedMacros) {
+            paintedMacros.insert(m);
+        }
+    }
 };
 
 class SourceBuffer {
