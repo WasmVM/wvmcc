@@ -24,6 +24,13 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
                    << ", column " << t.span.begin.column;
                 return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
             }
+        } else if (t.kind == PPTokenKind::CharConst) {
+            if (t.lexeme.empty() || t.lexeme.back() != '\'') {
+                std::ostringstream em;
+                em << "unterminated character constant at line " << t.span.begin.line
+                   << ", column " << t.span.begin.column;
+                return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
+            }
         }
     }
     return PreprocessResult{std::move(tokens), true, std::string()};

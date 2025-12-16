@@ -17,6 +17,11 @@ inline bool expectKindsLex(const std::string& name,
         std::cerr << "[FAIL] " << name << ": size mismatch: expected kinds="
                   << kinds.size() << ", lexemes=" << lexemes.size()
                   << ", got tokens=" << toks.size() << std::endl;
+        std::cerr << "  tokens:" << std::endl;
+        for (size_t i = 0; i < toks.size(); ++i) {
+            std::cerr << "    [" << i << "] kind=" << (int)toks[i].kind
+                      << " lexeme='" << toks[i].lexeme << "'" << std::endl;
+        }
         return false;
     }
     for (size_t i = 0; i < kinds.size(); ++i) {

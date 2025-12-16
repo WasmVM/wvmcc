@@ -35,3 +35,11 @@ if(EXISTS ${PP_TOKENIZER_STRING_TEST})
     target_include_directories(wvmcc-pp-tokenizer-string-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
     add_test(NAME pp-tokenizer-string COMMAND wvmcc-pp-tokenizer-string-test)
 endif()
+
+# Tokenizer char literal tests
+set(PP_TOKENIZER_CHAR_TEST ${TEST_ROOT}/unit/pp_tokenizer_char_test.cpp)
+if(EXISTS ${PP_TOKENIZER_CHAR_TEST})
+    add_executable(wvmcc-pp-tokenizer-char-test ${PP_TOKENIZER_CHAR_TEST} ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-tokenizer-char-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-tokenizer-char COMMAND wvmcc-pp-tokenizer-char-test)
+endif()
