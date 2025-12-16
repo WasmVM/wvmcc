@@ -26,133 +26,115 @@ static bool file_ends_with_newline(const std::string& path) {
 bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                                           std::vector<PPToken>& out,
                                           const std::string& currentDir) {
-    // TODO: Execute include in Phase 2 using currentDir and includePaths.
-    // Skip spaces (do not emit) between directive and header name
+    auto executeInclude = [&](const std::string& header, bool isAngle, std::optional<SourceSpan> span) -> bool {
+        if (auto resolved = resolveInclude(header, isAngle, currentDir)) {
+            Preprocessor child;
+            child.includePaths = includePaths;
+            child.inclusionStack = inclusionStack;
+            auto childRes = child.run(*resolved);
+            diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+            if (childRes.success) {
+                for (const auto& tk : childRes.tokens) out.push_back(tk);
+                return true;
+            }
+            diagnostics.push_back(Diagnostic{
+                .message = std::string("failed to read include file '") + *resolved + "'",
+                .severity = Diagnostic::Severity::Error,
+                .span = span
+            });
+            return false;
+        }
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("include file not found: ") + header,
+            .severity = Diagnostic::Severity::Error,
+            .span = span
+        });
+        return false;
+    };
+
+    // Skip spaces after include
     while (auto w = tokenizer.peek()) {
-        if (w->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
+        if (w->kind == PPTokenKind::Whitespace) tokenizer.next();
         else break;
     }
-    auto h = tokenizer.peek();
-    if (h && h->kind == PPTokenKind::Punctuator && h->lexeme == "<") {
-        SourcePos begin = h->span.begin;
-        // consume '<' but do not emit it; we'll emit a single HeaderName token
+
+    auto tok = tokenizer.peek();
+    if (tok && tok->kind == PPTokenKind::Punctuator && tok->lexeme == "<") {
         tokenizer.next();
-        std::string acc;
-        SourcePos end = begin;
-        bool terminated = false;
-        while (auto x = tokenizer.peek()) {
-            if (x->kind == PPTokenKind::Newline) break;
-            if (x->kind == PPTokenKind::Punctuator && x->lexeme == ">") {
-                end = x->span.end;
-                tokenizer.next();
-                // Resolution: try -I search paths for angle form
-                if (auto resolved = resolveInclude(acc, /*isAngle=*/true, currentDir)) {
-                    includeQueue.push_back(*resolved);
-                    // Check for cyclic include
-                    std::string canonicalResolved = std::filesystem::weakly_canonical(
-                        std::filesystem::absolute(*resolved)).string();
-                    if (isInInclusionStack(canonicalResolved)) {
-                        std::cerr << "error: cyclic include detected: " << canonicalResolved << "\n";
-                        diagnostics.push_back(Diagnostic{
-                            .message = std::string("cyclic include detected: ") + canonicalResolved,
-                            .severity = Diagnostic::Severity::Error,
-                            .span = SourceSpan{begin, end}
-                        });
-                        return false;  // Fail on cycle
-                    } else {
-                        // Execute: preprocess included file (supports nested includes) and inline its tokens
-                        Preprocessor child;
-                        child.includePaths = includePaths;
-                        child.inclusionStack = inclusionStack;  // Share the inclusion stack
-                        auto childRes = child.run(*resolved);
-                        diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
-                        if (childRes.success) {
-                            for (const auto& tk : childRes.tokens) out.push_back(tk);
-                            return true;
-                        } else {
-                            std::cerr << "error: failed to read include file '" << *resolved << "' for <" << acc << ">\n";
-                            diagnostics.push_back(Diagnostic{
-                                .message = std::string("failed to read include file '") + *resolved + "' for <" + acc + ">",
-                                .severity = Diagnostic::Severity::Error,
-                                .span = SourceSpan{begin, end}
-                            });
-                            return false;  // Propagate child failure
-                        }
-                    }
-                } else {
-                    std::cerr << "error: include file not found for <" << acc << "> (searched -I paths)\n";
-                    diagnostics.push_back(Diagnostic{
-                        .message = std::string("include file not found for <") + acc + "> (searched -I paths)",
-                        .severity = Diagnostic::Severity::Error,
-                        .span = SourceSpan{begin, end}
-                    });
-                }
-                // Fallback: do not emit HeaderName when execution fails; rely on diagnostics
-                terminated = true;
-                break;
-            }
-            acc += x->lexeme;
-            // consume inner tokens without emitting them
-            tokenizer.next();
-        }
-        // If not terminated, leave as-is (no header-name token)
-        (void)terminated;
-    } else if (h && h->kind == PPTokenKind::StringLiteral) {
-        // Strip quotes and resolve using currentDir then -I paths
-        std::string quoted = h->lexeme;
         std::string header;
-        if (quoted.size() >= 2 && quoted.front()=='"' && quoted.back()=='"') {
-            header = quoted.substr(1, quoted.size()-2);
-        } else {
-            header = quoted;
+        auto begin = tok->span.begin;
+        SourcePos end = tok->span.end;
+        while (auto t = tokenizer.peek()) {
+            if (t->kind == PPTokenKind::Punctuator && t->lexeme == ">") { end = t->span.end; tokenizer.next(); break; }
+            if (t->kind == PPTokenKind::Newline) break;
+            header += t->lexeme; tokenizer.next();
         }
-        if (auto resolved = resolveInclude(header, /*isAngle=*/false, currentDir)) {
-            includeQueue.push_back(*resolved);
-            // Check for cyclic include
-            std::string canonicalResolved = std::filesystem::weakly_canonical(
-                std::filesystem::absolute(*resolved)).string();
-            if (isInInclusionStack(canonicalResolved)) {
-                std::cerr << "error: cyclic include detected: " << canonicalResolved << "\n";
-                diagnostics.push_back(Diagnostic{
-                    .message = std::string("cyclic include detected: ") + canonicalResolved,
-                    .severity = Diagnostic::Severity::Error,
-                    .span = h->span
-                });
-                tokenizer.next();
-                return false;  // Fail on cycle
-            } else {
-                // Execute: preprocess included file (supports nested includes) and inline its tokens
-                Preprocessor child;
-                child.includePaths = includePaths;
-                child.inclusionStack = inclusionStack;  // Share the inclusion stack
-                auto childRes = child.run(*resolved);
-                diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
-                if (childRes.success) {
-                    for (const auto& tk : childRes.tokens) out.push_back(tk);
-                    tokenizer.next();
-                    return true;
-                } else {
-                    std::cerr << "error: failed to read include file '" << *resolved << "' for \"" << header << "\"\n";
-                    diagnostics.push_back(Diagnostic{
-                        .message = std::string("failed to read include file '") + *resolved + "' for \"" + header + "\"",
-                        .severity = Diagnostic::Severity::Error,
-                        .span = h->span
-                    });
-                    tokenizer.next();
-                    return false;  // Propagate child failure
-                }
-            }
-        } else {
-            std::cerr << "error: include file not found for \"" << header << "\" (searched current dir and -I paths)\n";
-            diagnostics.push_back(Diagnostic{
-                .message = std::string("include file not found for \"") + header + "\" (Searched current dir and -I paths)",
-                .severity = Diagnostic::Severity::Error,
-                .span = h->span
-            });
-        }
-        // Fallback: do not emit HeaderName when execution fails; rely on diagnostics
-        tokenizer.next();
+        return executeInclude(header, /*isAngle=*/true, SourceSpan{begin, end});
     }
+
+    if (tok && tok->kind == PPTokenKind::StringLiteral) {
+        auto lit = *tokenizer.next();
+        std::string header = lit.lexeme;
+        if (header.size() >= 2 && header.front() == '"' && header.back() == '"') {
+            header = header.substr(1, header.size() - 2);
+        }
+        // First: quote search, then fallback to angle with same sequence
+        if (executeInclude(header, /*isAngle=*/false, lit.span)) return true;
+        return executeInclude(header, /*isAngle=*/true, lit.span);
+    }
+
+    // Macro-replaced include: collect, expand, then parse header-name
+    auto tail = collectLineTokens(tokenizer);
+    auto expanded = expandMacros(tail);
+    size_t i = 0;
+    while (i < expanded.size() && expanded[i].kind == PPTokenKind::Whitespace) i++;
+
+    if (i >= expanded.size()) {
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("invalid #include after macro expansion: missing header-name"),
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+
+    if (expanded[i].kind == PPTokenKind::Punctuator && expanded[i].lexeme == "<") {
+        std::string header; size_t j = i + 1; int depth = 1;
+        SourcePos begin = expanded[i].span.begin; SourcePos end = expanded[i].span.end;
+        for (; j < expanded.size(); ++j) {
+            if (expanded[j].kind == PPTokenKind::Punctuator && expanded[j].lexeme == "<") depth++;
+            else if (expanded[j].kind == PPTokenKind::Punctuator && expanded[j].lexeme == ">") {
+                if (--depth == 0) { end = expanded[j].span.end; break; }
+            } else if (expanded[j].kind != PPTokenKind::Newline) {
+                header += expanded[j].lexeme;
+            }
+        }
+        if (depth == 0) {
+            return executeInclude(header, /*isAngle=*/true, SourceSpan{begin, end});
+        }
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("unterminated header-name in macro-expanded #include"),
+            .severity = Diagnostic::Severity::Error,
+            .span = SourceSpan{begin, expanded.back().span.end}
+        });
+        return false;
+    }
+
+    if (expanded[i].kind == PPTokenKind::StringLiteral) {
+        auto lit = expanded[i];
+        std::string header = lit.lexeme;
+        if (header.size() >= 2 && header.front() == '"' && header.back() == '"') {
+            header = header.substr(1, header.size() - 2);
+        }
+        if (executeInclude(header, /*isAngle=*/false, lit.span)) return true;
+        return executeInclude(header, /*isAngle=*/true, lit.span);
+    }
+
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("invalid #include after macro expansion: expected <header> or \"header\""),
+        .severity = Diagnostic::Severity::Error,
+        .span = expanded[i].span
+    });
     return false;
 }
 

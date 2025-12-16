@@ -106,11 +106,16 @@ private:
 - Implement `defined(NAME)` operator within `#if`
 - Support `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif` with nesting
 - Skip inactive regions while still recognizing matching `#endif`
+- Status: **Not implemented yet**; Example 2 include test is defined but not executed until this lands.
 
 ### Phase 5: Includes
 - Implement `#include <...>` (system) and `#include "..."` (local)
 - Configurable include search paths
 - Detect and honor include guards; prevent cycles
+- Current status:
+    - Quote includes search the current file directory then fall back to angle search paths (`-I`), reusing the same header-name sequence (C11 6.10.2).
+    - Macro-replaced `#include` is supported: tokens after `include` are macro-expanded and reinterpreted as `<...>` or `"..."`; diagnostics report missing/unterminated header-names.
+    - Cycle detection via inclusion stack is in place; nesting-depth enforcement is deferred.
 
 ### Phase 6: Utilities
 - Implement `#error` (emit failure) and `#warning` (optional)
