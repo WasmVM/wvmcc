@@ -1,5 +1,8 @@
 #include "Tokenizer.hpp"
 #include <cstring>
+#include <istream>
+#include <ostream>
+#include <sstream>
 
 namespace wvmcc {
 
@@ -80,6 +83,11 @@ SourceBuffer::SourceBuffer(const std::string& input) : inputRef(input) {
     inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
 }
 
+SourceBuffer::SourceBuffer(std::istream& in) : inputRef(inputAccum), inStream(&in) {
+    charBuf.reserve(64);
+    inputEndsWithNewline = false;
+}
+
 char SourceBuffer::trigraph_at(std::size_t idx) const {
     if (idx + 2 < inputRef.size() && inputRef[idx] == '?' && inputRef[idx+1] == '?') {
         switch (inputRef[idx+2]) {
@@ -98,7 +106,9 @@ char SourceBuffer::trigraph_at(std::size_t idx) const {
 }
 
 void SourceBuffer::fill_buffer() {
-    while (charBuf.empty() && rawIdx < inputRef.size()) {
+    while (charBuf.empty()) {
+        ensure_input(rawIdx + 3);
+        if (rawIdx >= inputRef.size()) break;
         char c = inputRef[rawIdx];
         // EOL normalize
         if (c == '\r') {
@@ -163,6 +173,15 @@ void SourceBuffer::fill_buffer() {
     }
     // ensure final newline only if original input didn't end with newline
     if (rawIdx >= inputRef.size() && charBuf.empty()) {
+        // For stream-backed input, recompute whether input ends with newline at EOF
+        if (inStream) {
+            if (eof) {
+                inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
+            } else {
+                // Not at EOF yet: do not append final newline
+                return;
+            }
+        }
         if (!inputEndsWithNewline) {
             charBuf.push_back('\n');
             inputEndsWithNewline = true;
@@ -188,12 +207,37 @@ void SourceBuffer::ensure_stream(std::string& stream, std::size_t upto) {
     }
 }
 
+void SourceBuffer::ensure_input(std::size_t upto) {
+    if (!inStream) return; // string-backed
+    while (inputRef.size() <= upto) {
+        int c = inStream->get();
+        if (c == EOF) { eof = true; break; }
+        inputAccum.push_back(static_cast<char>(c));
+    }
+}
+
 void SourceBuffer::reset() {
     st = State::Normal;
     esc = false;
     rawIdx = 0;
     lastEmittedWhitespace = false;
-    inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
+    if (!inStream) {
+        inputEndsWithNewline = (!inputRef.empty() && (inputRef.back() == '\n' || inputRef.back() == '\r'));
+    } else {
+        // Attempt to seek to beginning if stream is seekable
+        std::istream& s = *inStream;
+        if (s.good()) {
+            try {
+                s.clear();
+                s.seekg(0, std::ios::beg);
+                inputAccum.clear();
+                eof = false;
+            } catch (...) {
+                // Non-seekable streams: keep current position, mark eof if already at end
+            }
+        }
+        inputEndsWithNewline = false;
+    }
     charBuf.clear();
     pos = SourcePos{0, 1, 1, 0};
 }
@@ -220,11 +264,7 @@ bool Tokenizer::is_oct(char c) {
 
 Tokenizer::Tokenizer(const std::string& input) : input(input), feeder(input) {}
 
-Tokenizer::Tokenizer(std::istream& in) : input(stream), feeder(stream) {
-    std::ostringstream oss;
-    oss << in.rdbuf();
-    stream = oss.str();
-}
+Tokenizer::Tokenizer(std::istream& in) : input(stream), feeder(in) {}
 
 void Tokenizer::emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end) {
     tokens.push_back(PPToken{kind, SourceSpan{begin, end}, lexeme});

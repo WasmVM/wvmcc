@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <optional>
+#include <istream>
 
 namespace wvmcc {
 
@@ -30,6 +31,7 @@ struct PPToken {
 class SourceBuffer {
 public:
     explicit SourceBuffer(const std::string& input);
+    explicit SourceBuffer(std::istream& in);
     bool next_char(char& outCh);
     void ensure_stream(std::string& stream, std::size_t upto);
     bool lastWhitespace() const { return lastEmittedWhitespace; }
@@ -39,6 +41,9 @@ public:
 private:
     enum class State { Normal, InString, InChar, InBlockComment, InLineComment };
     const std::string& inputRef;
+    std::istream* inStream{nullptr};
+    std::string inputAccum; // used when inStream!=nullptr
+    bool eof{false};
     State st{State::Normal};
     bool esc{false};
     std::size_t rawIdx{0};
@@ -49,12 +54,13 @@ private:
 
     char trigraph_at(std::size_t idx) const;
     void fill_buffer();
+    void ensure_input(std::size_t upto);
 };
 
 class Tokenizer {
 public:
     explicit Tokenizer(const std::string& input);
-        explicit Tokenizer(std::istream& in);
+    explicit Tokenizer(std::istream& in);
     
     // Streaming API: read next token; returns std::nullopt at EOF
     std::optional<PPToken> next();
@@ -118,7 +124,7 @@ private:
     SourceBuffer feeder;
     std::vector<PPToken> tokens;
     std::string stream;
-    size_t streamPos;
+    size_t streamPos{0};
     std::optional<PPToken> lookahead;
 
     void emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end);
