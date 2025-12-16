@@ -15,6 +15,8 @@ public:
     PreprocessResult run(const std::string& inputPath) const;
     // Phase 1: Source mapping + trigraphs + EOL normalization + final newline
     static std::string phase1_normalize(const std::string& input);
+    // Phase 2: Splice lines ending with a backslash (\\\n)
+    static std::string phase2_line_splice(const std::string& input);
 
 private:
 };

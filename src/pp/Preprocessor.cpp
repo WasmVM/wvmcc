@@ -12,8 +12,9 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     }
     std::ostringstream oss;
     oss << ifs.rdbuf();
-    std::string normalized = phase1_normalize(oss.str());
-    return PreprocessResult{normalized, true, std::string()};
+    std::string phase1 = phase1_normalize(oss.str());
+    std::string phase2 = phase2_line_splice(phase1);
+    return PreprocessResult{phase2, true, std::string()};
 }
 
 // Phase 1 implementation: trigraphs, EOL normalization, final newline
@@ -67,6 +68,31 @@ std::string Preprocessor::phase1_normalize(const std::string& input) {
     }
 
     return eol;
+}
+
+// Phase 2 implementation: line splicing of a backslash at end of physical line
+// After Phase 1, input uses only '\n' as line ending.
+// If a line ends with a single backslash before the newline, remove the backslash and newline.
+// Only the final backslash character immediately preceding the newline is eligible.
+std::string Preprocessor::phase2_line_splice(const std::string& input) {
+    std::string out;
+    out.reserve(input.size());
+
+    for (size_t i = 0; i < input.size(); ++i) {
+        char c = input[i];
+        if (c == '\n') {
+            if (!out.empty() && out.back() == '\\') {
+                // splice: remove the trailing backslash and skip this newline
+                out.pop_back();
+                continue; // do not append '\n'
+            }
+            out.push_back('\n');
+        } else {
+            out.push_back(c);
+        }
+    }
+
+    return out;
 }
 
 } // namespace wvmcc

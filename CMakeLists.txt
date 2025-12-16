@@ -26,18 +26,4 @@ install(TARGETS wvmcc RUNTIME DESTINATION bin)
 
 # Tests
 enable_testing()
-set(TEST_ROOT ${PROJECT_ROOT}/tests)
-file(GLOB_RECURSE WVMCC_TEST_SOURCES
-	${TEST_ROOT}/unit/*.cpp
-)
-if(WVMCC_TEST_SOURCES)
-	# Include implementation sources needed by tests (e.g., preprocessor)
-	file(GLOB_RECURSE WVMCC_TEST_IMPL_SOURCES
-		${SRC_ROOT}/pp/*.cpp
-	)
-	add_executable(wvmcc-tests ${WVMCC_TEST_SOURCES} ${WVMCC_TEST_IMPL_SOURCES})
-	target_include_directories(wvmcc-tests PRIVATE ${WASMVM_INCLUDE_DIR} ${SRC_ROOT})
-	target_link_directories(wvmcc-tests PRIVATE ${WASMVM_LIBRARY_DIR})
-	target_link_libraries(wvmcc-tests PRIVATE ${WASMVM_LIBRARY})
-	add_test(NAME unit-tests COMMAND wvmcc-tests)
-endif()
+add_subdirectory(tests)

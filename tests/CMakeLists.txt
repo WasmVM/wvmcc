@@ -1,0 +1,24 @@
+# CMake configuration for unit tests
+
+set(TEST_ROOT ${CMAKE_CURRENT_LIST_DIR})
+set(SRC_ROOT ${PROJECT_SOURCE_DIR}/src)
+
+# Phase 1 unit test
+set(PP_PHASE1_TEST ${TEST_ROOT}/unit/pp_phase1_test.cpp)
+if(EXISTS ${PP_PHASE1_TEST})
+    add_executable(wvmcc-pp-phase1-test ${PP_PHASE1_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp)
+    target_include_directories(wvmcc-pp-phase1-test PRIVATE ${WASMVM_INCLUDE_DIR} ${SRC_ROOT})
+    target_link_directories(wvmcc-pp-phase1-test PRIVATE ${WASMVM_LIBRARY_DIR})
+    target_link_libraries(wvmcc-pp-phase1-test PRIVATE ${WASMVM_LIBRARY})
+    add_test(NAME pp-phase1 COMMAND wvmcc-pp-phase1-test)
+endif()
+
+# Phase 2 unit test
+set(PP_PHASE2_TEST ${TEST_ROOT}/unit/pp_phase2_test.cpp)
+if(EXISTS ${PP_PHASE2_TEST})
+    add_executable(wvmcc-pp-phase2-test ${PP_PHASE2_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp)
+    target_include_directories(wvmcc-pp-phase2-test PRIVATE ${WASMVM_INCLUDE_DIR} ${SRC_ROOT})
+    target_link_directories(wvmcc-pp-phase2-test PRIVATE ${WASMVM_LIBRARY_DIR})
+    target_link_libraries(wvmcc-pp-phase2-test PRIVATE ${WASMVM_LIBRARY})
+    add_test(NAME pp-phase2 COMMAND wvmcc-pp-phase2-test)
+endif()
