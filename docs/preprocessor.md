@@ -97,11 +97,13 @@ private:
 - Respect identifier boundaries; no expansion inside string/char literals
 - Status: Object-like macros fully implemented with expansion tracking to prevent recursion.
 
-### Phase 3: Function-like Macros — ✅ Done
+### Phase 3: Function-like Macros — 🟡 Partial
 - Implement `#define NAME(arg1, ...) replacement`
-- Argument substitution, stringification `#`, token pasting `##`, variadic handling `__VA_ARGS__`
-- Blue-paint marking to avoid re-expansion within same pass
-- Status: Function-like macros with parameter substitution and variadic support implemented; stringification and token pasting deferred.
+- ✅ Argument substitution and variadic handling `__VA_ARGS__`
+- ❌ Stringification `#` operator (deferred)
+- ❌ Token pasting `##` operator (deferred)
+- 🟡 Basic recursion prevention (not full paint semantics)
+- Status: Function-like macros with parameter substitution and variadic support fully implemented. Stringification and token pasting operators deferred.
 
 ### Phase 4: Conditional Compilation — ✅ Done
 - Implement `#if` expression evaluation per C17 6.6 (integer constant expressions)
@@ -132,6 +134,30 @@ private:
 - Implement `#line` (affect emitted `SourcePos`)
 - Handle `#pragma` as pass-through or targeted behaviors
 - Status: Not yet implemented; planned for later milestone.
+
+### Phase 7 (Enhancement): Macro Replacement Operators — 🚧 Deferred
+- Implement stringification `#` operator (C17 §6.10.3.1)
+- Implement token pasting `##` operator (C17 §6.10.3.2)
+- Implement full rescanning with paint semantics (C17 §6.10.3.3)
+- Status: Not yet implemented. Current recursion prevention sufficient for common cases.
+
+## Implementation Status Summary
+
+| Feature | Status | Notes |
+|---------|--------|-------|
+| Object-like macros | ✅ | Full support with expansion |
+| Function-like macros | ✅ | Parameters, argument substitution |
+| Variadic macros `__VA_ARGS__` | ✅ | Per C17 §6.10.3.1 |
+| Stringification `#` | ❌ | Deferred |
+| Token pasting `##` | ❌ | Deferred |
+| Full rescanning with paint | 🟡 | Basic recursion prevention only |
+| `#define` / `#undef` | ✅ | Full support |
+| Conditional directives | ✅ | All variants |
+| Constant expressions | ✅ | C17 §6.6 (except `sizeof`) |
+| `#include` directives | ✅ | Paths, macros, cycles |
+| Predefined macros | ❌ | Deferred |
+| `#error`, `#warning` | ❌ | Deferred |
+| `#line`, `#pragma` | ❌ | Deferred |
 
 ## Error Handling
 - All directive errors must include `SourcePos` (line, column)

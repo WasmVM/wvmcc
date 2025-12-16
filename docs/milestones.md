@@ -21,16 +21,19 @@ This document tracks key milestones achieved so far and the upcoming work items 
 - Header-name recognition (6.4.7) in `#include` directives
   - Post-tokenization transform combines `<...>` or "..." into a single `HeaderName`
 - **Preprocessor Phase 4: Complete directive processing and macro expansion**
-  - Object-like and function-like macros (`#define`, `#undef`) with recursion guards
-  - Variadic macros with `__VA_ARGS__` support
-  - Macro expansion with argument substitution
-  - Conditional compilation (`#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`)
-  - Constant expression evaluation (ConstExprParser) with full operator support
-  - `defined()` operator with proper semantics (no operand expansion)
-  - `#include` directives with cycle detection and search path resolution
-  - Macro-replaced includes (expand then reparse header-name)
-  - Nested conditional tracking and inactive region skipping
-  - Structured diagnostics with severity levels and source spans
+  - ✅ Object-like and function-like macros (`#define`, `#undef`) with recursion guards
+  - ✅ Variadic macros with `__VA_ARGS__` support
+  - ✅ Macro expansion with argument substitution
+  - ✅ Conditional compilation (`#if`, `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif`)
+  - ✅ Constant expression evaluation (ConstExprParser) with full operator support
+  - ✅ `defined()` operator with proper semantics (no operand expansion)
+  - ✅ `#include` directives with cycle detection and search path resolution
+  - ✅ Macro-replaced includes (expand then reparse header-name)
+  - ✅ Nested conditional tracking and inactive region skipping
+  - ✅ Structured diagnostics with severity levels and source spans
+  - ❌ Stringification `#` operator (not implemented, deferred)
+  - ❌ Token pasting `##` operator (not implemented, deferred)
+  - 🟡 Proper rescanning with paint semantics (basic recursion prevention only)
 - Unit tests
   - Preprocessor: basic, macro expansion, conditionals, includes, constant expressions
   - Tokenizer: whitespace, punctuators, strings, chars, pp-number, identifiers
