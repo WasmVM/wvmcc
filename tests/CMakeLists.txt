@@ -124,6 +124,14 @@ if(EXISTS ${PP_LINE_MACRO_TEST})
     add_test(NAME pp-line-macro COMMAND wvmcc-pp-line-macro-test)
 endif()
 
+# #pragma once tests
+set(PP_PRAGMA_ONCE_TEST ${TEST_ROOT}/unit/pp_pragma_once_test.cpp)
+if(EXISTS ${PP_PRAGMA_ONCE_TEST})
+    add_executable(wvmcc-pp-pragma-once-test ${PP_PRAGMA_ONCE_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp)
+    target_include_directories(wvmcc-pp-pragma-once-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-pragma-once COMMAND wvmcc-pp-pragma-once-test)
+endif()
+
 # Include guard optimization tests (deferred - complex pattern detection needed)
 # set(PP_INCLUDE_GUARD_TEST ${TEST_ROOT}/unit/pp_include_guard_test.cpp)
 # if(EXISTS ${PP_INCLUDE_GUARD_TEST})

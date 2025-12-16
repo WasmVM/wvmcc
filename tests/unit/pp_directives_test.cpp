@@ -140,7 +140,7 @@ static int test_pragma_directive() {
     
     {
         std::ofstream ofs(srcName);
-        ofs << "#pragma once\n";
+        ofs << "#pragma unknown_directive\n";
         ofs << "int z = 3;\n";
     }
 
@@ -154,7 +154,7 @@ static int test_pragma_directive() {
         return 1;
     }
     
-    // Check that pragma diagnostic was generated
+    // Check that pragma diagnostic was generated (for unknown pragmas, not "once")
     const auto& diags = pp.getDiagnostics();
     bool foundPragma = false;
     for (const auto& d : diags) {

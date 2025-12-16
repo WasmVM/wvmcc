@@ -65,13 +65,22 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                                           const std::string& currentDir) {
     auto executeInclude = [&](const std::string& header, bool isAngle, std::optional<SourceSpan> span) -> bool {
         if (auto resolved = resolveInclude(header, isAngle, currentDir)) {
-            // TODO: Include guard optimization disabled for now
+            // #pragma once optimization: skip if already processed
+            if (pragmaOnceFiles.count(*resolved) > 0) {
+                return true; // File has #pragma once and was already included, skip it
+            }
             
             Preprocessor child;
             child.includePaths = includePaths;
             child.inclusionStack = inclusionStack;
+            child.pragmaOnceFiles = pragmaOnceFiles;  // Share pragma once info
             auto childRes = child.run(*resolved);
             diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+            
+            // Merge back pragma once files from child
+            for (const auto& file : child.pragmaOnceFiles) {
+                pragmaOnceFiles.insert(file);
+            }
             
             if (childRes.success) {
                 for (const auto& tk : childRes.tokens) out.push_back(tk);
@@ -1375,7 +1384,30 @@ bool Preprocessor::handleLineDirective(const std::vector<PPToken>& tokens) {
 
 bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
     // #pragma directive: implementation-defined behavior
-    // We'll use a pass-through approach: emit a diagnostic but continue
+    // Special handling for #pragma once
+    
+    // Check if this is #pragma once
+    bool isPragmaOnce = false;
+    if (!tokens.empty()) {
+        size_t idx = 0;
+        // Skip leading whitespace
+        while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++;
+        
+        if (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Identifier && 
+            tokens[idx].lexeme == "once") {
+            // Check there's nothing after "once" (except whitespace)
+            idx++;
+            while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++;
+            
+            if (idx >= tokens.size()) {
+                isPragmaOnce = true;
+                // Mark current file as having #pragma once
+                if (!inclusionStack.empty()) {
+                    pragmaOnceFiles.insert(inclusionStack.back());
+                }
+            }
+        }
+    }
     
     std::string pragmaContent;
     for (const auto& tok : tokens) {
@@ -1393,12 +1425,14 @@ bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
         pragmaContent.pop_back();
     }
     
-    // Emit an info diagnostic about the pragma (not an error or warning)
-    diagnostics.push_back(Diagnostic{
-        .message = std::string("#pragma: ") + (pragmaContent.empty() ? "(empty)" : pragmaContent),
-        .severity = Diagnostic::Severity::Warning, // Use warning level for visibility
-        .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
-    });
+    // Emit a diagnostic about the pragma (only if not pragma once, which is handled silently)
+    if (!isPragmaOnce) {
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("#pragma: ") + (pragmaContent.empty() ? "(empty)" : pragmaContent),
+            .severity = Diagnostic::Severity::Warning, // Use warning level for visibility
+            .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
+        });
+    }
     
     return true; // #pragma does not cause preprocessing to fail
 }

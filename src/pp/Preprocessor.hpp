@@ -5,6 +5,7 @@
 #include <optional>
 #include <deque>
 #include <unordered_map>
+#include <unordered_set>
 #include "Tokenizer.hpp"
 #include "MacroTable.hpp"
 #include "Diagnostics.hpp"
@@ -38,6 +39,10 @@ private:
     // Include guard optimization: maps file path to its guard macro name
     // If a file has a detected guard and the macro is defined, we skip re-processing
     std::unordered_map<std::string, std::string> includeGuards{};
+    
+    // #pragma once optimization: set of files that have #pragma once
+    // These files should only be processed once per translation unit
+    std::unordered_set<std::string> pragmaOnceFiles{};
 
     // Structured diagnostics collected during preprocessing
     std::vector<Diagnostic> diagnostics{};
