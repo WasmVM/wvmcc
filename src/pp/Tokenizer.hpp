@@ -5,6 +5,7 @@
 #include <deque>
 #include <istream>
 #include <unordered_set>
+#include "../common.hpp"
 
 namespace wvmcc {
 
@@ -19,9 +20,6 @@ enum class PPTokenKind {
     Newline,
     Other
 };
-
-struct SourcePos { int fileId; int line; int column; std::size_t offset; };
-struct SourceSpan { SourcePos begin; SourcePos end; };
 
 struct PPToken {
     PPTokenKind kind;
