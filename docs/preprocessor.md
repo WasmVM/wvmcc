@@ -100,10 +100,14 @@ private:
 ### Phase 3: Function-like Macros — 🟡 Partial
 - Implement `#define NAME(arg1, ...) replacement`
 - ✅ Argument substitution and variadic handling `__VA_ARGS__`
-- ❌ Stringification `#` operator (deferred)
-- ❌ Token pasting `##` operator (deferred)
-- 🟡 Basic recursion prevention (not full paint semantics)
-- Status: Function-like macros with parameter substitution and variadic support fully implemented. Stringification and token pasting operators deferred.
+- ❌ Stringification `#` operator (deferred to Phase 7)
+- ❌ Token pasting `##` operator (deferred to Phase 7)
+- 🚧 **GOAL: Full paint semantics and proper rescanning** (currently limited)
+- **Current Status**: Basic recursion prevention via `expandedMacros` set. This is INSUFFICIENT for complex nested macros per C17 §6.10.3.3. Need to implement full "blue paint" marking where:
+  - Macro names in replacement lists are marked as "painted" 
+  - Marked names skip expansion even during rescanning
+  - Marks persist through nested replacements
+  - Properly handles the example from §6.10.3.2 with `##` creating new token sequences
 
 ### Phase 4: Conditional Compilation — ✅ Done
 - Implement `#if` expression evaluation per C17 6.6 (integer constant expressions)
@@ -137,9 +141,21 @@ private:
 
 ### Phase 7 (Enhancement): Macro Replacement Operators — 🚧 Deferred
 - Implement stringification `#` operator (C17 §6.10.3.1)
+  - Convert macro parameter to string literal
+  - Escape handling: insert `\` before each `"` and `\` in literals
+  - Whitespace normalization between tokens
 - Implement token pasting `##` operator (C17 §6.10.3.2)
+  - Concatenate adjacent tokens into single token
+  - Placemarker handling for empty arguments
+  - Token validation after concatenation
+  - Rescanning for further macro replacement
 - Implement full rescanning with paint semantics (C17 §6.10.3.3)
-- Status: Not yet implemented. Current recursion prevention sufficient for common cases.
+  - Track expansion state with painted tokens (not just per-invocation set)
+  - Painted names skip expansion in all nested replacements
+  - Handle complex cases like the `hash_hash` example in §6.10.3.2
+  - **Priority**: Implement full paint semantics first (can do before `#` and `##`)
+- **Current Limitation**: Basic recursion prevention (§3) insufficient; Phase 7a should focus on full paint implementation before operators.
+- Status: Not yet implemented. Stringification and token pasting deferred. Full rescanning with paint is a prerequisite for correct implementation.
 
 ## Implementation Status Summary
 
@@ -148,16 +164,16 @@ private:
 | Object-like macros | ✅ | Full support with expansion |
 | Function-like macros | ✅ | Parameters, argument substitution |
 | Variadic macros `__VA_ARGS__` | ✅ | Per C17 §6.10.3.1 |
-| Stringification `#` | ❌ | Deferred |
-| Token pasting `##` | ❌ | Deferred |
-| Full rescanning with paint | 🟡 | Basic recursion prevention only |
+| Stringification `#` | ❌ | Phase 7, deferred |
+| Token pasting `##` | ❌ | Phase 7, deferred |
+| Full rescanning with paint | 🚧 | **NEEDED**: Basic prevention insufficient; full paint semantics planned for Phase 7a |
 | `#define` / `#undef` | ✅ | Full support |
 | Conditional directives | ✅ | All variants |
 | Constant expressions | ✅ | C17 §6.6 (except `sizeof`) |
 | `#include` directives | ✅ | Paths, macros, cycles |
-| Predefined macros | ❌ | Deferred |
-| `#error`, `#warning` | ❌ | Deferred |
-| `#line`, `#pragma` | ❌ | Deferred |
+| Predefined macros | ❌ | `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `__STDC__` — future work |
+| `#error`, `#warning` | ❌ | Phase 6, deferred |
+| `#line`, `#pragma` | ❌ | Phase 6, deferred |
 
 ## Error Handling
 - All directive errors must include `SourcePos` (line, column)
@@ -178,7 +194,12 @@ Tokenizer-focused tests use range-style iteration to verify phases 1–3 and lit
 - Avoid quadratic behavior in macro substitution by linear passes with markers
 
 ## Future Extensions
+- Stringification and token pasting operators with proper rescanning
+- Predefined macros: `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__VA_ARGS__` in non-variadic context
 - `#pragma once` fast-path support via include handler
+- Diagnostic directives: `#error`, `#warning`
+- Line information: `#line` directive
+- Utilities: `#pragma` extended handling
 - Configurable predefined macros by target/flags
 - File-level preprocessing API (beyond path-based run)
 
