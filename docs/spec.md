@@ -46,6 +46,85 @@
   - Delete backslash-newline pairs; only the last backslash on a physical line is eligible.
 - Phase 3: Preprocessing tokenization + comments
   - Decompose into pp-tokens and whitespace; replace comments with a single space; retain newlines; error on partial pp-token/comment at EOF.
+### Preprocessing Tokens (PPToken)
+
+Per C17 §6.4, Phase 3 decomposes the character stream into preprocessing-tokens and sequences of whitespace. We will represent both pp-tokens and whitespace as tokens, with explicit new-line tokens to preserve directive boundaries and macro spacing.
+
+- Kind enum:
+  - `header-name` (only recognized in `#include` context)
+  - `identifier`
+  - `pp-number`
+  - `character-constant`
+  - `string-literal`
+  - `punctuator`
+  - `whitespace` (one or more of space, HT, VT, FF)
+  - `newline` (`\n` after Phase 1 normalization)
+  - `other` (each non-white-space character that cannot be one of the above)
+
+- Punctuators supported (C17 + preprocessor):
+  - Single-char: `[](){}.,;&*+-~!/%<>^|?:=#` and digraphs: `<: :> <% %> %:`
+  - Multi-char: `-> ++ -- << >> <= >= == != && || ... *= /= %= += -= <<= >>= &= ^= |= ##`
+  - Note: `##` and `#` are only meaningful within macro contexts but still tokenized as punctuators.
+
+- Source tracking:
+  - `SourcePos { fileId, line, column, offset }`
+  - `SourceSpan { begin, end }` attached to every token.
+
+- Whitespace representation:
+  - We emit `whitespace` tokens for contiguous runs of space/tab/vtab/form-feed.
+  - We emit `newline` tokens for each `\n`. Comments replaced by a single space become a `whitespace` token of length 1.
+  - This explicit model simplifies `#`-at-line-start detection and macro expansion spacing rules without relying on per-token trivia.
+
+- Proposed C++ representation (conceptual):
+```
+enum class PPTokenKind {
+  HeaderName,
+  Identifier,
+  PPNumber,
+  CharConst,
+  StringLiteral,
+  Punctuator,
+  Whitespace,
+  Newline,
+  Other
+};
+
+enum class PPPunctuator {
+  LBracket, RBracket, LParen, RParen, LBrace, RBrace,
+  Dot, Arrow, Comma, Semicolon, Colon, Question,
+  Plus, Minus, Star, Slash, Percent, Tilde, Bang,
+  Amp, Pipe, Caret,
+  Lt, Gt, Le, Ge, EqEq, Ne,
+  Shl, Shr, AndAnd, OrOr,
+  Ellipsis,
+  Assign, MulAssign, DivAssign, ModAssign, AddAssign, SubAssign,
+  ShlAssign, ShrAssign, AndAssign, XorAssign, OrAssign,
+  Hash, HashHash,
+  Digraph_LBracket, Digraph_RBracket, Digraph_LBrace, Digraph_RBrace,
+  Digraph_Hash, Digraph_HashHash
+};
+
+struct SourcePos { int fileId; int line; int column; std::size_t offset; };
+struct SourceSpan { SourcePos begin; SourcePos end; };
+
+struct PPToken {
+  PPTokenKind kind;
+  SourceSpan span;
+  std::string lexeme;      // raw bytes after phases 1–3
+  std::optional<PPPunctuator> punct; // when kind == Punctuator
+  struct HeaderInfo { enum Type { Angle, Quote } type; };
+  std::optional<HeaderInfo> header;   // when kind == HeaderName
+};
+
+using PPTokenStream = std::vector<PPToken>;
+```
+
+- Notes:
+  - `header-name` tokens carry `HeaderInfo::type` to distinguish `<...>` vs `"..."` forms and retain raw lexeme; only recognized when the first non-space token after `#include`.
+  - `pp-number` retains raw bytes; semantic interpretation (e.g., UCNs in identifiers) is deferred until later phases.
+  - Explicit `newline` tokens mark logical line boundaries; `whitespace` runs may be coalesced by later stages.
+  - Extended characters are UTF-8; tokenization treats them as part of identifiers/literals where allowed.
+
 - Phase 4: Directives + macro expansion
   - Implement `#define/#undef/#include/#if/#ifdef/#ifndef/#elif/#else/#endif`, `_Pragma` later; expand object/function-like macros; delete directives; includes processed recursively (phases 1–4).
 - Phase 5: Char constants and strings
