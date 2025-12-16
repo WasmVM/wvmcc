@@ -3,48 +3,28 @@
 #include <string>
 
 #include "../../src/pp/Tokenizer.hpp"
-
-static bool expectKinds(const std::string& name, const std::string& input,
-                        const std::vector<wvmcc::PPTokenKind>& kinds,
-                        const std::vector<std::string>& lexemes) {
-    auto toks = wvmcc::Tokenizer::tokenize_with_punctuators(input);
-    if (toks.size() != kinds.size() || toks.size() != lexemes.size()) {
-        std::cerr << "[FAIL] " << name << ": size mismatch: expected kinds="
-                  << kinds.size() << ", lexemes=" << lexemes.size()
-                  << ", got tokens=" << toks.size() << std::endl;
-        return false;
-    }
-    for (size_t i = 0; i < kinds.size(); ++i) {
-        if (toks[i].kind != kinds[i] || toks[i].lexeme != lexemes[i]) {
-            std::cerr << "[FAIL] " << name << ": token " << i
-                      << " kind/lexeme mismatch\n  expected kind=" << (int)kinds[i]
-                      << " lexeme='" << lexemes[i] << "'\n  got kind="
-                      << (int)toks[i].kind << " lexeme='" << toks[i].lexeme << "'\n";
-            return false;
-        }
-    }
-    return true;
-}
+#include "../include/test_utils.hpp"
 
 int main() {
     using K = wvmcc::PPTokenKind;
+    using testutil::expectKindsLex;
     bool all_ok = true;
 
-    all_ok &= expectKinds(
+    all_ok &= expectKindsLex(
         "spaces and letters",
         "  abc\n",
         {K::Whitespace, K::Other, K::Other, K::Other, K::Newline},
         {"  ", "a", "b", "c", "\n"}
     );
 
-    all_ok &= expectKinds(
+    all_ok &= expectKindsLex(
         "tabs and punctuation",
         "\t= +\n",
         {K::Whitespace, K::Punctuator, K::Whitespace, K::Punctuator, K::Newline},
         {"\t", "=", " ", "+", "\n"}
     );
 
-    all_ok &= expectKinds(
+    all_ok &= expectKindsLex(
         "mixed vtab/ff",
         "\v\fX\n",
         {K::Whitespace, K::Other, K::Newline},
