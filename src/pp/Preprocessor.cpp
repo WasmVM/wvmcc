@@ -512,10 +512,92 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
         
         const Macro* m = *macro;
         
-        // For now, only handle object-like macros
         if (m->isFunction) {
-            // TODO: Implement function-like macro expansion
-            result.push_back(t);
+            // Function-like macro: check if next non-whitespace token is '('
+            // Note: In C, there must be no space between macro name and (
+            // However, we'll be lenient and allow whitespace for now
+            size_t j = i + 1;
+            
+            // Skip whitespace to find '('
+            while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) {
+                j++;
+            }
+            
+            // Check if we have '(' - if not, don't expand
+            if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator || 
+                tokens[j].lexeme != "(") {
+                result.push_back(t);
+                continue;
+            }
+            
+            // Collect argument tokens between '(' and ')'
+            std::vector<std::vector<PPToken>> args;
+            size_t argStart = j + 1;
+            int parenDepth = 1;
+            size_t k = argStart;
+            
+            while (k < tokens.size() && parenDepth > 0) {
+                if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == "(") {
+                    parenDepth++;
+                } else if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == ")") {
+                    parenDepth--;
+                    if (parenDepth == 0) {
+                        // End of arguments - collect the last argument
+                        std::vector<PPToken> lastArg;
+                        for (size_t l = argStart; l < k; ++l) {
+                            if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == ",") {
+                                args.push_back(lastArg);
+                                lastArg.clear();
+                                argStart = l + 1;
+                            } else if (tokens[l].kind != PPTokenKind::Whitespace || !lastArg.empty()) {
+                                lastArg.push_back(tokens[l]);
+                            }
+                        }
+                        if (!lastArg.empty() || args.empty()) {
+                            args.push_back(lastArg);
+                        }
+                        break;
+                    }
+                }
+                k++;
+            }
+            
+            // Check argument count matches parameter count
+            if (args.size() != m->params.size() && !m->variadic) {
+                // Mismatch - don't expand
+                result.push_back(t);
+                continue;
+            }
+            
+            // Perform substitution: replace parameters in replacement with arguments
+            std::vector<PPToken> expanded;
+            for (const auto& repl : m->replacement) {
+                bool isParam = false;
+                for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+                    if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
+                        // Replace parameter with argument
+                        if (pIdx < args.size()) {
+                            for (const auto& arg : args[pIdx]) {
+                                expanded.push_back(arg);
+                            }
+                        }
+                        isParam = true;
+                        break;
+                    }
+                }
+                if (!isParam) {
+                    expanded.push_back(repl);
+                }
+            }
+            
+            // Add expanded tokens to result
+            for (const auto& exp : expanded) {
+                result.push_back(exp);
+            }
+            
+            // Move past the closing )
+            i = k;
+            expandedMacros.insert(t.lexeme);
             continue;
         }
         
@@ -526,10 +608,6 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
         for (const auto& repl : m->replacement) {
             result.push_back(repl);
         }
-        
-        // Rescan replacement tokens for further expansions
-        // (This prevents one level of recursion but allows nested macros)
-        // For simple cases, this is adequate
     }
     
     return result;
