@@ -3,7 +3,7 @@
 This document outlines the design and phased plan to implement a C preprocessor for WVMCC. Tokenization (including phase 1–3 preprocessing) is implemented via a streaming `Tokenizer` and `SourceBuffer`. The Tokenizer now provides `next()`, `peek()`, and range-style iteration; the former batch `tokenize()` API has been removed. This plan focuses on directive parsing, macro expansion, conditional compilation, and includes, moving toward a single-pass model.
 
 ## Goals
-- Standards-compliant handling of C preprocessor directives (target C11/C17 semantics)
+- Standards-compliant handling of C17 preprocessor directives (ISO/IEC 9899:2018)
 - Efficient single-pass behavior with clear separation of responsibilities
 - Robust error reporting with source positions
 - Deterministic macro expansion with recursion protection
@@ -102,10 +102,16 @@ private:
 - Blue-paint marking to avoid re-expansion within same pass
 
 ### Phase 4: Conditional Compilation
-- Implement `#if` expression evaluation (integer constant expressions)
-- Implement `defined(NAME)` operator within `#if`
-- Support `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif` with nesting
-- Skip inactive regions while still recognizing matching `#endif`
+- Implement `#if` expression evaluation per C17 6.6 (integer constant expressions)
+  - Support integer/character constants, sizeof, defined(NAME) preprocessor operator
+  - Arithmetic, bitwise, logical, relational, equality, and ternary operators
+  - Reject disallowed operators: assignment, increment/decrement, function calls, comma
+  - Short-circuit evaluation for && and || to avoid divide-by-zero
+  - Macro expansion before expression parse
+- Implement `defined(NAME)` operator: evaluates to 1 if NAME is defined, 0 otherwise
+- Support `#ifdef`, `#ifndef`, `#elif`, `#else`, `#endif` with arbitrary nesting
+- Skip tokens in inactive regions; continue parsing directives to maintain nesting balance
+- Emit diagnostics for unmatched/duplicate directives and malformed expressions
 - Status: **Not implemented yet**; Example 2 include test is defined but not executed until this lands.
 
 ### Phase 5: Includes
@@ -113,7 +119,7 @@ private:
 - Configurable include search paths
 - Detect and honor include guards; prevent cycles
 - Current status:
-    - Quote includes search the current file directory then fall back to angle search paths (`-I`), reusing the same header-name sequence (C11 6.10.2).
+    - Quote includes search the current file directory first, then fall back to angle-style search paths (`-I`), reusing the same header-name sequence (C17 6.10.2).
     - Macro-replaced `#include` is supported: tokens after `include` are macro-expanded and reinterpreted as `<...>` or `"..."`; diagnostics report missing/unterminated header-names.
     - Cycle detection via inclusion stack is in place; nesting-depth enforcement is deferred.
 

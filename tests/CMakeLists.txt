@@ -91,3 +91,11 @@ if(EXISTS ${PP_MACRO_TEST})
     target_include_directories(wvmcc-pp-macro-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
     add_test(NAME pp-macro COMMAND wvmcc-pp-macro-test)
 endif()
+
+# Conditional directive tests
+set(PP_CONDITIONAL_TEST ${TEST_ROOT}/unit/pp_conditional_test.cpp)
+if(EXISTS ${PP_CONDITIONAL_TEST})
+    add_executable(wvmcc-pp-conditional-test ${PP_CONDITIONAL_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp)
+    target_include_directories(wvmcc-pp-conditional-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-conditional COMMAND wvmcc-pp-conditional-test)
+endif()

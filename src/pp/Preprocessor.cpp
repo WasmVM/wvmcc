@@ -241,19 +241,20 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
         }
 
         if (t.kind == PPTokenKind::Newline) {
+            // Emit newlines even in inactive regions to maintain line count
             out.push_back(t);
             atLineStart = true;
             continue;
         }
         if (atLineStart) {
             if (t.kind == PPTokenKind::Whitespace) {
+                // Emit whitespace at line start regardless of conditional state
                 out.push_back(t);
                 // still at line start until a non-whitespace token
                 continue;
             }
             if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
-                // Parse directive keyword
-                out.push_back(t);
+                // Don't push '#' yet; we'll decide later if this is a recognized directive
                 // Skip spaces (do not emit) between '#' and directive keyword
                 while (auto p = tokenizer.peek()) {
                     if (p->kind == PPTokenKind::Whitespace) { tokenizer.next(); }
@@ -261,12 +262,14 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                 }
                 auto dir = tokenizer.peek();
                 if (dir && dir->kind == PPTokenKind::Identifier) {
-                    // Push directive keyword
-                    out.push_back(*tokenizer.next());
+                    // Consume directive keyword (don't push yet)
+                    tokenizer.next();
                     // Special handling for include header-name recognition
                     if (dir->lexeme == "include") {
                         // For executed includes, do not emit '#' or 'include' tokens
-                        bool executed = handleIncludeDirective(tokenizer, out, currentDir);
+                        // Only execute includes if we're in an active conditional region
+                        bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                        bool executed = shouldExecute && handleIncludeDirective(tokenizer, out, currentDir);
                         if (!executed) {
                             // Check if include failed due to error
                             bool hasErrorDiag = false;
@@ -287,16 +290,115 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                     } else {
                         // Other directives: parse and execute
                         if (dir->lexeme == "define") {
-                            if (!handleDefineDirective(tokenizer)) {
-                                hasErrors = true;
+                            // Only execute #define if in active region
+                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                            if (shouldExecute) {
+                                if (!handleDefineDirective(tokenizer)) {
+                                    hasErrors = true;
+                                }
+                            } else {
+                                // Skip directive in inactive region
+                                while (auto a = tokenizer.peek()) {
+                                    if (a->kind == PPTokenKind::Newline) break;
+                                    tokenizer.next();
+                                }
                             }
                         } else if (dir->lexeme == "undef") {
-                            if (!handleUndefDirective(tokenizer)) {
+                            // Only execute #undef if in active region
+                            bool shouldExecute = conditionalStack.empty() || conditionalStack.back().currentlyActive;
+                            if (shouldExecute) {
+                                if (!handleUndefDirective(tokenizer)) {
+                                    hasErrors = true;
+                                }
+                            } else {
+                                // Skip directive in inactive region
+                                while (auto a = tokenizer.peek()) {
+                                    if (a->kind == PPTokenKind::Newline) break;
+                                    tokenizer.next();
+                                }
+                            }
+                        } else if (dir->lexeme == "if") {
+                            auto lineTokens = collectLineTokens(tokenizer);
+                            if (!handleIfDirective(tokenizer, lineTokens)) {
+                                hasErrors = true;
+                            }
+                        } else if (dir->lexeme == "ifdef") {
+                            auto lineTokens = collectLineTokens(tokenizer);
+                            if (lineTokens.empty()) {
+                                diagnostics.push_back(Diagnostic{
+                                    .message = "expected macro name after #ifdef",
+                                    .severity = Diagnostic::Severity::Error,
+                                    .span = std::nullopt
+                                });
+                                hasErrors = true;
+                            } else {
+                                // Find identifier in line tokens (skip whitespace)
+                                std::string macroName;
+                                for (const auto& lt : lineTokens) {
+                                    if (lt.kind == PPTokenKind::Identifier) {
+                                        macroName = lt.lexeme;
+                                        break;
+                                    }
+                                }
+                                if (macroName.empty()) {
+                                    diagnostics.push_back(Diagnostic{
+                                        .message = "expected macro name after #ifdef",
+                                        .severity = Diagnostic::Severity::Error,
+                                        .span = std::nullopt
+                                    });
+                                    hasErrors = true;
+                                } else {
+                                    if (!handleIfdefDirective(macroName)) {
+                                        hasErrors = true;
+                                    }
+                                }
+                            }
+                        } else if (dir->lexeme == "ifndef") {
+                            auto lineTokens = collectLineTokens(tokenizer);
+                            if (lineTokens.empty()) {
+                                diagnostics.push_back(Diagnostic{
+                                    .message = "expected macro name after #ifndef",
+                                    .severity = Diagnostic::Severity::Error,
+                                    .span = std::nullopt
+                                });
+                                hasErrors = true;
+                            } else {
+                                // Find identifier in line tokens (skip whitespace)
+                                std::string macroName;
+                                for (const auto& lt : lineTokens) {
+                                    if (lt.kind == PPTokenKind::Identifier) {
+                                        macroName = lt.lexeme;
+                                        break;
+                                    }
+                                }
+                                if (macroName.empty()) {
+                                    diagnostics.push_back(Diagnostic{
+                                        .message = "expected macro name after #ifndef",
+                                        .severity = Diagnostic::Severity::Error,
+                                        .span = std::nullopt
+                                    });
+                                    hasErrors = true;
+                                } else {
+                                    if (!handleIfndefDirective(macroName)) {
+                                        hasErrors = true;
+                                    }
+                                }
+                            }
+                        } else if (dir->lexeme == "elif") {
+                            auto lineTokens = collectLineTokens(tokenizer);
+                            if (!handleElifDirective(tokenizer, lineTokens)) {
+                                hasErrors = true;
+                            }
+                        } else if (dir->lexeme == "else") {
+                            if (!handleElseDirective()) {
+                                hasErrors = true;
+                            }
+                        } else if (dir->lexeme == "endif") {
+                            if (!handleEndifDirective()) {
                                 hasErrors = true;
                             }
                         } else {
-                            // Other directives: consume until newline but do not execute; emit as-is
-                            // TODO: Implement conditional stack handling (#if/#ifdef/#ifndef/#elif/#else/#endif)
+                            // Unknown directive: consume until newline but emit as-is
                             while (auto a = tokenizer.peek()) {
                                 if (a->kind == PPTokenKind::Newline) break;
                                 out.push_back(*tokenizer.next());
@@ -309,12 +411,16 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
                 continue;
             }
             // Non-directive non-whitespace at line start
-            out.push_back(t);
+            if (conditionalStack.empty() || conditionalStack.back().currentlyActive) {
+                out.push_back(t);
+            }
             atLineStart = false;
             continue;
         }
         // Normal token outside of line start
-        out.push_back(t);
+        if (conditionalStack.empty() || conditionalStack.back().currentlyActive) {
+            out.push_back(t);
+        }
     }
 
     if (!endsWithNewline) {
@@ -323,6 +429,16 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) {
             .severity = Diagnostic::Severity::Warning,
             .span = std::nullopt
         });
+    }
+    
+    // Check for unclosed conditional directives
+    if (!conditionalStack.empty()) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#if/#ifdef/#ifndef without matching #endif",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        hasErrors = true;
     }
     
     popInclusion();
@@ -593,6 +709,512 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
     }
     
     return result;
+}
+
+std::optional<int64_t> Preprocessor::evaluateConstantExpression(const std::vector<PPToken>& tokens) {
+    // Expand macros first, then evaluate as integer constant expression (C17 6.6)
+    auto expanded = expandMacros(tokens);
+    
+    // Skip leading/trailing whitespace
+    size_t i = 0;
+    while (i < expanded.size() && expanded[i].kind == PPTokenKind::Whitespace) i++;
+    size_t end = expanded.size();
+    while (end > i && expanded[end - 1].kind == PPTokenKind::Whitespace) end--;
+    
+    if (i >= end) {
+        diagnostics.push_back(Diagnostic{
+            .message = "empty constant expression in #if/#elif",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return std::nullopt;
+    }
+
+    // Simple recursive descent parser for integer expressions with operator precedence
+    // Helper lambda to skip whitespace
+    auto skipWhitespace = [&expanded, &end](size_t& pos) {
+        while (pos < end && expanded[pos].kind == PPTokenKind::Whitespace) pos++;
+    };
+    
+    std::function<std::optional<int64_t>(size_t&)> parseExpr;
+    std::function<std::optional<int64_t>(size_t&)> parseTernary;
+    std::function<std::optional<int64_t>(size_t&)> parseLogicalOr;
+    std::function<std::optional<int64_t>(size_t&)> parseLogicalAnd;
+    std::function<std::optional<int64_t>(size_t&)> parseBitwiseOr;
+    std::function<std::optional<int64_t>(size_t&)> parseBitwiseXor;
+    std::function<std::optional<int64_t>(size_t&)> parseBitwiseAnd;
+    std::function<std::optional<int64_t>(size_t&)> parseEquality;
+    std::function<std::optional<int64_t>(size_t&)> parseRelational;
+    std::function<std::optional<int64_t>(size_t&)> parseShift;
+    std::function<std::optional<int64_t>(size_t&)> parseAdditive;
+    std::function<std::optional<int64_t>(size_t&)> parseMultiplicative;
+    std::function<std::optional<int64_t>(size_t&)> parseUnary;
+    std::function<std::optional<int64_t>(size_t&)> parsePrimary;
+
+    parseExpr = [&](size_t& pos) -> std::optional<int64_t> {
+        return parseTernary(pos);
+    };
+
+    parseTernary = [&](size_t& pos) -> std::optional<int64_t> {
+        skipWhitespace(pos);
+        auto val = parseLogicalOr(pos);
+        if (!val) return std::nullopt;
+        
+        skipWhitespace(pos);
+        if (pos < end && expanded[pos].kind == PPTokenKind::Punctuator && expanded[pos].lexeme == "?") {
+            pos++;
+            auto trueVal = parseExpr(pos);
+            if (!trueVal) return std::nullopt;
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != ":") {
+                diagnostics.push_back(Diagnostic{
+                    .message = "expected ':' in ternary operator",
+                    .severity = Diagnostic::Severity::Error,
+                    .span = (pos < end) ? std::optional<SourceSpan>(expanded[pos].span) : std::optional<SourceSpan>()
+                });
+                return std::nullopt;
+            }
+            pos++;
+            auto falseVal = parseTernary(pos);
+            if (!falseVal) return std::nullopt;
+            return *val ? *trueVal : *falseVal;
+        }
+        return val;
+    };
+
+    parseLogicalOr = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseLogicalAnd(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "||") break;
+            pos++;
+            auto right = parseLogicalAnd(pos);
+            if (!right) return std::nullopt;
+            left = *left || *right;
+        }
+        return left;
+    };
+
+    parseLogicalAnd = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseBitwiseOr(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "&&") break;
+            pos++;
+            auto right = parseBitwiseOr(pos);
+            if (!right) return std::nullopt;
+            left = *left && *right;
+        }
+        return left;
+    };
+
+    parseBitwiseOr = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseBitwiseXor(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "|" ||
+                (pos + 1 < expanded.size() && expanded[pos + 1].lexeme == "|")) break;
+            pos++;
+            auto right = parseBitwiseXor(pos);
+            if (!right) return std::nullopt;
+            left = *left | *right;
+        }
+        return left;
+    };
+
+    parseBitwiseXor = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseBitwiseAnd(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "^") break;
+            pos++;
+            auto right = parseBitwiseAnd(pos);
+            if (!right) return std::nullopt;
+            left = *left ^ *right;
+        }
+        return left;
+    };
+
+    parseBitwiseAnd = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseEquality(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != "&" ||
+                (pos + 1 < expanded.size() && expanded[pos + 1].lexeme == "&")) break;
+            pos++;
+            auto right = parseEquality(pos);
+            if (!right) return std::nullopt;
+            left = *left & *right;
+        }
+        return left;
+    };
+
+    parseEquality = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseRelational(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
+                (expanded[pos].lexeme != "==" && expanded[pos].lexeme != "!=")) break;
+            std::string op = expanded[pos].lexeme;
+            pos++;
+            auto right = parseRelational(pos);
+            if (!right) return std::nullopt;
+            left = (op == "==") ? (*left == *right) : (*left != *right);
+        }
+        return left;
+    };
+
+    parseRelational = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseShift(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
+                (expanded[pos].lexeme != "<" && expanded[pos].lexeme != ">" && 
+                 expanded[pos].lexeme != "<=" && expanded[pos].lexeme != ">=")) break;
+            std::string op = expanded[pos].lexeme;
+            pos++;
+            auto right = parseShift(pos);
+            if (!right) return std::nullopt;
+            if (op == "<") left = *left < *right;
+            else if (op == ">") left = *left > *right;
+            else if (op == "<=") left = *left <= *right;
+            else if (op == ">=") left = *left >= *right;
+        }
+        return left;
+    };
+
+    parseShift = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseAdditive(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
+                (expanded[pos].lexeme != "<<" && expanded[pos].lexeme != ">>")) break;
+            std::string op = expanded[pos].lexeme;
+            pos++;
+            auto right = parseAdditive(pos);
+            if (!right) return std::nullopt;
+            left = (op == "<<") ? (*left << *right) : (*left >> *right);
+        }
+        return left;
+    };
+
+    parseAdditive = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseMultiplicative(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
+                (expanded[pos].lexeme != "+" && expanded[pos].lexeme != "-")) break;
+            std::string op = expanded[pos].lexeme;
+            pos++;
+            auto right = parseMultiplicative(pos);
+            if (!right) return std::nullopt;
+            left = (op == "+") ? (*left + *right) : (*left - *right);
+        }
+        return left;
+    };
+
+    parseMultiplicative = [&](size_t& pos) -> std::optional<int64_t> {
+        auto left = parseUnary(pos);
+        if (!left) return std::nullopt;
+        while (true) {
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || 
+                (expanded[pos].lexeme != "*" && expanded[pos].lexeme != "/" && expanded[pos].lexeme != "%")) break;
+            std::string op = expanded[pos].lexeme;
+            pos++;
+            auto right = parseUnary(pos);
+            if (!right) return std::nullopt;
+            if (op == "*") left = *left * *right;
+            else if (op == "/") {
+                if (*right == 0) {
+                    diagnostics.push_back(Diagnostic{
+                        .message = "division by zero in constant expression",
+                        .severity = Diagnostic::Severity::Error,
+                        .span = expanded[pos - 1].span
+                    });
+                    return std::nullopt;
+                }
+                left = *left / *right;
+            } else if (op == "%") {
+                if (*right == 0) {
+                    diagnostics.push_back(Diagnostic{
+                        .message = "modulo by zero in constant expression",
+                        .severity = Diagnostic::Severity::Error,
+                        .span = expanded[pos - 1].span
+                    });
+                    return std::nullopt;
+                }
+                left = *left % *right;
+            }
+        }
+        return left;
+    };
+
+    parseUnary = [&](size_t& pos) -> std::optional<int64_t> {
+        skipWhitespace(pos);
+        if (pos < end && expanded[pos].kind == PPTokenKind::Punctuator && 
+            (expanded[pos].lexeme == "!" || expanded[pos].lexeme == "~" || 
+             expanded[pos].lexeme == "+" || expanded[pos].lexeme == "-")) {
+            std::string op = expanded[pos].lexeme;
+            pos++;
+            auto val = parseUnary(pos);
+            if (!val) return std::nullopt;
+            if (op == "!") return !*val;
+            else if (op == "~") return ~*val;
+            else if (op == "-") return -*val;
+            else return *val;
+        }
+        return parsePrimary(pos);
+    };
+
+    parsePrimary = [&](size_t& pos) -> std::optional<int64_t> {
+        skipWhitespace(pos);
+        if (pos >= end) {
+            diagnostics.push_back(Diagnostic{
+                .message = "unexpected end of constant expression",
+                .severity = Diagnostic::Severity::Error,
+                .span = std::nullopt
+            });
+            return std::nullopt;
+        }
+
+        const auto& tok = expanded[pos];
+
+        // Integer constant
+        if (tok.kind == PPTokenKind::PPNumber) {
+            try {
+                int64_t val = std::stoll(tok.lexeme, nullptr, 0);
+                pos++;
+                return val;
+            } catch (...) {
+                diagnostics.push_back(Diagnostic{
+                    .message = std::string("invalid integer constant: ") + tok.lexeme,
+                    .severity = Diagnostic::Severity::Error,
+                    .span = tok.span
+                });
+                return std::nullopt;
+            }
+        }
+
+        // Character constant
+        if (tok.kind == PPTokenKind::CharConst) {
+            std::string ch = tok.lexeme;
+            if (ch.size() >= 3 && ch.front() == '\'' && ch.back() == '\'') {
+                ch = ch.substr(1, ch.size() - 2);
+                if (ch.size() == 1) {
+                    pos++;
+                    return (int64_t)(unsigned char)ch[0];
+                }
+            }
+            diagnostics.push_back(Diagnostic{
+                .message = std::string("invalid character constant in expression: ") + tok.lexeme,
+                .severity = Diagnostic::Severity::Error,
+                .span = tok.span
+            });
+            return std::nullopt;
+        }
+
+        // Parenthesized expression
+        if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "(") {
+            pos++;
+            auto val = parseExpr(pos);
+            if (!val) return std::nullopt;
+            skipWhitespace(pos);
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != ")") {
+                diagnostics.push_back(Diagnostic{
+                    .message = "expected ')' after expression",
+                    .severity = Diagnostic::Severity::Error,
+                    .span = (pos < end) ? std::optional<SourceSpan>(expanded[pos].span) : std::optional<SourceSpan>()
+                });
+                return std::nullopt;
+            }
+            pos++;
+            return val;
+        }
+
+        // defined(NAME) operator
+        if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "defined") {
+            pos++;
+            skipWhitespace(pos);
+            if (pos >= end) {
+                diagnostics.push_back(Diagnostic{
+                    .message = "expected '(' or identifier after 'defined'",
+                    .severity = Diagnostic::Severity::Error,
+                    .span = tok.span
+                });
+                return std::nullopt;
+            }
+            bool hasParens = false;
+            if (expanded[pos].kind == PPTokenKind::Punctuator && expanded[pos].lexeme == "(") {
+                hasParens = true;
+                pos++;
+                skipWhitespace(pos);
+            }
+            if (pos >= end || expanded[pos].kind != PPTokenKind::Identifier) {
+                diagnostics.push_back(Diagnostic{
+                    .message = "expected macro name in 'defined'",
+                    .severity = Diagnostic::Severity::Error,
+                    .span = (pos < end) ? expanded[pos].span : tok.span
+                });
+                return std::nullopt;
+            }
+            std::string macroName = expanded[pos].lexeme;
+            pos++;
+            if (hasParens) {
+                skipWhitespace(pos);
+                if (pos >= end || expanded[pos].kind != PPTokenKind::Punctuator || expanded[pos].lexeme != ")") {
+                    diagnostics.push_back(Diagnostic{
+                        .message = "expected ')' after macro name in 'defined'",
+                        .severity = Diagnostic::Severity::Error,
+                        .span = (pos < end) ? std::optional<SourceSpan>(expanded[pos].span) : std::optional<SourceSpan>()
+                    });
+                    return std::nullopt;
+                }
+                pos++;
+            }
+            return macroTable.getMacro(macroName) ? 1 : 0;
+        }
+
+        // Undefined identifier → 0 (preprocessor convention)
+        if (tok.kind == PPTokenKind::Identifier) {
+            pos++;
+            return 0;
+        }
+
+        diagnostics.push_back(Diagnostic{
+            .message = std::string("unexpected token in constant expression: ") + tok.lexeme,
+            .severity = Diagnostic::Severity::Error,
+            .span = tok.span
+        });
+        return std::nullopt;
+    };
+
+    size_t pos = i;
+    auto result = parseExpr(pos);
+    if (result && pos < end) {
+        // Extra tokens after expression
+        diagnostics.push_back(Diagnostic{
+            .message = "unexpected tokens after constant expression",
+            .severity = Diagnostic::Severity::Error,
+            .span = expanded[pos].span
+        });
+        return std::nullopt;
+    }
+    return result;
+}
+
+bool Preprocessor::handleIfDirective(Tokenizer& tokenizer, const std::vector<PPToken>& dirTokens) {
+    auto result = evaluateConstantExpression(dirTokens);
+    if (!result) return false;
+
+    ConditionalFrame frame;
+    frame.seenTrueBranch = *result != 0;
+    frame.currentlyActive = frame.seenTrueBranch;
+    frame.inElse = false;
+    conditionalStack.push_back(frame);
+    return true;
+}
+
+bool Preprocessor::handleIfdefDirective(const std::string& macroName) {
+    bool isDefined = macroTable.getMacro(macroName) != nullptr;
+    ConditionalFrame frame;
+    frame.seenTrueBranch = isDefined;
+    frame.currentlyActive = isDefined;
+    frame.inElse = false;
+    conditionalStack.push_back(frame);
+    return true;
+}
+
+bool Preprocessor::handleIfndefDirective(const std::string& macroName) {
+    bool isDefined = macroTable.getMacro(macroName) != nullptr;
+    ConditionalFrame frame;
+    frame.seenTrueBranch = !isDefined;
+    frame.currentlyActive = !isDefined;
+    frame.inElse = false;
+    conditionalStack.push_back(frame);
+    return true;
+}
+
+bool Preprocessor::handleElifDirective(Tokenizer& tokenizer, const std::vector<PPToken>& dirTokens) {
+    if (conditionalStack.empty()) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#elif without matching #if",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+
+    ConditionalFrame& frame = conditionalStack.back();
+    if (frame.inElse) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#elif after #else",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+
+    if (frame.seenTrueBranch) {
+        frame.currentlyActive = false;
+        return true;
+    }
+
+    auto result = evaluateConstantExpression(dirTokens);
+    if (!result) return false;
+
+    bool newActive = *result != 0;
+    frame.seenTrueBranch = frame.seenTrueBranch || newActive;
+    frame.currentlyActive = newActive;
+    return true;
+}
+
+bool Preprocessor::handleElseDirective() {
+    if (conditionalStack.empty()) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#else without matching #if",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+
+    ConditionalFrame& frame = conditionalStack.back();
+    if (frame.inElse) {
+        diagnostics.push_back(Diagnostic{
+            .message = "multiple #else in same conditional block",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+
+    frame.inElse = true;
+    frame.currentlyActive = !frame.seenTrueBranch;
+    return true;
+}
+
+bool Preprocessor::handleEndifDirective() {
+    if (conditionalStack.empty()) {
+        diagnostics.push_back(Diagnostic{
+            .message = "#endif without matching #if",
+            .severity = Diagnostic::Severity::Error,
+            .span = std::nullopt
+        });
+        return false;
+    }
+
+    conditionalStack.pop_back();
+    return true;
 }
 
 } // namespace wvmcc

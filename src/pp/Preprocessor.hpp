@@ -87,6 +87,28 @@ private:
     // Returns the expanded token list with macro substitutions applied.
     // Prevents infinite recursion by tracking expanded macro names.
     std::vector<PPToken> expandMacros(const std::vector<PPToken>& tokens);
+
+    // Conditional compilation state tracking
+    struct ConditionalFrame {
+        bool seenTrueBranch{false};  // Has a taken #if/#elif been seen in this frame?
+        bool currentlyActive{true};  // Should we emit tokens in this frame?
+        bool inElse{false};          // Have we seen #else in this frame?
+    };
+    std::vector<ConditionalFrame> conditionalStack{};
+
+    // Evaluate a C17 6.6 constant expression (integer-only, per preprocessor requirements).
+    // Expands macros in tokens, then parses and evaluates as an integer expression.
+    // Returns the evaluated result, or std::nullopt on parse/eval error (diagnostics emitted).
+    std::optional<int64_t> evaluateConstantExpression(const std::vector<PPToken>& tokens);
+
+    // Handle #if/#ifdef/#ifndef/#elif/#else/#endif directives.
+    // Returns true if the directive was successfully parsed, false on error.
+    bool handleIfDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
+    bool handleIfdefDirective(const std::string& macroName);
+    bool handleIfndefDirective(const std::string& macroName);
+    bool handleElifDirective(Tokenizer& tokenizer, const std::vector<PPToken>& tokens);
+    bool handleElseDirective();
+    bool handleEndifDirective();
 };
 
 } // namespace wvmcc
