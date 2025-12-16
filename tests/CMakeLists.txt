@@ -51,3 +51,11 @@ if(EXISTS ${PP_TOKENIZER_PPNUMBER_TEST})
     target_include_directories(wvmcc-pp-tokenizer-ppnumber-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
     add_test(NAME pp-tokenizer-ppnumber COMMAND wvmcc-pp-tokenizer-ppnumber-test)
 endif()
+
+# Tokenizer identifier tests
+set(PP_TOKENIZER_IDENTIFIER_TEST ${TEST_ROOT}/unit/pp_tokenizer_identifier_test.cpp)
+if(EXISTS ${PP_TOKENIZER_IDENTIFIER_TEST})
+    add_executable(wvmcc-pp-tokenizer-identifier-test ${PP_TOKENIZER_IDENTIFIER_TEST} ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-tokenizer-identifier-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-tokenizer-identifier COMMAND wvmcc-pp-tokenizer-identifier-test)
+endif()

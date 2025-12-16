@@ -218,6 +218,56 @@ std::vector<PPToken> Tokenizer::tokenize_with_punctuators(const std::string& inp
             continue;
         }
 
+        // Identifier: starts with nondigit or universal-character-name
+        auto is_alpha = [](char ch){ return (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||ch=='_'; };
+        auto is_alnum_us = [&](char ch){ return is_alpha(ch) || (ch>='0'&&ch<='9'); };
+        auto try_ucn = [&](size_t idx, size_t& consumed){
+            consumed = 0;
+            if (idx >= input.size() || input[idx] != '\\') return false;
+            if (idx + 1 < input.size() && input[idx+1] == 'u') {
+                // \uXXXX (exactly 4 hex digits)
+                if (idx + 6 <= input.size()) {
+                    for (size_t k = idx+2; k < idx+6; ++k) {
+                        char ch = input[k];
+                        bool hex = (ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F');
+                        if (!hex) return false;
+                    }
+                    consumed = 6; return true;
+                }
+                return false;
+            }
+            if (idx + 1 < input.size() && input[idx+1] == 'U') {
+                // \UXXXXXXXX (exactly 8 hex digits)
+                if (idx + 10 <= input.size()) {
+                    for (size_t k = idx+2; k < idx+10; ++k) {
+                        char ch = input[k];
+                        bool hex = (ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F');
+                        if (!hex) return false;
+                    }
+                    consumed = 10; return true;
+                }
+                return false;
+            }
+            return false;
+        };
+        if (is_alpha(c) || (c=='\\' && (i+1<input.size()) && (input[i+1]=='u' || input[i+1]=='U'))) {
+            size_t j = i;
+            // consume first char or ucn
+            if (is_alpha(input[j])) { advance_pos(input[j]); ++j; }
+            else {
+                size_t u = 0; if (try_ucn(j, u)) { for (size_t k=0;k<u;++k){ advance_pos(input[j+k]); } j += u; } else { /* not actually ucn */ }
+            }
+            // consume subsequent identifier chars: alnum or underscores or ucn
+            while (j < input.size()) {
+                if (is_alnum_us(input[j])) { advance_pos(input[j]); ++j; continue; }
+                size_t u = 0; if (try_ucn(j, u)) { for (size_t k=0;k<u;++k){ advance_pos(input[j+k]); } j += u; continue; }
+                break;
+            }
+            std::string lex = input.substr(i, j - i);
+            emit(PPTokenKind::Identifier, lex, begin, pos);
+            i = j; continue;
+        }
+
         size_t plen = match_punct(input, i);
         if (plen > 0) {
             std::string lex = input.substr(i, plen);
