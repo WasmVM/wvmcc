@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
         }
     }
 
-    // Preprocess input if provided (passthrough for now)
+    // Preprocess input if provided (tokens for now)
     wvmcc::Preprocessor pp;
     if (inputPath.has_value()) {
         auto res = pp.run(*inputPath);
@@ -54,7 +54,20 @@ int main(int argc, char** argv) {
             std::cerr << "preprocess error: " << res.errorMsg << std::endl;
             return 1;
         }
-        // TODO: feed res.text into frontend once available
+        // For now, just report token counts by kind
+        size_t ws = 0, nl = 0, other = 0;
+        for (const auto& t : res.tokens) {
+            using K = wvmcc::PPTokenKind;
+            switch (t.kind) {
+                case K::Whitespace: ++ws; break;
+                case K::Newline: ++nl; break;
+                case K::Other: ++other; break;
+                default: break;
+            }
+        }
+        std::cout << "preprocess: tokens=" << res.tokens.size()
+                  << " whitespace=" << ws << " newline=" << nl
+                  << " other=" << other << std::endl;
     }
 
     WasmVM::WasmModule module;

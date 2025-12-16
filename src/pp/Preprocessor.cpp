@@ -2,18 +2,20 @@
 
 #include <fstream>
 #include <sstream>
+#include "Tokenizer.hpp"
 
 namespace wvmcc {
 
 PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     std::ifstream ifs(inputPath);
     if (!ifs) {
-        return PreprocessResult{std::string(), false, std::string("cannot open input: ") + inputPath};
+        return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cannot open input: ") + inputPath};
     }
     std::ostringstream oss;
     oss << ifs.rdbuf();
     std::string combined = phase1to3_process(oss.str());
-    return PreprocessResult{combined, true, std::string()};
+    auto toks = Tokenizer::tokenize_minimal(combined);
+    return PreprocessResult{std::move(toks), true, std::string()};
 }
 
 

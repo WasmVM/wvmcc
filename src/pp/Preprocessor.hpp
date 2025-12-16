@@ -1,11 +1,13 @@
 #pragma once
 
 #include <string>
+#include <vector>
+#include "Tokenizer.hpp"
 
 namespace wvmcc {
 
 struct PreprocessResult {
-    std::string text;
+    std::vector<PPToken> tokens;
     bool success{true};
     std::string errorMsg;
 };
