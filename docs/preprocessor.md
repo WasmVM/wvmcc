@@ -97,17 +97,18 @@ private:
 - Respect identifier boundaries; no expansion inside string/char literals
 - Status: Object-like macros fully implemented with expansion tracking to prevent recursion.
 
-### Phase 3: Function-like Macros — 🟡 Partial
+### Phase 3: Function-like Macros — ✅ Done
 - Implement `#define NAME(arg1, ...) replacement`
 - ✅ Argument substitution and variadic handling `__VA_ARGS__`
-- ❌ Stringification `#` operator (deferred to Phase 7)
-- ❌ Token pasting `##` operator (deferred to Phase 7)
-- 🚧 **GOAL: Full paint semantics and proper rescanning** (currently limited)
-- **Current Status**: Basic recursion prevention via `expandedMacros` set. This is INSUFFICIENT for complex nested macros per C17 §6.10.3.3. Need to implement full "blue paint" marking where:
-  - Macro names in replacement lists are marked as "painted" 
-  - Marked names skip expansion even during rescanning
-  - Marks persist through nested replacements
-  - Properly handles the example from §6.10.3.2 with `##` creating new token sequences
+- ✅ Stringification `#` operator (converts parameter to string literal)
+- ✅ Token pasting `##` operator (concatenates adjacent tokens)
+- ✅ **Full paint semantics and proper rescanning implemented**
+- **Current Status**: Full paint semantics per C17 §6.10.3.3 implemented:
+  - Each token tracks painted macros via `paintedMacros` set in `PPToken`
+  - Tokens from macro replacement are marked as painted with that macro name
+  - Painted tokens skip expansion when the same macro is encountered again
+  - Recursive expansion works correctly for multi-level macro chains
+  - Handles complex cases including nested stringification and token pasting
 
 ### Phase 4: Conditional Compilation — ✅ Done
 - Implement `#if` expression evaluation per C17 6.6 (integer constant expressions)
@@ -139,23 +140,21 @@ private:
 - Handle `#pragma` as pass-through or targeted behaviors
 - Status: Not yet implemented; planned for later milestone.
 
-### Phase 7 (Enhancement): Macro Replacement Operators — 🚧 Deferred
-- Implement stringification `#` operator (C17 §6.10.3.1)
+### Phase 7 (Enhancement): Macro Replacement Operators — ✅ Done
+- Implement stringification `#` operator (C17 §6.10.3.1) — ✅ Complete
   - Convert macro parameter to string literal
   - Escape handling: insert `\` before each `"` and `\` in literals
   - Whitespace normalization between tokens
-- Implement token pasting `##` operator (C17 §6.10.3.2)
+- Implement token pasting `##` operator (C17 §6.10.3.2) — ✅ Complete
   - Concatenate adjacent tokens into single token
   - Placemarker handling for empty arguments
   - Token validation after concatenation
   - Rescanning for further macro replacement
-- Implement full rescanning with paint semantics (C17 §6.10.3.3)
+- Implement full rescanning with paint semantics (C17 §6.10.3.3) — ✅ Complete
   - Track expansion state with painted tokens (not just per-invocation set)
   - Painted names skip expansion in all nested replacements
   - Handle complex cases like the `hash_hash` example in §6.10.3.2
-  - **Priority**: Implement full paint semantics first (can do before `#` and `##`)
-- **Current Limitation**: Basic recursion prevention (§3) insufficient; Phase 7a should focus on full paint implementation before operators.
-- Status: Not yet implemented. Stringification and token pasting deferred. Full rescanning with paint is a prerequisite for correct implementation.
+- Status: All macro replacement operators and paint semantics fully implemented and tested.
 
 ## Implementation Status Summary
 
@@ -164,14 +163,14 @@ private:
 | Object-like macros | ✅ | Full support with expansion |
 | Function-like macros | ✅ | Parameters, argument substitution |
 | Variadic macros `__VA_ARGS__` | ✅ | Per C17 §6.10.3.1 |
-| Stringification `#` | ❌ | Phase 7, deferred |
-| Token pasting `##` | ❌ | Phase 7, deferred |
-| Full rescanning with paint | 🚧 | **NEEDED**: Basic prevention insufficient; full paint semantics planned for Phase 7a |
+| Stringification `#` | ✅ | Fully implemented with escape handling |
+| Token pasting `##` | ✅ | Fully implemented with multi-paste support |
+| Full rescanning with paint | ✅ | Per C17 §6.10.3.3, paint tracking in PPToken |
 | `#define` / `#undef` | ✅ | Full support |
 | Conditional directives | ✅ | All variants |
 | Constant expressions | ✅ | C17 §6.6 (except `sizeof`) |
 | `#include` directives | ✅ | Paths, macros, cycles |
-| Predefined macros | ❌ | `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `__STDC__` — future work |
+| Predefined macros | ✅ | `__FILE__`, `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__STDC_HOSTED__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__` |
 | `#error`, `#warning` | ❌ | Phase 6, deferred |
 | `#line`, `#pragma` | ❌ | Phase 6, deferred |
 
@@ -194,12 +193,12 @@ Tokenizer-focused tests use range-style iteration to verify phases 1–3 and lit
 - Avoid quadratic behavior in macro substitution by linear passes with markers
 
 ## Future Extensions
-- Stringification and token pasting operators with proper rescanning
-- Predefined macros: `__FILE__`, `__LINE__`, `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__VA_ARGS__` in non-variadic context
+- `__LINE__` macro with dynamic line tracking (currently not supported)
 - `#pragma once` fast-path support via include handler
 - Diagnostic directives: `#error`, `#warning`
 - Line information: `#line` directive
 - Utilities: `#pragma` extended handling
 - Configurable predefined macros by target/flags
 - File-level preprocessing API (beyond path-based run)
+- Include guard optimization
 
