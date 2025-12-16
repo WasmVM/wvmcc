@@ -24,6 +24,69 @@ target_link_libraries(wvmcc PRIVATE ${WASMVM_LIBRARY})
 
 install(TARGETS wvmcc RUNTIME DESTINATION bin)
 
+# ============================================
+# Code Complexity Monitoring
+# ============================================
+
+# Find Python for complexity tools
+find_package(Python3 COMPONENTS Interpreter)
+
+if(Python3_FOUND)
+    # Check if lizard is installed via pipx or pip
+    execute_process(
+        COMMAND lizard --version
+        RESULT_VARIABLE LIZARD_CHECK
+        OUTPUT_QUIET ERROR_QUIET
+    )
+    
+    if(LIZARD_CHECK EQUAL 0)
+        message(STATUS "Lizard complexity analyzer found")
+        set(LIZARD_AVAILABLE TRUE)
+    else()
+        message(STATUS "Lizard not found. Install with: pipx install lizard")
+        set(LIZARD_AVAILABLE FALSE)
+    endif()
+    
+    # Complexity analysis target
+    if(LIZARD_AVAILABLE)
+        add_custom_target(complexity
+            COMMAND lizard 
+                ${SRC_ROOT}
+                -l cpp
+                --sort cyclomatic_complexity
+                -w
+            WORKING_DIRECTORY ${PROJECT_ROOT}
+            COMMENT "Analyzing code complexity with Lizard..."
+        )
+        
+        # Detailed complexity report
+        add_custom_target(complexity-report
+            COMMAND lizard 
+                ${SRC_ROOT}
+                -l cpp
+                --sort cyclomatic_complexity
+                -w
+                -o ${CMAKE_BINARY_DIR}/complexity-report.html
+                --html
+            WORKING_DIRECTORY ${PROJECT_ROOT}
+            COMMENT "Generating HTML complexity report..."
+        )
+        
+        # Complexity check with thresholds
+        add_custom_target(complexity-check
+            COMMAND lizard 
+                ${SRC_ROOT}
+                -l cpp
+                -C 15
+                -L 1000
+                -a 5
+                -w
+            WORKING_DIRECTORY ${PROJECT_ROOT}
+            COMMENT "Checking complexity thresholds (CCN<15, Length<1000, Args<5)..."
+        )
+    endif()
+endif()
+
 # Tests
 enable_testing()
 add_subdirectory(tests)
