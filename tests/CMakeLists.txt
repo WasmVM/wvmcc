@@ -76,26 +76,10 @@ if(EXISTS ${TOKENIZER_IFSTREAM_RESET_TEST})
     add_test(NAME tokenizer-ifstream-reset COMMAND wvmcc-tokenizer-ifstream-reset-test)
 endif()
 
-# Include success test
-set(PP_INCLUDE_SUCCESS_TEST ${TEST_ROOT}/unit/pp_include_success_test.cpp)
-if(EXISTS ${PP_INCLUDE_SUCCESS_TEST})
-    add_executable(wvmcc-pp-include-success-test ${PP_INCLUDE_SUCCESS_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
-    target_include_directories(wvmcc-pp-include-success-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
-    add_test(NAME pp-include-success COMMAND wvmcc-pp-include-success-test)
-endif()
-
-# Include failure test
-set(PP_INCLUDE_FAILURE_TEST ${TEST_ROOT}/unit/pp_include_failure_test.cpp)
-if(EXISTS ${PP_INCLUDE_FAILURE_TEST})
-    add_executable(wvmcc-pp-include-failure-test ${PP_INCLUDE_FAILURE_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
-    target_include_directories(wvmcc-pp-include-failure-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
-    add_test(NAME pp-include-failure COMMAND wvmcc-pp-include-failure-test)
-endif()
-
-# Nested include test
-set(PP_INCLUDE_NESTED_TEST ${TEST_ROOT}/unit/pp_include_nested_test.cpp)
-if(EXISTS ${PP_INCLUDE_NESTED_TEST})
-    add_executable(wvmcc-pp-include-nested-test ${PP_INCLUDE_NESTED_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
-    target_include_directories(wvmcc-pp-include-nested-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
-    add_test(NAME pp-include-nested COMMAND wvmcc-pp-include-nested-test)
+# Include tests (success, failure, nested combined)
+set(PP_INCLUDE_TEST ${TEST_ROOT}/unit/pp_include_test.cpp)
+if(EXISTS ${PP_INCLUDE_TEST})
+    add_executable(wvmcc-pp-include-test ${PP_INCLUDE_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-include-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-include COMMAND wvmcc-pp-include-test)
 endif()

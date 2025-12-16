@@ -47,12 +47,13 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
                 // Resolution: try -I search paths for angle form
                 if (auto resolved = resolveInclude(acc, /*isAngle=*/true, currentDir)) {
                     includeQueue.push_back(*resolved);
-                    // Execute: stream tokens from included file inline
-                    std::ifstream hfs(*resolved);
-                    if (hfs) {
-                        Tokenizer htok(hfs);
-                        htok.reset();
-                        while (auto itok = htok.next()) { out.push_back(*itok); }
+                    // Execute: preprocess included file (supports nested includes) and inline its tokens
+                    Preprocessor child;
+                    child.includePaths = includePaths;
+                    auto childRes = child.run(*resolved);
+                    diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+                    if (childRes.success) {
+                        for (const auto& tk : childRes.tokens) out.push_back(tk);
                         return true;
                     } else {
                         std::cerr << "error: failed to read include file '" << *resolved << "' for <" << acc << ">\n";
@@ -91,12 +92,13 @@ bool Preprocessor::handleIncludeDirective(Tokenizer& tokenizer,
         }
         if (auto resolved = resolveInclude(header, /*isAngle=*/false, currentDir)) {
             includeQueue.push_back(*resolved);
-            // Execute: stream tokens from included file inline
-            std::ifstream hfs(*resolved);
-            if (hfs) {
-                Tokenizer htok(hfs);
-                htok.reset();
-                while (auto itok = htok.next()) { out.push_back(*itok); }
+            // Execute: preprocess included file (supports nested includes) and inline its tokens
+            Preprocessor child;
+            child.includePaths = includePaths;
+            auto childRes = child.run(*resolved);
+            diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+            if (childRes.success) {
+                for (const auto& tk : childRes.tokens) out.push_back(tk);
                 tokenizer.next();
                 return true;
             } else {
