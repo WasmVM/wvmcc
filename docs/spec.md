@@ -26,8 +26,7 @@
 
 ## Architecture
 - Frontend:
-  - Lexer: C17 tokens, tracks `typedef` names.
-  - Preprocessor: streams pp-tokens via `Tokenizer` (`next()`, `peek()`, range iteration).
+  - Preprocessor / Tokenizer: use the streaming `Tokenizer` and `Preprocessor` which emit `PPToken`s.
   - Parser: hand-written recursive descent with declarator grammar; recovery at `;`/`}`/`,`.
   - AST: typed nodes, source spans; casts inserted during semantic analysis.
   - Semantics: scope stacks (file/block/function/tag), type system (qualifiers, arrays, functions, pointers), conversions, constant folding, diagnostics.

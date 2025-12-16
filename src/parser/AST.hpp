@@ -8,6 +8,7 @@
 #include <variant>
 #include <optional>
 #include "../common.hpp"
+#include "Token.hpp"
 
 namespace wvmcc::parser {
 

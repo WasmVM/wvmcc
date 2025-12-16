@@ -6,6 +6,7 @@
 
 #include <WasmVM.hpp>
 #include "../pp/Preprocessor.hpp"
+#include "../parser/Lexer.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
     std::ofstream ofs(path, std::ios::binary);
@@ -99,21 +100,22 @@ void printDiagnostics(const std::vector<wvmcc::Diagnostic>& diagnostics) {
     }
 }
 
-void printTokenStats(const std::vector<wvmcc::PPToken>& tokens) {
-    size_t ws = 0, nl = 0, punct = 0, other = 0;
+void printTokenStats(const std::vector<wvmcc::parser::Token>& tokens) {
+    size_t kw = 0, id = 0, cn = 0, str = 0, punct = 0;
     for (const auto& t : tokens) {
-        using K = wvmcc::PPTokenKind;
         switch (t.kind) {
-            case K::Whitespace: ++ws; break;
-            case K::Newline: ++nl; break;
-            case K::Punctuator: ++punct; break;
-            case K::Other: ++other; break;
+            case wvmcc::parser::TokenKind::Keyword: ++kw; break;
+            case wvmcc::parser::TokenKind::Identifier: ++id; break;
+            case wvmcc::parser::TokenKind::Constant: ++cn; break;
+            case wvmcc::parser::TokenKind::StringLiteral: ++str; break;
+            case wvmcc::parser::TokenKind::Punctuator: ++punct; break;
             default: break;
         }
     }
-    std::cout << "preprocess: tokens=" << tokens.size()
-              << " whitespace=" << ws << " newline=" << nl
-              << " punctuator=" << punct << " other=" << other << std::endl;
+    std::cout << "tokens=" << tokens.size()
+              << " keywords=" << kw << " identifiers=" << id
+              << " constants=" << cn << " strings=" << str
+              << " punctuators=" << punct << std::endl;
 }
 
 int main(int argc, char** argv) {
@@ -131,8 +133,9 @@ int main(int argc, char** argv) {
             std::cerr << "preprocess error: failed to open input" << std::endl;
             return 1;
         }
-        std::vector<wvmcc::PPToken> tokens;
-        while (auto t = pp.next()) tokens.push_back(*t);
+        wvmcc::parser::Lexer lex(pp);
+        std::vector<wvmcc::parser::Token> tokens;
+        while (auto t = lex.next()) tokens.push_back(*t);
         printDiagnostics(pp.getDiagnostics());
         printTokenStats(tokens);
     }

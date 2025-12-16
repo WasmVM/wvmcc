@@ -14,7 +14,8 @@ find_package(WasmVM REQUIRED)
 set(SRC_ROOT ${PROJECT_ROOT}/src)
 file(GLOB_RECURSE WVMCC_SOURCES
 	${SRC_ROOT}/exec/*.cpp
-	${SRC_ROOT}/pp/*.cpp
+    ${SRC_ROOT}/pp/*.cpp
+    ${SRC_ROOT}/parser/*.cpp
 )
 
 add_executable(wvmcc ${WVMCC_SOURCES})
