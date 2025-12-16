@@ -13,12 +13,8 @@ struct PreprocessResult {
 class Preprocessor {
 public:
     PreprocessResult run(const std::string& inputPath) const;
-    // Phase 1: Source mapping + trigraphs + EOL normalization + final newline
-    static std::string phase1_normalize(const std::string& input);
-    // Phase 2: Splice lines ending with a backslash (\\\n)
-    static std::string phase2_line_splice(const std::string& input);
-    // Phase 3: Replace comments with a single space; retain newlines
-    static std::string phase3_strip_comments(const std::string& input);
+    // Combined Phase 1–3 single-pass processing for performance
+    static std::string phase1to3_process(const std::string& input);
 
 private:
 };

@@ -12,7 +12,7 @@ struct Case {
 
 static bool run_case(const Case& c) {
     std::string in(c.input);
-    std::string out = wvmcc::Preprocessor::phase1_normalize(in);
+    std::string out = wvmcc::Preprocessor::phase1to3_process(in);
     bool ok = (out == std::string(c.expected));
     if (!ok) {
         std::cerr << "[FAIL] " << c.name << "\nExpected:\n" << c.expected
