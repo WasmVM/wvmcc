@@ -91,3 +91,11 @@ if(EXISTS ${PP_INCLUDE_FAILURE_TEST})
     target_include_directories(wvmcc-pp-include-failure-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
     add_test(NAME pp-include-failure COMMAND wvmcc-pp-include-failure-test)
 endif()
+
+# Nested include test
+set(PP_INCLUDE_NESTED_TEST ${TEST_ROOT}/unit/pp_include_nested_test.cpp)
+if(EXISTS ${PP_INCLUDE_NESTED_TEST})
+    add_executable(wvmcc-pp-include-nested-test ${PP_INCLUDE_NESTED_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-include-nested-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME pp-include-nested COMMAND wvmcc-pp-include-nested-test)
+endif()
