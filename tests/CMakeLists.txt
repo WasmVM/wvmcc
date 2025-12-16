@@ -27,3 +27,11 @@ if(EXISTS ${PP_TOKENIZER_PUNCT_TEST})
     target_include_directories(wvmcc-pp-tokenizer-punct-test PRIVATE ${SRC_ROOT})
     add_test(NAME pp-tokenizer-punct COMMAND wvmcc-pp-tokenizer-punct-test)
 endif()
+
+# Tokenizer string literal tests
+set(PP_TOKENIZER_STRING_TEST ${TEST_ROOT}/unit/pp_tokenizer_string_test.cpp)
+if(EXISTS ${PP_TOKENIZER_STRING_TEST})
+    add_executable(wvmcc-pp-tokenizer-string-test ${PP_TOKENIZER_STRING_TEST} ${SRC_ROOT}/pp/Tokenizer.cpp)
+    target_include_directories(wvmcc-pp-tokenizer-string-test PRIVATE ${SRC_ROOT})
+    add_test(NAME pp-tokenizer-string COMMAND wvmcc-pp-tokenizer-string-test)
+endif()

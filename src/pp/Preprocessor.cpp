@@ -15,6 +15,17 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     oss << ifs.rdbuf();
     std::string combined = phase1to3_process(oss.str());
     auto tokens = Tokenizer::tokenize_with_punctuators(combined);
+    // Validate tokens for errors (e.g., unterminated string literal)
+    for (const auto& t : tokens) {
+        if (t.kind == PPTokenKind::StringLiteral) {
+            if (t.lexeme.empty() || t.lexeme.back() != '"') {
+                std::ostringstream em;
+                em << "unterminated string literal at line " << t.span.begin.line
+                   << ", column " << t.span.begin.column;
+                return PreprocessResult{std::vector<PPToken>{}, false, em.str()};
+            }
+        }
+    }
     return PreprocessResult{std::move(tokens), true, std::string()};
 }
 
