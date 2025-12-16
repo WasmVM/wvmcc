@@ -136,6 +136,22 @@ static int test_variadic_macro() {
         return 1;
     }
     
+    // Verify __VA_ARGS__ was replaced with 42
+    bool foundPrintf = false;
+    bool foundTest = false;
+    bool found42 = false;
+    for (const auto& t : res.tokens) {
+        if (t.lexeme == "printf") foundPrintf = true;
+        if (t.lexeme == "test") foundTest = true;
+        if (t.lexeme == "42") found42 = true;
+    }
+    
+    if (!foundPrintf || !foundTest || !found42) {
+        std::cerr << "test_variadic_macro: expected 'printf', '\"test\"', and '42' in output\n";
+        std::cerr << "found: printf=" << foundPrintf << " test=" << foundTest << " 42=" << found42 << "\n";
+        return 2;
+    }
+    
     return 0;
 }
 
@@ -158,6 +174,80 @@ static int test_undef_macro() {
     if (!res.success) {
         std::cerr << "test_undef_macro: preprocess failed: " << res.errorMsg << "\n";
         return 1;
+    }
+    
+    return 0;
+}
+
+// Test 7a: Variadic macro with empty variadic args
+static int test_variadic_empty() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_variadic_empty.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define LOG(msg, ...) log_func(msg, __VA_ARGS__)\n";
+        ofs << "void test() { LOG(\"only message\"); }\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_variadic_empty: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // When variadic is empty, __VA_ARGS__ expands to nothing
+    // Result: log_func("only message", )
+    bool foundLogFunc = false;
+    for (const auto& t : res.tokens) {
+        if (t.lexeme == "log_func") foundLogFunc = true;
+    }
+    
+    if (!foundLogFunc) {
+        std::cerr << "test_variadic_empty: expected 'log_func' in output\n";
+        return 2;
+    }
+    
+    return 0;
+}
+
+// Test 7b: Variadic macro with multiple arguments
+static int test_variadic_multiple() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_variadic_multiple.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define CALL(fn, ...) fn(__VA_ARGS__)\n";
+        ofs << "int result = CALL(add, 1, 2, 3);\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_variadic_multiple: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // Should expand to: add(1, 2, 3)
+    bool foundAdd = false;
+    bool found1 = false, found2 = false, found3 = false;
+    for (const auto& t : res.tokens) {
+        if (t.lexeme == "add") foundAdd = true;
+        if (t.lexeme == "1") found1 = true;
+        if (t.lexeme == "2") found2 = true;
+        if (t.lexeme == "3") found3 = true;
+    }
+    
+    if (!foundAdd || !found1 || !found2 || !found3) {
+        std::cerr << "test_variadic_multiple: expected 'add', '1', '2', '3' in output\n";
+        std::cerr << "found: add=" << foundAdd << " 1=" << found1 << " 2=" << found2 << " 3=" << found3 << "\n";
+        return 2;
     }
     
     return 0;
@@ -269,6 +359,18 @@ int main() {
     result = test_undef_macro();
     if (result != 0) {
         std::cerr << "test_undef_macro failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_variadic_empty();
+    if (result != 0) {
+        std::cerr << "test_variadic_empty failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_variadic_multiple();
+    if (result != 0) {
+        std::cerr << "test_variadic_multiple failed with code " << result << "\n";
         return result;
     }
 

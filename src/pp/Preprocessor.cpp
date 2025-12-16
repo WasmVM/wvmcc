@@ -638,6 +638,7 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
             size_t argStart = j + 1;
             int parenDepth = 1;
             size_t k = argStart;
+            int commaDepth = 0; // Track depth for comma separation
 
             while (k < tokens.size() && parenDepth > 0) {
                 if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == "(") {
@@ -648,12 +649,20 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
                         // End of arguments - collect the last argument
                         std::vector<PPToken> lastArg;
                         for (size_t l = argStart; l < k; ++l) {
-                            if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == ",") {
+                            if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == "," && 
+                                commaDepth == 0 && args.size() < m->params.size()) {
+                                // Only split on top-level commas up to fixed param count
                                 args.push_back(lastArg);
                                 lastArg.clear();
                                 argStart = l + 1;
                             } else if (tokens[l].kind != PPTokenKind::Whitespace || !lastArg.empty()) {
                                 lastArg.push_back(tokens[l]);
+                            }
+                            // Track nested parens for comma depth
+                            if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == "(") {
+                                commaDepth++;
+                            } else if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == ")") {
+                                commaDepth--;
                             }
                         }
                         if (!lastArg.empty() || args.empty()) {
@@ -665,9 +674,36 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
                 k++;
             }
 
+            // For variadic macros, collect remaining args as __VA_ARGS__
+            if (m->variadic && args.size() > m->params.size()) {
+                // Combine all args beyond fixed params into one variadic arg
+                std::vector<PPToken> variadicArg;
+                for (size_t vIdx = m->params.size(); vIdx < args.size(); ++vIdx) {
+                    if (vIdx > m->params.size()) {
+                        // Add comma separator between variadic arguments
+                        variadicArg.push_back(PPToken{
+                            .kind = PPTokenKind::Punctuator,
+                            .lexeme = ",",
+                            .span = {}
+                        });
+                    }
+                    for (const auto& tok : args[vIdx]) {
+                        variadicArg.push_back(tok);
+                    }
+                }
+                // Keep only fixed params in args, variadic is separate
+                args.resize(m->params.size());
+                args.push_back(variadicArg);
+            }
+
             // Check argument count matches parameter count
-            if (args.size() != m->params.size() && !m->variadic) {
+            if (!m->variadic && args.size() != m->params.size()) {
                 // Mismatch - don't expand
+                result.push_back(t);
+                continue;
+            }
+            if (m->variadic && args.size() < m->params.size()) {
+                // Not enough args for fixed params
                 result.push_back(t);
                 continue;
             }
@@ -676,18 +712,35 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
             std::vector<PPToken> expanded;
             for (const auto& repl : m->replacement) {
                 bool isParam = false;
-                for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-                    if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
-                        // Replace parameter with argument
-                        if (pIdx < args.size()) {
-                            for (const auto& arg : args[pIdx]) {
-                                expanded.push_back(arg);
-                            }
+                
+                // Check for __VA_ARGS__ substitution
+                if (m->variadic && repl.kind == PPTokenKind::Identifier && repl.lexeme == "__VA_ARGS__") {
+                    // Insert variadic argument tokens
+                    if (args.size() > m->params.size()) {
+                        for (const auto& vaToken : args[m->params.size()]) {
+                            expanded.push_back(vaToken);
                         }
-                        isParam = true;
-                        break;
+                    }
+                    // If no variadic args provided, __VA_ARGS__ expands to nothing
+                    isParam = true;
+                }
+                
+                // Check for named parameter substitution
+                if (!isParam) {
+                    for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+                        if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
+                            // Replace parameter with argument
+                            if (pIdx < args.size()) {
+                                for (const auto& arg : args[pIdx]) {
+                                    expanded.push_back(arg);
+                                }
+                            }
+                            isParam = true;
+                            break;
+                        }
                     }
                 }
+                
                 if (!isParam) {
                     expanded.push_back(repl);
                 }
