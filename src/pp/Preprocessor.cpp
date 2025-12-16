@@ -14,7 +14,8 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     std::ostringstream oss;
     oss << ifs.rdbuf();
     // Single-pass tokenization (phase 1–3 handled inline)
-    auto tokens = Tokenizer::tokenize(oss.str());
+    Tokenizer tokenizer(oss.str());
+    auto tokens = tokenizer.tokenize();
     // Validate tokens for errors (e.g., unterminated string literal)
     for (const auto& t : tokens) {
         if (t.kind == PPTokenKind::StringLiteral) {

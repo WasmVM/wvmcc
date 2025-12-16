@@ -26,20 +26,6 @@ struct PPToken {
     std::string lexeme;
 };
 
-class Tokenizer {
-public:
-    // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
-    static std::vector<PPToken> tokenize(const std::string& input);
-
-private:
-    static bool is_digit(char c);
-    static bool is_nondigit(char c);
-    static bool is_space(char c);
-    static bool is_hex(char c);
-    static bool is_oct(char c);
-};
-
-// Internal: SourceBuffer performs inline phase 1–3 preprocessing while feeding chars
 class SourceBuffer {
 public:
     explicit SourceBuffer(const std::string& input);
@@ -61,6 +47,33 @@ private:
 
     char trigraph_at(std::size_t idx) const;
     void fill_buffer();
+};
+
+class Tokenizer {
+public:
+    explicit Tokenizer(const std::string& input);
+    
+    // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
+    std::vector<PPToken> tokenize();
+
+private:
+    static bool is_digit(char c);
+    static bool is_nondigit(char c);
+    static bool is_space(char c);
+    static bool is_hex(char c);
+    static bool is_oct(char c);
+
+    // Member state for tokenization
+    const std::string& input;
+    SourceBuffer feeder;
+    std::vector<PPToken> tokens;
+    std::string stream;
+    size_t streamPos;
+
+    void emit(PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end);
+    bool try_ucn(size_t idx, size_t& consumed);
+    bool starts_char(size_t idx, size_t& prefixLen);
+    bool starts_string(size_t idx, size_t& prefixLen);
 };
 
 } // namespace wvmcc

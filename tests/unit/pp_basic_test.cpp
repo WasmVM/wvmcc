@@ -12,11 +12,12 @@ struct Case {
 
 static bool run_case(const Case& c) {
     std::string in(c.input);
-        // Single-pass tokenizer: concatenate lexemes to approximate preprocessed stream
-        auto toks = wvmcc::Tokenizer::tokenize(in);
-        std::string out;
-        out.reserve(256);
-        for (auto& t : toks) out += t.lexeme;
+    // Single-pass tokenizer: concatenate lexemes to approximate preprocessed stream
+    wvmcc::Tokenizer tokenizer(in);
+    auto toks = tokenizer.tokenize();
+    std::string out;
+    out.reserve(256);
+    for (auto& t : toks) out += t.lexeme;
     bool ok = (out == std::string(c.expected));
     if (!ok) {
         std::cerr << "[FAIL] " << c.name << "\nExpected:\n" << c.expected
