@@ -91,6 +91,19 @@ private:
     // Returns the expanded token list with macro substitutions applied.
     // Prevents infinite recursion by tracking expanded macro names.
     std::vector<PPToken> expandMacros(const std::vector<PPToken>& tokens);
+    
+    // Helper methods for expandMacros
+    bool tryExpandFunctionLikeMacro(const std::vector<PPToken>& tokens, size_t& i, 
+                                    const Macro* m, const PPToken& invocationToken,
+                                    std::vector<PPToken>& result);
+    std::vector<std::vector<PPToken>> collectMacroArguments(const std::vector<PPToken>& tokens,
+                                                            size_t startIdx, size_t& endIdx,
+                                                            const Macro* m);
+    std::vector<PPToken> substituteParameters(const Macro* m,
+                                              const std::vector<std::vector<PPToken>>& args,
+                                              const PPToken& invocationToken);
+    std::vector<PPToken> handleTokenPasting(const std::vector<PPToken>& tokens);
+    std::string stringifyTokens(const std::vector<PPToken>& tokens);
 
     // Conditional compilation state tracking
     struct ConditionalFrame {

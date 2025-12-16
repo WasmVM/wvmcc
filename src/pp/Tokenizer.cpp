@@ -5,70 +5,58 @@
 
 namespace wvmcc {
 
+// Helper to check multi-character punctuator sequences
+static bool matches_at(const std::string& s, size_t i, const char* pattern) {
+    size_t plen = std::strlen(pattern);
+    if (i + plen > s.size()) return false;
+    return s.substr(i, plen) == pattern;
+}
+
 static size_t match_punct(const std::string& s, size_t i) {
-    // Fast path: dispatch by first character, checking longest candidates first per starter.
-    const size_t n = s.size() - i;
+    if (i >= s.size()) return 0;
+    
     const char c = s[i];
+    
+    // Check 4-character operators first
+    if (matches_at(s, i, "%:%:")) return 4;
+    
+    // Check 3-character operators
+    if (matches_at(s, i, "<<=")) return 3;
+    if (matches_at(s, i, ">>=")) return 3;
+    if (matches_at(s, i, "...")) return 3;
+    
+    // Check 2-character operators
+    if (matches_at(s, i, "%:")) return 2;
+    if (matches_at(s, i, "%>")) return 2;
+    if (matches_at(s, i, "%=")) return 2;
+    if (matches_at(s, i, "<:")) return 2;
+    if (matches_at(s, i, "<%")) return 2;
+    if (matches_at(s, i, "<<")) return 2;
+    if (matches_at(s, i, "<=")) return 2;
+    if (matches_at(s, i, ">>")) return 2;
+    if (matches_at(s, i, ">=")) return 2;
+    if (matches_at(s, i, ":>")) return 2;
+    if (matches_at(s, i, "##")) return 2;
+    if (matches_at(s, i, "->")) return 2;
+    if (matches_at(s, i, "--")) return 2;
+    if (matches_at(s, i, "-=")) return 2;
+    if (matches_at(s, i, "++")) return 2;
+    if (matches_at(s, i, "+=")) return 2;
+    if (matches_at(s, i, "&&")) return 2;
+    if (matches_at(s, i, "&=")) return 2;
+    if (matches_at(s, i, "||")) return 2;
+    if (matches_at(s, i, "|=")) return 2;
+    if (matches_at(s, i, "*=")) return 2;
+    if (matches_at(s, i, "/=")) return 2;
+    if (matches_at(s, i, "^=")) return 2;
+    if (matches_at(s, i, "!=")) return 2;
+    if (matches_at(s, i, "==")) return 2;
+    
+    // Check 1-character punctuators
     switch (c) {
-        case '%':
-            if (n >= 4 && s[i+1]==':' && s[i+2]=='%' && s[i+3]==':') return 4; // %:%:
-            if (n >= 2 && s[i+1]==':') return 2; // %:
-            if (n >= 2 && s[i+1]=='>') return 2; // %>
-            if (n >= 2 && s[i+1]=='=') return 2; // %=
-            return 1;
-        case '<':
-            if (n >= 3 && s[i+1]=='<' && s[i+2]=='=') return 3; // <<=
-            if (n >= 2 && s[i+1]==':') return 2; // <:
-            if (n >= 2 && s[i+1]=='%') return 2; // <%
-            if (n >= 2 && s[i+1]=='<') return 2; // <<
-            if (n >= 2 && s[i+1]=='=') return 2; // <=
-            return 1;
-        case '>':
-            if (n >= 3 && s[i+1]=='>' && s[i+2]=='=') return 3; // >>=
-            if (n >= 2 && s[i+1]=='>' ) return 2; // >>
-            if (n >= 2 && s[i+1]=='=') return 2; // >=
-            return 1;
-        case ':':
-            if (n >= 2 && s[i+1]=='>') return 2; // :>
-            return 1;
-        case '#':
-            if (n >= 2 && s[i+1]=='#') return 2; // ##
-            return 1;
-        case '-':
-            if (n >= 2 && s[i+1]=='>') return 2; // ->
-            if (n >= 2 && s[i+1]=='-') return 2; // --
-            if (n >= 2 && s[i+1]=='=') return 2; // -=
-            return 1;
-        case '+':
-            if (n >= 2 && s[i+1]=='+') return 2; // ++
-            if (n >= 2 && s[i+1]=='=') return 2; // +=
-            return 1;
-        case '&':
-            if (n >= 2 && s[i+1]=='&') return 2; // &&
-            if (n >= 2 && s[i+1]=='=') return 2; // &=
-            return 1;
-        case '|':
-            if (n >= 2 && s[i+1]=='|') return 2; // ||
-            if (n >= 2 && s[i+1]=='=') return 2; // |=
-            return 1;
-        case '*':
-            if (n >= 2 && s[i+1]=='=') return 2; // *=
-            return 1;
-        case '/':
-            if (n >= 2 && s[i+1]=='=') return 2; // /=
-            return 1;
-        case '^':
-            if (n >= 2 && s[i+1]=='=') return 2; // ^=
-            return 1;
-        case '!':
-            if (n >= 2 && s[i+1]=='=') return 2; // !=
-            return 1;
-        case '=':
-            if (n >= 2 && s[i+1]=='=') return 2; // ==
-            return 1;
-        case '.':
-            if (n >= 3 && s[i+1]=='.' && s[i+2]=='.') return 3; // ...
-            return 1;
+        case '%': case '<': case '>': case ':': case '#':
+        case '-': case '+': case '&': case '|': case '*':
+        case '/': case '^': case '!': case '=': case '.':
         case '[': case ']': case '(': case ')': case '{': case '}':
         case ',': case ';': case '~': case '?':
             return 1;
@@ -374,146 +362,329 @@ Tokenizer::Iterator Tokenizer::end() {
 bool Tokenizer::readNextToken(PPToken& out) {
     auto c0 = feeder.peek(0);
     if (!c0.has_value()) return false;
+    
     char c = c0.value();
     SourcePos begin = feeder.position();
 
-    // Preprocessing number (PPNumber)
+    // Try each token type in priority order
+    if (tryReadPPNumber(out, c, begin)) return true;
+    if (tryReadCharConstant(out, begin)) return true;
+    if (tryReadStringLiteral(out, begin)) return true;
+    if (tryReadNewline(out, c, begin)) return true;
+    if (tryReadWhitespace(out, c, begin)) return true;
+    if (tryReadIdentifier(out, c, begin)) return true;
+    if (tryReadPunctuator(out, begin)) return true;
+    
+    // Fallback: Other token
+    readOtherToken(out, begin);
+    return true;
+}
+
+bool Tokenizer::tryReadPPNumber(PPToken& out, char c, const SourcePos& begin) {
     auto c1 = feeder.peek(1);
-    if (c == '.' ? (c1.has_value() && is_digit(c1.value())) : is_digit(c)) {
-        std::string lex;
-        if (c == '.') { feeder.consume(1); lex.push_back('.'); }
-        auto d0 = feeder.peek(0);
-        if (d0.has_value() && is_digit(d0.value())) { lex.push_back(d0.value()); feeder.consume(1); }
-        while (true) {
-            auto dopt = feeder.peek(0);
-            if (!dopt.has_value()) break;
-            char d = dopt.value();
-            if (d=='e'||d=='E'||d=='p'||d=='P') {
-                feeder.consume(1); lex.push_back(d);
-                auto sign = feeder.peek(0);
-                if (sign.has_value() && (sign.value() == '+' || sign.value() == '-')) { lex.push_back(sign.value()); feeder.consume(1); }
-                while (true) {
-                    auto nd = feeder.peek(0);
-                    if (nd.has_value() && (nd.value() >= '0' && nd.value() <= '9')) { lex.push_back(nd.value()); feeder.consume(1); }
-                    else break;
-                }
+    bool isPPNumber = (c == '.' && c1.has_value() && is_digit(c1.value())) || is_digit(c);
+    if (!isPPNumber) return false;
+
+    std::string lex;
+    if (c == '.') {
+        feeder.consume(1);
+        lex.push_back('.');
+    }
+    
+    auto d0 = feeder.peek(0);
+    if (d0.has_value() && is_digit(d0.value())) {
+        lex.push_back(d0.value());
+        feeder.consume(1);
+    }
+    
+    while (true) {
+        auto dopt = feeder.peek(0);
+        if (!dopt.has_value()) break;
+        char d = dopt.value();
+        
+        // Handle exponent notation
+        if (d == 'e' || d == 'E' || d == 'p' || d == 'P') {
+            feeder.consume(1);
+            lex.push_back(d);
+            auto sign = feeder.peek(0);
+            if (sign.has_value() && (sign.value() == '+' || sign.value() == '-')) {
+                lex.push_back(sign.value());
+                feeder.consume(1);
+            }
+            while (true) {
+                auto nd = feeder.peek(0);
+                if (nd.has_value() && is_digit(nd.value())) {
+                    lex.push_back(nd.value());
+                    feeder.consume(1);
+                } else break;
+            }
+            continue;
+        }
+        
+        if (is_digit(d) || is_nondigit(d)) {
+            lex.push_back(d);
+            feeder.consume(1);
+            continue;
+        }
+        if (d == '.') {
+            lex.push_back('.');
+            feeder.consume(1);
+            continue;
+        }
+        break;
+    }
+    
+    out = PPToken{PPTokenKind::PPNumber, SourceSpan{begin, feeder.position()}, lex};
+    return true;
+}
+
+bool Tokenizer::tryReadCharConstant(PPToken& out, const SourcePos& begin) {
+    size_t charPrefixLen = 0;
+    if (!starts_char(0, charPrefixLen)) return false;
+
+    std::string lex;
+    for (size_t k = 0; k < charPrefixLen; ++k) {
+        auto ch = feeder.get();
+        if (ch) lex.push_back(ch.value());
+    }
+    
+    auto q = feeder.get();
+    if (q) lex.push_back(q.value());
+    
+    bool escaped = false;
+    while (true) {
+        auto dopt = feeder.peek(0);
+        if (!dopt.has_value()) break;
+        char d = dopt.value();
+        
+        if (!escaped) {
+            if (d == '\\') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                escaped = true;
                 continue;
             }
-            if (is_digit(d) || is_nondigit(d)) { lex.push_back(d); feeder.consume(1); continue; }
-            if (d == '.') { lex.push_back('.'); feeder.consume(1); continue; }
-            break;
-        }
-        out = PPToken{PPTokenKind::PPNumber, SourceSpan{begin, feeder.position()}, lex};
-        return true;
-    }
-
-    // Character constant (with optional encoding prefix L/u/U)
-    size_t charPrefixLen = 0;
-    if (starts_char(0, charPrefixLen)) {
-        std::string lex;
-        for (size_t k = 0; k < charPrefixLen; ++k) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); }
-        auto q = feeder.get(); if (q) lex.push_back(q.value());
-        bool escaped = false;
-        while (true) {
-            auto dopt = feeder.peek(0);
-            if (!dopt.has_value()) break;
-            char d = dopt.value();
-            if (!escaped) {
-                if (d == '\\') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); escaped = true; continue; }
-                if (d == '\'') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); break; }
-                if (d == '\n') { break; }
-                auto ch = feeder.get(); if (ch) lex.push_back(ch.value());
-            } else {
-                if (d == 'x') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); while (true) { auto hx = feeder.peek(0); if (hx && is_hex(hx.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } else break; } escaped = false; continue; }
-                if (d == 'u') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); for (int k=0;k<4; ++k) { auto hx = feeder.peek(0); if (hx && is_hex(hx.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } } escaped = false; continue; }
-                if (d == 'U') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); for (int k=0;k<8; ++k) { auto hx = feeder.peek(0); if (hx && is_hex(hx.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } } escaped = false; continue; }
-                if (is_oct(d)) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); for (int k=1;k<3; ++k) { auto oc = feeder.peek(0); if (oc && is_oct(oc.value())) { auto cc = feeder.get(); if (cc) lex.push_back(cc.value()); } } escaped = false; continue; }
-                auto ch2 = feeder.get(); if (ch2) lex.push_back(ch2.value()); escaped = false;
-            }
-        }
-        out = PPToken{PPTokenKind::CharConst, SourceSpan{begin, feeder.position()}, lex};
-        return true;
-    }
-
-    // String literal (with optional encoding prefix u8/u/U/L)
-    size_t prefixLen = 0;
-    if (starts_string(0, prefixLen)) {
-        std::string lex;
-        for (size_t k = 0; k < prefixLen; ++k) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); }
-        auto q = feeder.get(); if (q) lex.push_back(q.value());
-        bool escaped = false;
-        while (true) {
-            auto dopt = feeder.peek(0);
-            if (!dopt.has_value()) break;
-            char d = dopt.value();
-            if (!escaped) {
-                if (d == '\\') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); escaped = true; continue; }
-                if (d == '"') { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); break; }
-                if (d == '\n') { break; }
-                auto ch = feeder.get(); if (ch) lex.push_back(ch.value());
-            } else {
-                auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); escaped = false;
-            }
-        }
-        out = PPToken{PPTokenKind::StringLiteral, SourceSpan{begin, feeder.position()}, lex};
-        return true;
-    }
-
-    // Newline
-    if (c == '\n') {
-        feeder.consume(1);
-        out = PPToken{PPTokenKind::Newline, SourceSpan{begin, feeder.position()}, "\n"};
-        return true;
-    }
-
-    // Whitespace
-    if (is_space(c)) {
-        std::string lex;
-        do {
-            auto ch = feeder.get(); if (ch) lex.push_back(ch.value());
-            auto np = feeder.peek(0); if (!np.has_value()) break; c = np.value();
-        } while (is_space(c));
-        out = PPToken{PPTokenKind::Whitespace, SourceSpan{begin, feeder.position()}, lex};
-        return true;
-    }
-
-    // Identifier: starts with nondigit or universal-character-name
-    auto n1 = feeder.peek(1);
-    if (is_nondigit(c) || (c=='\\' && n1.has_value() && (n1.value()=='u' || n1.value()=='U'))) {
-        bool validStart = false;
-        std::string lex;
-        if (is_nondigit(c)) { auto ch = feeder.get(); if (ch) { lex.push_back(ch.value()); validStart = true; } }
-        else { size_t u = 0; if (try_ucn(0, u)) { for (size_t k=0;k<u;++k){ auto ch2 = feeder.get(); if (ch2) lex.push_back(ch2.value()); } validStart = true; } }
-        if (validStart) {
-            while (true) {
-                auto p = feeder.peek(0);
-                if (!p.has_value()) break;
-                char d = p.value();
-                if (is_nondigit(d) || is_digit(d)) { auto ch3 = feeder.get(); (void)ch3; lex.push_back(d); continue; }
-                size_t u = 0; if (try_ucn(0, u)) { for (size_t k=0;k<u;++k){ auto ch4 = feeder.get(); if (ch4) lex.push_back(ch4.value()); } continue; }
+            if (d == '\'') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
                 break;
             }
-            out = PPToken{PPTokenKind::Identifier, SourceSpan{begin, feeder.position()}, lex};
-            return true;
+            if (d == '\n') break;
+            auto ch = feeder.get();
+            if (ch) lex.push_back(ch.value());
+        } else {
+            if (d == 'x') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                while (true) {
+                    auto hx = feeder.peek(0);
+                    if (hx && is_hex(hx.value())) {
+                        auto cc = feeder.get();
+                        if (cc) lex.push_back(cc.value());
+                    } else break;
+                }
+                escaped = false;
+                continue;
+            }
+            if (d == 'u') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                for (int k = 0; k < 4; ++k) {
+                    auto hx = feeder.peek(0);
+                    if (hx && is_hex(hx.value())) {
+                        auto cc = feeder.get();
+                        if (cc) lex.push_back(cc.value());
+                    }
+                }
+                escaped = false;
+                continue;
+            }
+            if (d == 'U') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                for (int k = 0; k < 8; ++k) {
+                    auto hx = feeder.peek(0);
+                    if (hx && is_hex(hx.value())) {
+                        auto cc = feeder.get();
+                        if (cc) lex.push_back(cc.value());
+                    }
+                }
+                escaped = false;
+                continue;
+            }
+            if (is_oct(d)) {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                for (int k = 1; k < 3; ++k) {
+                    auto oc = feeder.peek(0);
+                    if (oc && is_oct(oc.value())) {
+                        auto cc = feeder.get();
+                        if (cc) lex.push_back(cc.value());
+                    }
+                }
+                escaped = false;
+                continue;
+            }
+            auto ch2 = feeder.get();
+            if (ch2) lex.push_back(ch2.value());
+            escaped = false;
         }
     }
-
-    // Punctuator: greedy longest-match over up to 4 chars
-    std::string snapshot;
-    for (size_t i=0;i<4;++i) { auto ch = feeder.peek(i); if (ch) snapshot.push_back(ch.value()); else break; }
-    size_t plen = match_punct(snapshot, 0);
-    if (plen > 0) {
-        std::string lex;
-        for (size_t i=0;i<plen;++i) { auto ch = feeder.get(); if (ch) lex.push_back(ch.value()); }
-        out = PPToken{PPTokenKind::Punctuator, SourceSpan{begin, feeder.position()}, lex};
-        return true;
-    }
-
-    // Fallback: single Other character
-    std::string lex;
-    auto gc = feeder.get(); if (gc) lex.push_back(gc.value());
-    out = PPToken{PPTokenKind::Other, SourceSpan{begin, feeder.position()}, lex};
+    
+    out = PPToken{PPTokenKind::CharConst, SourceSpan{begin, feeder.position()}, lex};
     return true;
+}
+
+bool Tokenizer::tryReadStringLiteral(PPToken& out, const SourcePos& begin) {
+    size_t prefixLen = 0;
+    if (!starts_string(0, prefixLen)) return false;
+
+    std::string lex;
+    for (size_t k = 0; k < prefixLen; ++k) {
+        auto ch = feeder.get();
+        if (ch) lex.push_back(ch.value());
+    }
+    
+    auto q = feeder.get();
+    if (q) lex.push_back(q.value());
+    
+    bool escaped = false;
+    while (true) {
+        auto dopt = feeder.peek(0);
+        if (!dopt.has_value()) break;
+        char d = dopt.value();
+        
+        if (!escaped) {
+            if (d == '\\') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                escaped = true;
+                continue;
+            }
+            if (d == '"') {
+                auto ch = feeder.get();
+                if (ch) lex.push_back(ch.value());
+                break;
+            }
+            if (d == '\n') break;
+            auto ch = feeder.get();
+            if (ch) lex.push_back(ch.value());
+        } else {
+            auto ch = feeder.get();
+            if (ch) lex.push_back(ch.value());
+            escaped = false;
+        }
+    }
+    
+    out = PPToken{PPTokenKind::StringLiteral, SourceSpan{begin, feeder.position()}, lex};
+    return true;
+}
+
+bool Tokenizer::tryReadNewline(PPToken& out, char c, const SourcePos& begin) {
+    if (c != '\n') return false;
+    
+    feeder.consume(1);
+    out = PPToken{PPTokenKind::Newline, SourceSpan{begin, feeder.position()}, "\n"};
+    return true;
+}
+
+bool Tokenizer::tryReadWhitespace(PPToken& out, char c, const SourcePos& begin) {
+    if (!is_space(c)) return false;
+    
+    std::string lex;
+    do {
+        auto ch = feeder.get();
+        if (ch) lex.push_back(ch.value());
+        auto np = feeder.peek(0);
+        if (!np.has_value()) break;
+        c = np.value();
+    } while (is_space(c));
+    
+    out = PPToken{PPTokenKind::Whitespace, SourceSpan{begin, feeder.position()}, lex};
+    return true;
+}
+
+bool Tokenizer::tryReadIdentifier(PPToken& out, char c, const SourcePos& begin) {
+    auto n1 = feeder.peek(1);
+    bool canBeIdentifier = is_nondigit(c) || 
+                          (c == '\\' && n1.has_value() && 
+                           (n1.value() == 'u' || n1.value() == 'U'));
+    if (!canBeIdentifier) return false;
+
+    bool validStart = false;
+    std::string lex;
+    
+    if (is_nondigit(c)) {
+        auto ch = feeder.get();
+        if (ch) {
+            lex.push_back(ch.value());
+            validStart = true;
+        }
+    } else {
+        size_t u = 0;
+        if (try_ucn(0, u)) {
+            for (size_t k = 0; k < u; ++k) {
+                auto ch2 = feeder.get();
+                if (ch2) lex.push_back(ch2.value());
+            }
+            validStart = true;
+        }
+    }
+    
+    if (!validStart) return false;
+    
+    while (true) {
+        auto p = feeder.peek(0);
+        if (!p.has_value()) break;
+        char d = p.value();
+        
+        if (is_nondigit(d) || is_digit(d)) {
+            feeder.get();
+            lex.push_back(d);
+            continue;
+        }
+        
+        size_t u = 0;
+        if (try_ucn(0, u)) {
+            for (size_t k = 0; k < u; ++k) {
+                auto ch4 = feeder.get();
+                if (ch4) lex.push_back(ch4.value());
+            }
+            continue;
+        }
+        break;
+    }
+    
+    out = PPToken{PPTokenKind::Identifier, SourceSpan{begin, feeder.position()}, lex};
+    return true;
+}
+
+bool Tokenizer::tryReadPunctuator(PPToken& out, const SourcePos& begin) {
+    std::string snapshot;
+    for (size_t i = 0; i < 4; ++i) {
+        auto ch = feeder.peek(i);
+        if (ch) snapshot.push_back(ch.value());
+        else break;
+    }
+    
+    size_t plen = match_punct(snapshot, 0);
+    if (plen == 0) return false;
+    
+    std::string lex;
+    for (size_t i = 0; i < plen; ++i) {
+        auto ch = feeder.get();
+        if (ch) lex.push_back(ch.value());
+    }
+    
+    out = PPToken{PPTokenKind::Punctuator, SourceSpan{begin, feeder.position()}, lex};
+    return true;
+}
+
+void Tokenizer::readOtherToken(PPToken& out, const SourcePos& begin) {
+    std::string lex;
+    auto gc = feeder.get();
+    if (gc) lex.push_back(gc.value());
+    out = PPToken{PPTokenKind::Other, SourceSpan{begin, feeder.position()}, lex};
 }
 
 } // namespace wvmcc

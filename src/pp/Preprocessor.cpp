@@ -13,40 +13,7 @@
 namespace wvmcc {
 
 // Helper function to stringify tokens (for # operator in macros)
-// Returns a string literal token by converting tokens to string form
-static std::string stringifyTokens(const std::vector<PPToken>& tokens) {
-    std::string result = "\"";
-    
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        const auto& tok = tokens[i];
-        
-        // Skip leading whitespace
-        if (i == 0 && tok.kind == PPTokenKind::Whitespace) continue;
-        
-        // Skip whitespace unless needed for separation
-        if (tok.kind == PPTokenKind::Whitespace) {
-            // Only add space if previous token was not punctuation and next is not punctuation
-            if (i > 0 && i + 1 < tokens.size() &&
-                tokens[i-1].kind != PPTokenKind::Punctuator &&
-                tokens[i+1].kind != PPTokenKind::Punctuator) {
-                result += " ";
-            }
-            continue;
-        }
-        
-        // Escape quotes and backslashes in the stringified content
-        std::string lexeme = tok.lexeme;
-        for (char c : lexeme) {
-            if (c == '"' || c == '\\') {
-                result += '\\';
-            }
-            result += c;
-        }
-    }
-    
-    result += "\"";
-    return result;
-}
+// Now a member method (forward reference removed)
 
 static bool file_ends_with_newline(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
@@ -810,6 +777,282 @@ bool Preprocessor::handleUndefDirective(Tokenizer& tokenizer) {
     return true;
 }
 
+std::string Preprocessor::stringifyTokens(const std::vector<PPToken>& tokens) {
+    std::string result = "\"";
+    
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& tok = tokens[i];
+        
+        // Skip leading whitespace
+        if (i == 0 && tok.kind == PPTokenKind::Whitespace) continue;
+        
+        // Skip whitespace unless needed for separation
+        if (tok.kind == PPTokenKind::Whitespace) {
+            // Only add space if previous token was not punctuation and next is not punctuation
+            if (i > 0 && i + 1 < tokens.size() &&
+                tokens[i-1].kind != PPTokenKind::Punctuator &&
+                tokens[i+1].kind != PPTokenKind::Punctuator) {
+                result += " ";
+            }
+            continue;
+        }
+        
+        // Escape quotes and backslashes in the stringified content
+        std::string lexeme = tok.lexeme;
+        for (char c : lexeme) {
+            if (c == '"' || c == '\\') {
+                result += '\\';
+            }
+            result += c;
+        }
+    }
+    
+    result += "\"";
+    return result;
+}
+
+std::vector<std::vector<PPToken>> Preprocessor::collectMacroArguments(
+    const std::vector<PPToken>& tokens, size_t startIdx, size_t& endIdx, const Macro* m) {
+    
+    std::vector<std::vector<PPToken>> args;
+    std::vector<PPToken> currentArg;
+    int parenDepth = 1;  // Start with depth 1 since we're already inside the opening '('
+    
+    for (size_t k = startIdx; k < tokens.size(); ++k) {
+        const auto& tok = tokens[k];
+        
+        if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "(") {
+            parenDepth++;
+            currentArg.push_back(tok);
+        } else if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == ")") {
+            parenDepth--;
+            if (parenDepth == 0) {
+                // End of arguments
+                if (!currentArg.empty() || args.empty()) {
+                    args.push_back(currentArg);
+                }
+                endIdx = k;
+                break;
+            } else {
+                currentArg.push_back(tok);
+            }
+        } else if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "," && parenDepth == 1) {
+            // Argument separator at the top level
+            args.push_back(currentArg);
+            currentArg.clear();
+        } else if (tok.kind != PPTokenKind::Whitespace || !currentArg.empty()) {
+            currentArg.push_back(tok);
+        }
+    }
+    
+    // Handle variadic macros - collect remaining args as __VA_ARGS__
+    if (m->variadic && args.size() >= m->params.size()) {
+        std::vector<PPToken> variadicArg;
+        for (size_t vIdx = m->params.size(); vIdx < args.size(); ++vIdx) {
+            if (vIdx > m->params.size()) {
+                variadicArg.push_back(PPToken{
+                    .kind = PPTokenKind::Punctuator,
+                    .lexeme = ",",
+                    .span = {}
+                });
+            }
+            for (const auto& tok : args[vIdx]) {
+                variadicArg.push_back(tok);
+            }
+        }
+        args.resize(m->params.size());
+        args.push_back(variadicArg);
+    }
+    
+    return args;
+}
+
+std::vector<PPToken> Preprocessor::substituteParameters(
+    const Macro* m, const std::vector<std::vector<PPToken>>& args, const PPToken& invocationToken) {
+    
+    std::vector<PPToken> substituted;
+    
+    for (size_t rIdx = 0; rIdx < m->replacement.size(); ++rIdx) {
+        const auto& repl = m->replacement[rIdx];
+        bool handled = false;
+        
+        // Handle stringification operator (#)
+        if (repl.kind == PPTokenKind::Punctuator && repl.lexeme == "#") {
+            size_t nextIdx = rIdx + 1;
+            while (nextIdx < m->replacement.size() && 
+                   m->replacement[nextIdx].kind == PPTokenKind::Whitespace) {
+                nextIdx++;
+            }
+            
+            if (nextIdx < m->replacement.size()) {
+                const auto& nextTok = m->replacement[nextIdx];
+                int paramIdx = -1;
+                bool isVarargs = (m->variadic && nextTok.kind == PPTokenKind::Identifier && 
+                                 nextTok.lexeme == "__VA_ARGS__");
+                
+                if (!isVarargs) {
+                    for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+                        if (nextTok.kind == PPTokenKind::Identifier && 
+                            nextTok.lexeme == m->params[pIdx]) {
+                            paramIdx = pIdx;
+                            break;
+                        }
+                    }
+                }
+                
+                if (paramIdx >= 0 || isVarargs) {
+                    std::vector<PPToken> argToStringify;
+                    if (isVarargs && args.size() > m->params.size()) {
+                        argToStringify = args[m->params.size()];
+                    } else if (paramIdx >= 0 && paramIdx < static_cast<int>(args.size())) {
+                        argToStringify = args[paramIdx];
+                    }
+                    
+                    std::string stringified = stringifyTokens(argToStringify);
+                    PPToken strToken{
+                        .kind = PPTokenKind::StringLiteral,
+                        .span = repl.span,
+                        .lexeme = stringified,
+                        .paintedMacros = {}
+                    };
+                    strToken.paint(m->name);
+                    substituted.push_back(strToken);
+                    rIdx = nextIdx;
+                    handled = true;
+                }
+            }
+        }
+        
+        // Handle __VA_ARGS__
+        if (!handled && m->variadic && repl.kind == PPTokenKind::Identifier && 
+            repl.lexeme == "__VA_ARGS__") {
+            if (args.size() > m->params.size()) {
+                for (auto vaToken : args[m->params.size()]) {
+                    vaToken.paint(m->name);
+                    substituted.push_back(vaToken);
+                }
+            }
+            handled = true;
+        }
+        
+        // Handle regular parameters
+        if (!handled) {
+            for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+                if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
+                    if (pIdx < args.size()) {
+                        for (auto arg : args[pIdx]) {
+                            arg.paint(m->name);
+                            substituted.push_back(arg);
+                        }
+                    }
+                    handled = true;
+                    break;
+                }
+            }
+        }
+        
+        // Not a parameter - copy token and paint it
+        if (!handled) {
+            auto replToken = repl;
+            replToken.paint(m->name);
+            // Special handling for __LINE__: update span to invocation site
+            if (replToken.kind == PPTokenKind::Identifier && replToken.lexeme == "__LINE__") {
+                replToken.span = invocationToken.span;
+            }
+            substituted.push_back(replToken);
+        }
+    }
+    
+    return substituted;
+}
+
+std::vector<PPToken> Preprocessor::handleTokenPasting(const std::vector<PPToken>& tokens) {
+    std::vector<PPToken> result;
+    
+    for (size_t idx = 0; idx < tokens.size(); ++idx) {
+        const auto& tok = tokens[idx];
+        
+        // Check if current token is ##
+        if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "##") {
+            // Find previous non-whitespace token
+            int prevIdx = idx - 1;
+            while (prevIdx >= 0 && tokens[prevIdx].kind == PPTokenKind::Whitespace) {
+                prevIdx--;
+            }
+            
+            // Find next non-whitespace token
+            int nextIdx = idx + 1;
+            while (nextIdx < static_cast<int>(tokens.size()) && 
+                   tokens[nextIdx].kind == PPTokenKind::Whitespace) {
+                nextIdx++;
+            }
+            
+            // Paste tokens if we have both previous and next
+            if (prevIdx >= 0 && nextIdx < static_cast<int>(tokens.size())) {
+                // Remove whitespace before paste operator
+                while (!result.empty() && result.back().kind == PPTokenKind::Whitespace) {
+                    result.pop_back();
+                }
+                
+                // Paste: concatenate previous and next token lexemes
+                if (!result.empty()) {
+                    result.back().lexeme += tokens[nextIdx].lexeme;
+                    idx = nextIdx;  // Skip to next token
+                    continue;
+                }
+            }
+        }
+        
+        result.push_back(tok);
+    }
+    
+    return result;
+}
+
+bool Preprocessor::tryExpandFunctionLikeMacro(
+    const std::vector<PPToken>& tokens, size_t& i, const Macro* m, 
+    const PPToken& invocationToken, std::vector<PPToken>& result) {
+    
+    // Find opening '('
+    size_t j = i + 1;
+    while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) {
+        j++;
+    }
+    
+    // Check if we have '(' - if not, don't expand
+    if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator ||
+        tokens[j].lexeme != "(") {
+        return false;
+    }
+    
+    // Collect arguments
+    size_t endIdx = 0;
+    auto args = collectMacroArguments(tokens, j + 1, endIdx, m);
+    
+    // Validate argument count
+    if (!m->variadic && args.size() != m->params.size()) {
+        return false;
+    }
+    if (m->variadic && args.size() < m->params.size()) {
+        return false;
+    }
+    
+    // Substitute parameters
+    auto substituted = substituteParameters(m, args, invocationToken);
+    
+    // Handle token pasting
+    auto afterPasting = handleTokenPasting(substituted);
+    
+    // Recursively expand
+    auto expanded = expandMacros(afterPasting);
+    for (const auto& exp : expanded) {
+        result.push_back(exp);
+    }
+    
+    i = endIdx;  // Update position past the closing ')'
+    return true;
+}
+
 std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& tokens) {
     // Paint semantics implementation (C17 §6.10.3.3):
     // Each token tracks a "paint set" of macro names that have already tried to expand it.
@@ -828,7 +1071,6 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
 
         // Special handling for __LINE__ macro (dynamic expansion)
         if (t.lexeme == "__LINE__") {
-            // Expand to current line number
             std::string lineStr = std::to_string(t.span.begin.line);
             result.push_back(PPToken{
                 .kind = PPTokenKind::PPNumber,
@@ -854,243 +1096,22 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
             continue;
         }
 
+        // Try function-like macro expansion
         if (m->isFunction) {
-            // Function-like macro: check if next non-whitespace token is '('
-            size_t j = i + 1;
-
-            // Skip whitespace to find '('
-            while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) {
-                j++;
-            }
-
-            // Check if we have '(' - if not, don't expand
-            if (j >= tokens.size() || tokens[j].kind != PPTokenKind::Punctuator ||
-                tokens[j].lexeme != "(") {
-                result.push_back(t);
+            if (tryExpandFunctionLikeMacro(tokens, i, m, t, result)) {
                 continue;
             }
-
-            // Collect argument tokens between '(' and ')'
-            std::vector<std::vector<PPToken>> args;
-            size_t argStart = j + 1;
-            int parenDepth = 1;
-            size_t k = argStart;
-            int commaDepth = 0;
-
-            while (k < tokens.size() && parenDepth > 0) {
-                if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == "(") {
-                    parenDepth++;
-                } else if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == ")") {
-                    parenDepth--;
-                    if (parenDepth == 0) {
-                        std::vector<PPToken> lastArg;
-                        for (size_t l = argStart; l < k; ++l) {
-                            if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == "," && 
-                                commaDepth == 0 && args.size() < m->params.size()) {
-                                args.push_back(lastArg);
-                                lastArg.clear();
-                                argStart = l + 1;
-                            } else if (tokens[l].kind != PPTokenKind::Whitespace || !lastArg.empty()) {
-                                lastArg.push_back(tokens[l]);
-                            }
-                            if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == "(") {
-                                commaDepth++;
-                            } else if (tokens[l].kind == PPTokenKind::Punctuator && tokens[l].lexeme == ")") {
-                                commaDepth--;
-                            }
-                        }
-                        if (!lastArg.empty() || args.empty()) {
-                            args.push_back(lastArg);
-                        }
-                        break;
-                    }
-                }
-                k++;
-            }
-
-            // For variadic macros, collect remaining args as __VA_ARGS__
-            if (m->variadic && args.size() > m->params.size()) {
-                std::vector<PPToken> variadicArg;
-                for (size_t vIdx = m->params.size(); vIdx < args.size(); ++vIdx) {
-                    if (vIdx > m->params.size()) {
-                        variadicArg.push_back(PPToken{
-                            .kind = PPTokenKind::Punctuator,
-                            .lexeme = ",",
-                            .span = {}
-                        });
-                    }
-                    for (const auto& tok : args[vIdx]) {
-                        variadicArg.push_back(tok);
-                    }
-                }
-                args.resize(m->params.size());
-                args.push_back(variadicArg);
-            }
-
-            // Check argument count matches parameter count
-            if (!m->variadic && args.size() != m->params.size()) {
-                result.push_back(t);
-                continue;
-            }
-            if (m->variadic && args.size() < m->params.size()) {
-                result.push_back(t);
-                continue;
-            }
-
-            // Perform substitution with paint propagation
-            // Step 1: Replace parameters and handle stringification (#)
-            std::vector<PPToken> substituted;
-            
-            for (size_t rIdx = 0; rIdx < m->replacement.size(); ++rIdx) {
-                const auto& repl = m->replacement[rIdx];
-                bool isParam = false;
-                
-                // Check for stringification operator (#) followed by a parameter
-                if (repl.kind == PPTokenKind::Punctuator && repl.lexeme == "#") {
-                    // Next non-whitespace token should be a parameter name
-                    size_t nextIdx = rIdx + 1;
-                    while (nextIdx < m->replacement.size() && 
-                           m->replacement[nextIdx].kind == PPTokenKind::Whitespace) {
-                        nextIdx++;
-                    }
-                    
-                    if (nextIdx < m->replacement.size()) {
-                        const auto& nextTok = m->replacement[nextIdx];
-                        
-                        // Check if it's a parameter or __VA_ARGS__
-                        int paramIdx = -1;
-                        bool isVarargs = false;
-                        
-                        if (m->variadic && nextTok.kind == PPTokenKind::Identifier && 
-                            nextTok.lexeme == "__VA_ARGS__") {
-                            isVarargs = true;
-                        } else {
-                            for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-                                if (nextTok.kind == PPTokenKind::Identifier && 
-                                    nextTok.lexeme == m->params[pIdx]) {
-                                    paramIdx = pIdx;
-                                    break;
-                                }
-                            }
-                        }
-                        
-                        if (paramIdx >= 0 || isVarargs) {
-                            // Stringify the corresponding argument
-                            std::vector<PPToken> argToStringify;
-                            if (isVarargs && args.size() > m->params.size()) {
-                                argToStringify = args[m->params.size()];
-                            } else if (paramIdx >= 0 && paramIdx < static_cast<int>(args.size())) {
-                                argToStringify = args[paramIdx];
-                            }
-                            
-                            std::string stringified = stringifyTokens(argToStringify);
-                            PPToken strToken{
-                                .kind = PPTokenKind::StringLiteral,
-                                .span = repl.span,
-                                .lexeme = stringified,
-                                .paintedMacros = {}
-                            };
-                            strToken.paint(m->name);
-                            substituted.push_back(strToken);
-                            
-                            // Skip the # and the parameter in replacement
-                            rIdx = nextIdx;
-                            isParam = true;
-                        }
-                    }
-                }
-                
-                if (!isParam && m->variadic && repl.kind == PPTokenKind::Identifier && 
-                    repl.lexeme == "__VA_ARGS__") {
-                    if (args.size() > m->params.size()) {
-                        for (auto vaToken : args[m->params.size()]) {
-                            vaToken.paint(m->name);
-                            substituted.push_back(vaToken);
-                        }
-                    }
-                    isParam = true;
-                }
-                
-                if (!isParam) {
-                    for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-                        if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
-                            if (pIdx < args.size()) {
-                                for (auto arg : args[pIdx]) {
-                                    arg.paint(m->name);
-                                    substituted.push_back(arg);
-                                }
-                            }
-                            isParam = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!isParam) {
-                    auto replToken = repl;
-                    replToken.paint(m->name);
-                    // Special handling for __LINE__: update span to invocation site
-                    if (replToken.kind == PPTokenKind::Identifier && replToken.lexeme == "__LINE__") {
-                        replToken.span = t.span;  // Use the span of the macro invocation token
-                    }
-                    substituted.push_back(replToken);
-                }
-            }
-            
-            // Step 2: Handle token pasting (##) as a post-processing step
-            std::vector<PPToken> afterPasting;
-            for (size_t idx = 0; idx < substituted.size(); ++idx) {
-                const auto& tok = substituted[idx];
-                
-                // Check if current token is ##
-                if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "##") {
-                    // Get previous and next tokens (skipping whitespace)
-                    int prevIdx = idx - 1;
-                    while (prevIdx >= 0 && substituted[prevIdx].kind == PPTokenKind::Whitespace) {
-                        prevIdx--;
-                    }
-                    
-                    int nextIdx = idx + 1;
-                    while (nextIdx < static_cast<int>(substituted.size()) && 
-                           substituted[nextIdx].kind == PPTokenKind::Whitespace) {
-                        nextIdx++;
-                    }
-                    
-                    // Paste tokens if we have both previous and next
-                    if (prevIdx >= 0 && nextIdx < static_cast<int>(substituted.size())) {
-                        // Remove whitespace before paste operator
-                        while (!afterPasting.empty() && afterPasting.back().kind == PPTokenKind::Whitespace) {
-                            afterPasting.pop_back();
-                        }
-                        
-                        // Paste: concatenate previous and next token lexemes
-                        if (!afterPasting.empty()) {
-                            afterPasting.back().lexeme += substituted[nextIdx].lexeme;
-                            idx = nextIdx;  // Skip to next token (## and whitespace already processed)
-                            continue;
-                        }
-                    }
-                }
-                
-                afterPasting.push_back(tok);
-            }
-            
-            std::vector<PPToken> expanded = expandMacros(afterPasting);
-            for (const auto& exp : expanded) {
-                result.push_back(exp);
-            }
-
-            i = k;
+            // If not expanded (no '(' found), treat as regular identifier
+            result.push_back(t);
             continue;
         }
 
-        // Object-like macro expansion: replace with replacement tokens
+        // Object-like macro expansion
         std::vector<PPToken> substituted;
         for (auto repl : m->replacement) {
             repl.paint(m->name);
-            // Special handling for __LINE__: update span to invocation site
             if (repl.kind == PPTokenKind::Identifier && repl.lexeme == "__LINE__") {
-                repl.span = t.span;  // Use the span of the macro invocation token
+                repl.span = t.span;  // Update to invocation site
             }
             substituted.push_back(repl);
         }

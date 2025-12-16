@@ -154,6 +154,16 @@ private:
 
     // Core worker to produce one token; returns false at EOF
     bool readNextToken(PPToken& out);
+    
+    // Helper methods for readNextToken - each handles one token type
+    bool tryReadPPNumber(PPToken& out, char c, const SourcePos& begin);
+    bool tryReadCharConstant(PPToken& out, const SourcePos& begin);
+    bool tryReadStringLiteral(PPToken& out, const SourcePos& begin);
+    bool tryReadNewline(PPToken& out, char c, const SourcePos& begin);
+    bool tryReadWhitespace(PPToken& out, char c, const SourcePos& begin);
+    bool tryReadIdentifier(PPToken& out, char c, const SourcePos& begin);
+    bool tryReadPunctuator(PPToken& out, const SourcePos& begin);
+    void readOtherToken(PPToken& out, const SourcePos& begin);
 };
 
 } // namespace wvmcc
