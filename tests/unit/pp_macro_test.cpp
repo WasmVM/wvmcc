@@ -155,7 +155,93 @@ static int test_variadic_macro() {
     return 0;
 }
 
-// Test 6: Undefine macro
+// Test 6: Stringification operator (#)
+static int test_stringification() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_stringify.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define STR(x) #x\n";
+        ofs << "const char* s = STR(hello);\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_stringification: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // Verify stringification: STR(hello) should become "hello"
+    bool foundStringHello = false;
+    for (const auto& t : res.tokens) {
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme == "\"hello\"") {
+            foundStringHello = true;
+            break;
+        }
+    }
+    
+    if (!foundStringHello) {
+        std::cerr << "test_stringification: expected string literal \"hello\" in output\n";
+        std::cerr << "tokens:\n";
+        for (const auto& t : res.tokens) {
+            std::cerr << "  " << t.lexeme << "\n";
+        }
+        return 2;
+    }
+    
+    return 0;
+}
+
+// Test 7: Stringification with special characters
+static int test_stringification_special() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_stringify_special.c";
+    
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define STR(x) #x\n";
+        ofs << "const char* s1 = STR(1 + 2);\n";
+        ofs << "const char* s2 = STR(\"quoted\");\n";
+    }
+
+    Preprocessor pp;
+    auto res = pp.run(srcName);
+    std::remove(srcName.c_str());
+
+    if (!res.success) {
+        std::cerr << "test_stringification_special: preprocess failed: " << res.errorMsg << "\n";
+        return 1;
+    }
+    
+    // Verify stringification of expressions: STR(1 + 2) -> "1 + 2"
+    // and STR("quoted") -> "\"quoted\"" (with escaped quotes)
+    bool found1Plus2 = false;
+    bool foundQuoted = false;
+    for (const auto& t : res.tokens) {
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral) {
+            if (t.lexeme.find("1") != std::string::npos && t.lexeme.find("+") != std::string::npos) {
+                found1Plus2 = true;
+            }
+            if (t.lexeme.find("\\\"") != std::string::npos) {
+                foundQuoted = true;
+            }
+        }
+    }
+    
+    if (!found1Plus2 || !foundQuoted) {
+        std::cerr << "test_stringification_special: expected stringified expressions\n";
+        std::cerr << "found: 1Plus2=" << found1Plus2 << " quoted=" << foundQuoted << "\n";
+        return 2;
+    }
+    
+    return 0;
+}
+
+// Test 8: Undefine macro
 static int test_undef_macro() {
     using namespace wvmcc;
     const std::string srcName = "temp_macro_undef.c";
@@ -353,6 +439,18 @@ int main() {
     result = test_variadic_macro();
     if (result != 0) {
         std::cerr << "test_variadic_macro failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_stringification();
+    if (result != 0) {
+        std::cerr << "test_stringification failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_stringification_special();
+    if (result != 0) {
+        std::cerr << "test_stringification_special failed with code " << result << "\n";
         return result;
     }
 

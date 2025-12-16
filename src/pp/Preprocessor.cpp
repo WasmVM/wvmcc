@@ -11,6 +11,42 @@
 
 namespace wvmcc {
 
+// Helper function to stringify tokens (for # operator in macros)
+// Returns a string literal token by converting tokens to string form
+static std::string stringifyTokens(const std::vector<PPToken>& tokens) {
+    std::string result = "\"";
+    
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto& tok = tokens[i];
+        
+        // Skip leading whitespace
+        if (i == 0 && tok.kind == PPTokenKind::Whitespace) continue;
+        
+        // Skip whitespace unless needed for separation
+        if (tok.kind == PPTokenKind::Whitespace) {
+            // Only add space if previous token was not punctuation and next is not punctuation
+            if (i > 0 && i + 1 < tokens.size() &&
+                tokens[i-1].kind != PPTokenKind::Punctuator &&
+                tokens[i+1].kind != PPTokenKind::Punctuator) {
+                result += " ";
+            }
+            continue;
+        }
+        
+        // Escape quotes and backslashes in the stringified content
+        std::string lexeme = tok.lexeme;
+        for (char c : lexeme) {
+            if (c == '"' || c == '\\') {
+                result += '\\';
+            }
+            result += c;
+        }
+    }
+    
+    result += "\"";
+    return result;
+}
+
 static bool file_ends_with_newline(const std::string& path) {
     std::ifstream f(path, std::ios::binary);
     if (!f) return true; // if unreadable, avoid noisy warnings here
@@ -702,11 +738,70 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
             }
 
             // Perform substitution with paint propagation
+            // This handles parameter replacement, stringification (#), and token pasting (##)
             std::vector<PPToken> substituted;
-            for (const auto& repl : m->replacement) {
+            
+            for (size_t rIdx = 0; rIdx < m->replacement.size(); ++rIdx) {
+                const auto& repl = m->replacement[rIdx];
                 bool isParam = false;
                 
-                if (m->variadic && repl.kind == PPTokenKind::Identifier && repl.lexeme == "__VA_ARGS__") {
+                // Check for stringification operator (#) followed by a parameter
+                if (repl.kind == PPTokenKind::Punctuator && repl.lexeme == "#") {
+                    // Next non-whitespace token should be a parameter name
+                    size_t nextIdx = rIdx + 1;
+                    while (nextIdx < m->replacement.size() && 
+                           m->replacement[nextIdx].kind == PPTokenKind::Whitespace) {
+                        nextIdx++;
+                    }
+                    
+                    if (nextIdx < m->replacement.size()) {
+                        const auto& nextTok = m->replacement[nextIdx];
+                        
+                        // Check if it's a parameter or __VA_ARGS__
+                        int paramIdx = -1;
+                        bool isVarargs = false;
+                        
+                        if (m->variadic && nextTok.kind == PPTokenKind::Identifier && 
+                            nextTok.lexeme == "__VA_ARGS__") {
+                            isVarargs = true;
+                        } else {
+                            for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
+                                if (nextTok.kind == PPTokenKind::Identifier && 
+                                    nextTok.lexeme == m->params[pIdx]) {
+                                    paramIdx = pIdx;
+                                    break;
+                                }
+                            }
+                        }
+                        
+                        if (paramIdx >= 0 || isVarargs) {
+                            // Stringify the corresponding argument
+                            std::vector<PPToken> argToStringify;
+                            if (isVarargs && args.size() > m->params.size()) {
+                                argToStringify = args[m->params.size()];
+                            } else if (paramIdx >= 0 && paramIdx < static_cast<int>(args.size())) {
+                                argToStringify = args[paramIdx];
+                            }
+                            
+                            std::string stringified = stringifyTokens(argToStringify);
+                            PPToken strToken{
+                                .kind = PPTokenKind::StringLiteral,
+                                .span = repl.span,
+                                .lexeme = stringified,
+                                .paintedMacros = {}
+                            };
+                            strToken.paint(m->name);
+                            substituted.push_back(strToken);
+                            
+                            // Skip the # and the parameter in replacement
+                            rIdx = nextIdx;
+                            isParam = true;
+                        }
+                    }
+                }
+                
+                if (!isParam && m->variadic && repl.kind == PPTokenKind::Identifier && 
+                    repl.lexeme == "__VA_ARGS__") {
                     if (args.size() > m->params.size()) {
                         for (auto vaToken : args[m->params.size()]) {
                             vaToken.paint(m->name);
