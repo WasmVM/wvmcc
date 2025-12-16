@@ -80,8 +80,4 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     return PreprocessResult{std::move(transformed), true, std::string()};
 }
 
-
-// phase1to3_process removed; preprocessing is centralized in Tokenizer::preprocess
-
-
 } // namespace wvmcc

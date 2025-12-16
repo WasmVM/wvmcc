@@ -30,6 +30,11 @@ class Tokenizer {
 public:
     // Tokenize with punctuator recognition (greedy longest-match), plus Whitespace/Newline/Other.
     static std::vector<PPToken> tokenize(const std::string& input);
+
+private:
+    static bool is_digit(char c);
+    static bool is_nondigit(char c);
+    static bool is_space(char c);
 };
 
 // Internal: SourceBuffer performs inline phase 1–3 preprocessing while feeding chars

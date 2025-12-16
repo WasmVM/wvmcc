@@ -3,41 +3,76 @@
 
 namespace wvmcc {
 
-static bool is_space(char c) {
-    return c == ' ' || c == '\t' || c == '\v' || c == '\f';
-}
-
-// Greedy punctuator recognition set (includes digraphs and multi-char operators)
-static const char* const PUNCTS[] = {
-    "<:",":>","<%","%>","%:","%:%:",
-    "->","++","--","<<",">>","<=",">=","==","!=","&&","||","...",
-    "*=","/=","%=","+=","-=","<<=",">>=","&=","^=","|=",
-    "[", "]", "(", ")", "{", "}", ".", ",", ";",
-    "&","*","+","-","~","!","/","%","<",">","^","|","?",":","=","#","##"
-};
-
-static bool is_punct_start(char c) {
-    // Fast path: characters that can start punctuators
-    switch (c) {
-        case '[': case ']': case '(': case ')': case '{': case '}': case '.': case ',': case ';':
-        case '&': case '*': case '+': case '-': case '~': case '!': case '/': case '%':
-        case '<': case '>': case '^': case '|': case '?': case ':': case '=': case '#':
-            return true;
-        default: return false;
-    }
-}
-
 static size_t match_punct(const std::string& s, size_t i) {
-    if (!is_punct_start(s[i])) return 0;
-    // Try longest matches first
-    size_t maxLen = 0;
-    for (const char* p : PUNCTS) {
-        size_t len = std::strlen(p);
-        if (i + len <= s.size() && std::strncmp(&s[i], p, len) == 0) {
-            if (len > maxLen) maxLen = len;
-        }
+    // Fast path: dispatch by first character, checking longest candidates first per starter.
+    const size_t n = s.size() - i;
+    const char c = s[i];
+    switch (c) {
+        case '%':
+            if (n >= 4 && s[i+1]==':' && s[i+2]=='%' && s[i+3]==':') return 4; // %:%:
+            if (n >= 2 && s[i+1]==':') return 2; // %:
+            if (n >= 2 && s[i+1]=='>') return 2; // %>
+            if (n >= 2 && s[i+1]=='=') return 2; // %=
+            return 1;
+        case '<':
+            if (n >= 3 && s[i+1]=='<' && s[i+2]=='=') return 3; // <<=
+            if (n >= 2 && s[i+1]==':') return 2; // <:
+            if (n >= 2 && s[i+1]=='%') return 2; // <%
+            if (n >= 2 && s[i+1]=='<') return 2; // <<
+            if (n >= 2 && s[i+1]=='=') return 2; // <=
+            return 1;
+        case '>':
+            if (n >= 3 && s[i+1]=='>' && s[i+2]=='=') return 3; // >>=
+            if (n >= 2 && s[i+1]=='>' ) return 2; // >>
+            if (n >= 2 && s[i+1]=='=') return 2; // >=
+            return 1;
+        case ':':
+            if (n >= 2 && s[i+1]=='>') return 2; // :>
+            return 1;
+        case '#':
+            if (n >= 2 && s[i+1]=='#') return 2; // ##
+            return 1;
+        case '-':
+            if (n >= 2 && s[i+1]=='>') return 2; // ->
+            if (n >= 2 && s[i+1]=='-') return 2; // --
+            if (n >= 2 && s[i+1]=='=') return 2; // -=
+            return 1;
+        case '+':
+            if (n >= 2 && s[i+1]=='+') return 2; // ++
+            if (n >= 2 && s[i+1]=='=') return 2; // +=
+            return 1;
+        case '&':
+            if (n >= 2 && s[i+1]=='&') return 2; // &&
+            if (n >= 2 && s[i+1]=='=') return 2; // &=
+            return 1;
+        case '|':
+            if (n >= 2 && s[i+1]=='|') return 2; // ||
+            if (n >= 2 && s[i+1]=='=') return 2; // |=
+            return 1;
+        case '*':
+            if (n >= 2 && s[i+1]=='=') return 2; // *=
+            return 1;
+        case '/':
+            if (n >= 2 && s[i+1]=='=') return 2; // /=
+            return 1;
+        case '^':
+            if (n >= 2 && s[i+1]=='=') return 2; // ^=
+            return 1;
+        case '!':
+            if (n >= 2 && s[i+1]=='=') return 2; // !=
+            return 1;
+        case '=':
+            if (n >= 2 && s[i+1]=='=') return 2; // ==
+            return 1;
+        case '.':
+            if (n >= 3 && s[i+1]=='.' && s[i+2]=='.') return 3; // ...
+            return 1;
+        case '[': case ']': case '(': case ')': case '{': case '}':
+        case ',': case ';': case '~': case '?':
+            return 1;
+        default:
+            return 0;
     }
-    return maxLen;
 }
 
 SourceBuffer::SourceBuffer(const std::string& input) : inputRef(input) {
@@ -153,22 +188,24 @@ void SourceBuffer::ensure_stream(std::string& stream, std::size_t upto) {
     }
 }
 
+bool Tokenizer::is_digit(char c) {
+    return c >= '0' && c <= '9';
+}
+
+bool Tokenizer::is_nondigit(char c) {
+    return (c == '_') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
+bool Tokenizer::is_space(char c) {
+    return c == ' ' || c == '\t' || c == '\v' || c == '\f';
+}
+
 std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
     // Single-pass: tokenize directly over input without a separate preprocess call
     const std::string& inputRef = input;
     std::vector<PPToken> out;
     out.reserve(inputRef.size() / 2);
 
-    SourcePos pos{0, 1, 1, 0};
-    auto advance_pos = [&](char ch) {
-        if (ch == '\n') {
-            ++pos.line;
-            pos.column = 1;
-        } else {
-            ++pos.column;
-        }
-        ++pos.offset;
-    };
     auto emit = [&](PPTokenKind kind, const std::string& lexeme, SourcePos begin, SourcePos end) {
         out.push_back(PPToken{kind, SourceSpan{begin, end}, lexeme});
     };
@@ -177,41 +214,36 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
     SourceBuffer feeder(inputRef);
     std::string stream;
     stream.reserve(inputRef.size());
-    auto ensure_stream = [&](size_t upto) { feeder.ensure_stream(stream, upto); };
-
+    // inline: call feeder.ensure_stream(stream, upto) directly where needed
     size_t i = 0;
     while (true) {
-        ensure_stream(i);
+        feeder.ensure_stream(stream, i);
         if (i >= stream.size()) break;
         char c = stream[i];
         SourcePos begin = feeder.position();
 
         // Preprocessing number (PPNumber)
-        auto is_digit = [](char ch){ return ch>='0' && ch<='9'; };
-        auto is_nondigit = [](char ch){ return (ch=='_') || (ch>='a'&&ch<='z') || (ch>='A'&&ch<='Z'); };
-        // Ensure lookahead for pp-number start
-        ensure_stream(i + 1);
-        if (c == '.' ? (i + 1 < stream.size() && is_digit(stream[i+1])) : is_digit(c)) {
+        feeder.ensure_stream(stream, i + 1);
+        if (c == '.' ? (i + 1 < stream.size() && is_digit(stream[i + 1])) : is_digit(c)) {
             size_t j = i;
-            bool afterExpMarker = false;
             // if started with '.', consume it
             if (stream[j] == '.') { ++j; }
             // consume first run character (digit)
             if (j < stream.size() && is_digit(stream[j])) { ++j; }
             // main loop: digits, identifier-nondigit, exponent markers with optional sign, and trailing dot
             while (true) {
-                if (j >= stream.size()) ensure_stream(j);
+                if (j >= stream.size()) feeder.ensure_stream(stream, j);
                 if (j >= stream.size()) break;
                 char d = stream[j];
                 if (d=='e'||d=='E'||d=='p'||d=='P') {
                     // Consume exponent marker
                     ++j;
                     // Optional sign
-                    if (j >= stream.size()) ensure_stream(j);
+                    if (j >= stream.size()) feeder.ensure_stream(stream, j);
                     if (j < stream.size() && (stream[j] == '+' || stream[j] == '-')) { ++j; }
                     // Consume subsequent digits (if any) as part of pp-number
                     while (true) {
-                        if (j >= stream.size()) ensure_stream(j);
+                        if (j >= stream.size()) feeder.ensure_stream(stream, j);
                         if (j < stream.size() && (stream[j] >= '0' && stream[j] <= '9')) { ++j; }
                         else break;
                     }
@@ -237,7 +269,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
         };
         size_t charPrefixLen = 0;
         // Ensure lookahead for char prefix detection
-        ensure_stream(i + 1);
+        feeder.ensure_stream(stream, i + 1);
         if (starts_char(i, charPrefixLen)) {
             size_t j = i;
             for (size_t k = 0; k < charPrefixLen; ++k) { ++j; }
@@ -247,7 +279,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
             auto is_hex = [](char ch){ return (ch>='0'&&ch<='9')||(ch>='a'&&ch<='f')||(ch>='A'&&ch<='F'); };
             auto is_oct = [](char ch){ return ch>='0'&&ch<='7'; };
             while (true) {
-                if (j >= stream.size()) ensure_stream(j);
+                if (j >= stream.size()) feeder.ensure_stream(stream, j);
                 if (j >= stream.size()) break;
                 char d = stream[j];
                 if (!escaped) {
@@ -309,7 +341,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
         };
         size_t prefixLen = 0;
         // Ensure lookahead for string prefix detection (u8/u/U/L)
-        ensure_stream(i + 2);
+        feeder.ensure_stream(stream, i + 2);
         if (starts_string(i, prefixLen)) {
             size_t j = i;
             // Emit full literal from start of prefix to ending quote
@@ -319,7 +351,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
             if (j < stream.size() && stream[j] == '"') { ++j; }
             bool escaped = false;
             while (true) {
-                if (j >= stream.size()) ensure_stream(j);
+                if (j >= stream.size()) feeder.ensure_stream(stream, j);
                 if (j >= stream.size()) break;
                 char d = stream[j];
                 if (!escaped) {
@@ -350,22 +382,19 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
 
         if (is_space(c)) {
             std::string lex;
-            do { lex.push_back(c); ++i; ensure_stream(i); if (i>=stream.size()) break; c = stream[i]; } while (is_space(c));
+            do { lex.push_back(c); ++i; feeder.ensure_stream(stream, i); if (i>=stream.size()) break; c = stream[i]; } while (is_space(c));
             emit(PPTokenKind::Whitespace, lex, begin, feeder.position());
             continue;
         }
 
-        // Identifier: starts with nondigit or universal-character-name
-        auto is_alpha = [](char ch){ return (ch>='a'&&ch<='z')||(ch>='A'&&ch<='Z')||ch=='_'; };
-        auto is_alnum_us = [&](char ch){ return is_alpha(ch) || (ch>='0'&&ch<='9'); };
         auto try_ucn = [&](size_t idx, size_t& consumed){
             consumed = 0;
-            if (idx >= stream.size()) ensure_stream(idx);
+            if (idx >= stream.size()) feeder.ensure_stream(stream, idx);
             if (idx >= stream.size() || stream[idx] != '\\') return false;
-            ensure_stream(idx + 1);
+            feeder.ensure_stream(stream, idx + 1);
             if (idx + 1 < stream.size() && stream[idx+1] == 'u') {
                 // \\uXXXX (exactly 4 hex digits)
-                ensure_stream(idx + 5);
+                feeder.ensure_stream(stream, idx + 5);
                 if (idx + 6 <= stream.size()) {
                     for (size_t k = idx+2; k < idx+6; ++k) {
                         char ch = stream[k];
@@ -378,7 +407,7 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
             }
             if (idx + 1 < stream.size() && stream[idx+1] == 'U') {
                 // \\UXXXXXXXX (exactly 8 hex digits)
-                ensure_stream(idx + 9);
+                feeder.ensure_stream(stream, idx + 9);
                 if (idx + 10 <= stream.size()) {
                     for (size_t k = idx+2; k < idx+10; ++k) {
                         char ch = stream[k];
@@ -391,14 +420,15 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
             }
             return false;
         };
+        // Identifier: starts with nondigit or universal-character-name
         // Ensure lookahead so UCN detection sees the 'u'/'U' after '\\'
-        ensure_stream(i + 1);
-        if (is_alpha(c) || (c=='\\' && (i+1<stream.size()) && (stream[i+1]=='u' || stream[i+1]=='U'))) {
+        feeder.ensure_stream(stream, i + 1);
+        if (is_nondigit(c) || (c=='\\' && (i+1<stream.size()) && (stream[i+1]=='u' || stream[i+1]=='U'))) {
             size_t j = i;
             bool validStart = false;
             // consume first char or require valid UCN
-            if (is_alpha(stream[j])) { 
-                if (j + 1 > stream.size()) ensure_stream(j + 1);
+            if (is_nondigit(stream[j])) { 
+                if (j + 1 > stream.size()) feeder.ensure_stream(stream, j + 1);
                 ++j; 
                 validStart = true;
             } else {
@@ -407,9 +437,9 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
             if (validStart) {
                 // consume subsequent identifier chars: alnum or underscores or ucn
                 while (true) {
-                    if (j >= stream.size()) ensure_stream(j);
+                    if (j >= stream.size()) feeder.ensure_stream(stream, j);
                     if (j >= stream.size()) break;
-                    if (is_alnum_us(stream[j])) { ++j; continue; }
+                    if (is_nondigit(stream[j]) || is_digit(stream[j])) { ++j; continue; }
                     size_t u = 0; if (try_ucn(j, u)) { j += u; continue; }
                     break;
                 }
@@ -424,14 +454,12 @@ std::vector<PPToken> Tokenizer::tokenize(const std::string& input) {
         size_t plen = 0;
         if (i < stream.size()) {
             // Ensure enough lookahead for longest punctuators (e.g., "%:%:" is 4 chars)
-            if (stream.size() - i < 4) ensure_stream(i + 3);
+            if (stream.size() - i < 4) feeder.ensure_stream(stream, i + 3);
             plen = match_punct(stream, i);
         }
         if (plen > 0) {
             std::string lex = stream.substr(i, plen);
             i += plen;
-            pos.column += (int)plen;
-            pos.offset += plen;
             emit(PPTokenKind::Punctuator, lex, begin, feeder.position());
             continue;
         }
