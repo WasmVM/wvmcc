@@ -27,6 +27,342 @@ static bool file_ends_with_newline(const std::string& path) {
     return last == '\n';
 }
 
+// Minimal streaming API implementation (object-like macros, includes, simple conditionals)
+
+bool Preprocessor::open(const std::string& inputPath) {
+    return pushFile(inputPath);
+}
+
+std::optional<PPToken> Preprocessor::peek() {
+    ensureBuffer();
+    if (outBuffer.empty()) return std::nullopt;
+    return outBuffer.front();
+}
+
+std::optional<PPToken> Preprocessor::next() {
+    ensureBuffer();
+    if (outBuffer.empty()) return std::nullopt;
+    auto t = outBuffer.front(); outBuffer.pop_front();
+    return t;
+}
+
+void Preprocessor::reset() {
+    outBuffer.clear();
+    fileStack.clear();
+    macroTable.clear();
+    atLineStart = true;
+}
+
+bool Preprocessor::empty() {
+    ensureBuffer();
+    return outBuffer.empty();
+}
+
+bool Preprocessor::pushFile(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    auto ssp = std::make_unique<std::istringstream>(ss.str());
+    auto tz = std::make_unique<Tokenizer>(*ssp);
+    FileCtx ctx;
+    ctx.path = path;
+    ctx.stream = std::move(ssp);
+    ctx.tokenizer = std::move(tz);
+    ctx.dir = std::filesystem::path(path).parent_path().string();
+    // Track inclusion stack for streaming mode and define predefined macros
+    namespace fs = std::filesystem;
+    std::string canonicalPath = fs::weakly_canonical(fs::absolute(path)).string();
+    if (!pushInclusion(canonicalPath)) {
+        return false; // cycle detected
+    }
+
+    fileStack.push_back(std::move(ctx));
+    atLineStart = true;
+
+    // If this is the first file in the inclusion stack, initialize predefined macros
+    if (inclusionStack.size() == 1) {
+        // __FILE__
+        std::vector<PPToken> replacement;
+        replacement.push_back(PPToken{ .kind = PPTokenKind::StringLiteral, .span = {}, .lexeme = "\"" + canonicalPath + "\"", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__FILE__", replacement);
+
+        // __DATE__
+        auto now = std::time(nullptr);
+        auto tm = *std::localtime(&now);
+        char dateStr[32];
+        std::strftime(dateStr, sizeof(dateStr), "%b %d %Y", &tm);
+        std::vector<PPToken> dateRepl;
+        dateRepl.push_back(PPToken{ .kind = PPTokenKind::StringLiteral, .span = {}, .lexeme = std::string("\"") + dateStr + "\"", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__DATE__", dateRepl);
+
+        // __TIME__
+        char timeStr[32];
+        std::strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &tm);
+        std::vector<PPToken> timeRepl;
+        timeRepl.push_back(PPToken{ .kind = PPTokenKind::StringLiteral, .span = {}, .lexeme = std::string("\"") + timeStr + "\"", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__TIME__", timeRepl);
+
+        // __STDC__ and related
+        std::vector<PPToken> p1; p1.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "1", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC__", p1);
+        std::vector<PPToken> ver; ver.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "201710L", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC_VERSION__", ver);
+        std::vector<PPToken> zero; zero.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "0", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC_HOSTED__", zero);
+        std::vector<PPToken> one; one.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "1", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC_NO_ATOMICS__", one);
+        macroTable.defineObjectMacro("__STDC_NO_COMPLEX__", one);
+        macroTable.defineObjectMacro("__STDC_NO_THREADS__", one);
+    }
+
+    return true;
+}
+
+std::optional<PPToken> Preprocessor::readRawToken() {
+    while (!fileStack.empty()) {
+        auto &ctx = fileStack.back();
+        auto tok = ctx.tokenizer->next();
+        if (!tok) { fileStack.pop_back(); atLineStart = false; continue; }
+        return tok;
+    }
+    return std::nullopt;
+}
+
+void Preprocessor::ensureBuffer() {
+    while (outBuffer.empty()) {
+        auto opt = readRawToken();
+        if (!opt) return;
+        auto tok = *opt;
+
+        if (tok.kind == PPTokenKind::Newline) {
+            outBuffer.push_back(tok);
+            atLineStart = true;
+            continue;
+        }
+
+        if (atLineStart && tok.kind == PPTokenKind::Punctuator && tok.lexeme == "#") {
+            handleDirective();
+            continue;
+        }
+
+        if (tok.kind == PPTokenKind::Identifier) {
+            if (macroTable.isDefined(tok.lexeme)) {
+                auto mOpt = macroTable.getMacro(tok.lexeme);
+                if (mOpt) {
+                    const Macro* m = *mOpt;
+                    if (!m->isFunction) {
+                        for (auto it = m->replacement.rbegin(); it != m->replacement.rend(); ++it) {
+                            outBuffer.push_front(*it);
+                        }
+                        continue;
+                    } else {
+                        // Function-like macro: attempt to read the invocation (including parentheses)
+                        // without emitting until expansion decision is made.
+                        // Use the tokenizer from the current file context for lookahead/consumption.
+                        if (!fileStack.empty()) {
+                            auto &ctx = fileStack.back();
+                            // Peek to find if '(' follows (skip whitespace)
+                            std::optional<PPToken> p;
+                            size_t lookIdx = 0;
+                            // Use tokenizer peek to inspect next tokens without consuming
+                            while ((p = ctx.tokenizer->peek())) {
+                                if (p->kind == PPTokenKind::Whitespace) {
+                                    // do not consume here, just check
+                                    ctx.tokenizer->next();
+                                    // record whitespace as part of invocation if needed
+                                    // continue scanning
+                                    continue;
+                                }
+                                break;
+                            }
+                            // After skipping whitespace via peek+next above, check current peek
+                            auto nextTok = ctx.tokenizer->peek();
+                            if (nextTok && nextTok->kind == PPTokenKind::Punctuator && nextTok->lexeme == "(") {
+                                // We have a function-like invocation; consume tokens to collect full invocation
+                                std::vector<PPToken> invocation;
+                                invocation.push_back(tok); // identifier
+                                int parenDepth = 0;
+                                // consume tokens until matching ')' encountered
+                                while (true) {
+                                    auto nt = readRawToken();
+                                    if (!nt) break;
+                                    invocation.push_back(*nt);
+                                    if (nt->kind == PPTokenKind::Punctuator) {
+                                        if (nt->lexeme == "(") parenDepth++;
+                                        else if (nt->lexeme == ")") {
+                                            parenDepth--;
+                                            if (parenDepth <= 0) break;
+                                        }
+                                    }
+                                }
+                                // Try expansion
+                                size_t idx = 0;
+                                std::vector<PPToken> expandedResult;
+                                if (tryExpandFunctionLikeMacro(invocation, idx, m, tok, expandedResult)) {
+                                    // Push expanded tokens into outBuffer
+                                    for (const auto &et : expandedResult) outBuffer.push_back(et);
+                                    continue; // processed, move to next token
+                                } else {
+                                    // Expansion failed; emit original invocation tokens
+                                    for (const auto &itok : invocation) outBuffer.push_back(itok);
+                                    continue;
+                                }
+                            }
+                            // If no '(', fallthrough to emit identifier normally
+                        }
+                    }
+                }
+            }
+        }
+
+        outBuffer.push_back(tok);
+        atLineStart = false;
+    }
+}
+
+void Preprocessor::skipToEndOfLineTokensFromTokenizer(Tokenizer& tz) {
+    while (auto t = tz.next()) { if (t->kind == PPTokenKind::Newline) break; }
+}
+
+void Preprocessor::handleDirective() {
+    std::optional<PPToken> tok;
+    tok = readRawToken();
+    if (!tok) return;
+    while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
+    if (!tok) return;
+    if (tok->kind != PPTokenKind::Identifier) {
+        if (tok) skipLineFromToken(std::move(*tok));
+        return;
+    }
+    std::string dir = tok->lexeme;
+    if (dir == "define") {
+        handleDefine();
+    } else if (dir == "undef") {
+        handleUndef();
+    } else if (dir == "include") {
+        handleInclude();
+    } else if (dir == "ifdef") {
+        handleIfdef(true);
+    } else if (dir == "ifndef") {
+        handleIfdef(false);
+    } else {
+        std::optional<PPToken> t;
+        while ((t = readRawToken())) { if (t->kind == PPTokenKind::Newline) break; }
+    }
+}
+
+void Preprocessor::skipLineFromToken(PPToken t) {
+    if (t.kind == PPTokenKind::Newline) return;
+    std::optional<PPToken> tn;
+    while ((tn = readRawToken())) { if (tn->kind == PPTokenKind::Newline) break; }
+}
+
+void Preprocessor::handleDefine() {
+    if (fileStack.empty()) return;
+    auto &tz = *fileStack.back().tokenizer;
+    // Skip whitespace
+    while (auto p = tz.peek()) { if (p->kind == PPTokenKind::Whitespace) tz.next(); else break; }
+    auto nameTok = tz.peek();
+    if (!nameTok || nameTok->kind != PPTokenKind::Identifier) {
+        // consume until end of line
+        skipLineFromToken(nameTok ? *nameTok : PPToken{});
+        return;
+    }
+    std::string name = nameTok->lexeme;
+    tz.next(); // consume name
+
+    bool isFunction = false;
+    std::vector<std::string> params;
+    bool variadic = false;
+
+    auto next = tz.peek();
+    if (next && next->kind == PPTokenKind::Punctuator && next->lexeme == "(") {
+        isFunction = true;
+        tz.next(); // consume '('
+        if (!parseMacroParameters(tz, params, variadic)) {
+            // error already emitted by parseMacroParameters
+            return;
+        }
+    }
+
+    std::vector<PPToken> replacement = collectLineTokens(tz);
+    trimReplacementWhitespace(replacement);
+
+    if (isFunction) {
+        macroTable.defineFunctionMacro(name, params, replacement, variadic);
+    } else {
+        macroTable.defineObjectMacro(name, replacement);
+    }
+}
+
+void Preprocessor::handleUndef() {
+    auto tok = readRawToken();
+    while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
+    if (!tok || tok->kind != PPTokenKind::Identifier) { skipLineFromToken(tok ? *tok : PPToken{}); return; }
+    macroTable.undefine(tok->lexeme);
+    while (true) { auto t = readRawToken(); if (!t || t->kind == PPTokenKind::Newline) break; }
+}
+
+void Preprocessor::handleInclude() {
+    auto tok = readRawToken();
+    while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
+    if (!tok) return;
+    std::string header;
+    if (tok->kind == PPTokenKind::HeaderName) {
+        header = tok->lexeme;
+        if (!header.empty() && (header.front() == '<' || header.front() == '"')) {
+            if (header.front() == '<' && header.back() == '>') header = header.substr(1, header.size()-2);
+            else if (header.front() == '"' && header.back() == '"') header = header.substr(1, header.size()-2);
+        }
+    } else if (tok->kind == PPTokenKind::StringLiteral) {
+        auto s = tok->lexeme;
+        if (!s.empty() && s.front() == '"' && s.back() == '"') s = s.substr(1, s.size()-2);
+        header = s;
+    } else {
+        skipLineFromToken(*tok);
+        return;
+    }
+
+    std::string resolved;
+    if (!fileStack.empty()) {
+        auto cand = std::filesystem::path(fileStack.back().path).parent_path() / header;
+        if (std::filesystem::exists(cand)) resolved = cand.string();
+    }
+    if (resolved.empty()) {
+        for (const auto &ip : includePaths) {
+            auto cand = std::filesystem::path(ip) / header;
+            if (std::filesystem::exists(cand)) { resolved = cand.string(); break; }
+        }
+    }
+    if (!resolved.empty()) pushFile(resolved);
+    while (true) { auto t = readRawToken(); if (!t || t->kind == PPTokenKind::Newline) break; }
+}
+
+void Preprocessor::handleIfdef(bool wantDefined) {
+    auto tok = readRawToken();
+    while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
+    bool take = false;
+    if (tok && tok->kind == PPTokenKind::Identifier) {
+        bool def = macroTable.isDefined(tok->lexeme);
+        take = wantDefined ? def : !def;
+    }
+    if (!take) {
+        int depth = 1;
+        while (auto t = readRawToken()) {
+            if (t->kind == PPTokenKind::Punctuator && t->lexeme == "#") {
+                auto nt = readRawToken();
+                while (nt && nt->kind == PPTokenKind::Whitespace) nt = readRawToken();
+                if (nt && nt->kind == PPTokenKind::Identifier) {
+                    if (nt->lexeme == "ifdef" || nt->lexeme == "ifndef" || nt->lexeme == "if") depth++;
+                    else if (nt->lexeme == "endif") { depth--; if (depth==0) break; }
+                }
+            }
+        }
+    }
+}
+
+
 bool Preprocessor::validateLiteralToken(const PPToken& t, std::string& errMsg) const {
     if (t.kind == PPTokenKind::StringLiteral) {
         if (t.lexeme.empty() || t.lexeme.back() != '"') {
@@ -917,13 +1253,12 @@ std::vector<std::vector<PPToken>> Preprocessor::collectMacroArguments(
 }
 
 int Preprocessor::findParamIndex(const Macro* m, const PPToken& tok, bool& isVarargs) {
-    isVarargs = (m->variadic && tok.kind == PPTokenKind::Identifier && 
-                tok.lexeme == "__VA_ARGS__");
-    
+    // Allow matching of parameter tokens even if token kind varies (robustness)
+    isVarargs = (m->variadic && tok.lexeme == "__VA_ARGS__");
     if (isVarargs) return -1;
-    
+
     for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-        if (tok.kind == PPTokenKind::Identifier && tok.lexeme == m->params[pIdx]) {
+        if (tok.lexeme == m->params[pIdx]) {
             return pIdx;
         }
     }
@@ -1106,7 +1441,7 @@ bool Preprocessor::tryExpandFunctionLikeMacro(
     if (m->variadic && args.size() < m->params.size()) {
         return false;
     }
-    
+
     // Substitute parameters
     auto substituted = substituteParameters(m, args, invocationToken);
     

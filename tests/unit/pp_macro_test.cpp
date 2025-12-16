@@ -2,6 +2,28 @@
 #include <fstream>
 #include <string>
 #include <iostream>
+#include <vector>
+
+static bool preprocess_collect_tokens(const std::string &srcName,
+                                      std::vector<wvmcc::PPToken> &outTokens,
+                                      const char *testLabel) {
+    using namespace wvmcc;
+    Preprocessor pp;
+    if (!pp.open(srcName)) {
+        std::cerr << testLabel << ": failed to open stream\n";
+        std::remove(srcName.c_str());
+        return false;
+    }
+    while (auto t = pp.next()) outTokens.push_back(*t);
+    std::remove(srcName.c_str());
+    for (const auto &d : pp.getDiagnostics()) {
+        if (d.severity == Diagnostic::Severity::Error) {
+            std::cerr << testLabel << ": preprocess produced errors\n";
+            return false;
+        }
+    }
+    return true;
+}
 
 // Test 1: Simple object-like macro
 static int test_object_macro_simple() {
@@ -14,18 +36,11 @@ static int test_object_macro_simple() {
         ofs << "int x = MAX;\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_object_macro_simple")) return 1;
 
-    if (!res.success) {
-        std::cerr << "test_object_macro_simple: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-
-    // After macro expansion, "MAX" should be replaced with "100"
     bool hasMax = false, has100 = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "MAX") hasMax = true;
         if (t.lexeme == "100") has100 = true;
     }
@@ -56,15 +71,26 @@ static int test_multiple_object_macros() {
         ofs << "int a = MAX, b = MIN, c = SIZE;\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_multiple_object_macros: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_multiple_object_macros")) return 1;
+    bool found100 = false, found0 = false, found42 = false;
+    bool foundMAX = false, foundMIN = false, foundSIZE = false;
+    for (const auto &t : tokens) {
+        if (t.lexeme == "100") found100 = true;
+        if (t.lexeme == "0") found0 = true;
+        if (t.lexeme == "42") found42 = true;
+        if (t.lexeme == "MAX") foundMAX = true;
+        if (t.lexeme == "MIN") foundMIN = true;
+        if (t.lexeme == "SIZE") foundSIZE = true;
     }
-    
+    if (!found100 || !found0 || !found42) {
+        std::cerr << "test_multiple_object_macros: expected expanded values 100,0,42\n";
+        return 2;
+    }
+    if (foundMAX || foundMIN || foundSIZE) {
+        std::cerr << "test_multiple_object_macros: macro names should be expanded away\n";
+        return 3;
+    }
     return 0;
 }
 
@@ -79,15 +105,21 @@ static int test_empty_macro() {
         ofs << "void foo() {}\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_empty_macro: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_empty_macro")) return 1;
+    bool foundDEBUG = false, foundVoid = false;
+    for (const auto &t : tokens) {
+        if (t.lexeme == "DEBUG") foundDEBUG = true;
+        if (t.lexeme == "void") foundVoid = true;
     }
-    
+    if (foundDEBUG) {
+        std::cerr << "test_empty_macro: DEBUG should not appear in output\n";
+        return 2;
+    }
+    if (!foundVoid) {
+        std::cerr << "test_empty_macro: expected 'void' in output\n";
+        return 3;
+    }
     return 0;
 }
 
@@ -102,17 +134,22 @@ static int test_function_macro() {
         ofs << "int z = ADD(2, 3);\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_function_macro: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_function_macro")) return 1;
+    bool found2 = false, found3 = false, foundADD = false;
+    for (const auto &t : tokens) {
+        if (t.lexeme == "2") found2 = true;
+        if (t.lexeme == "3") found3 = true;
+        if (t.lexeme == "ADD") foundADD = true;
     }
-    
-    // Verify macro was defined (should be in macro table)
-    // For now, macro expansion is not implemented, so just verify parsing succeeds
+    if (!found2 || !found3) {
+        std::cerr << "test_function_macro: expected '2' and '3' after expansion\n";
+        return 2;
+    }
+    if (foundADD) {
+        std::cerr << "test_function_macro: macro name 'ADD' should not appear after expansion\n";
+        return 3;
+    }
     return 0;
 }
 
@@ -127,31 +164,27 @@ static int test_variadic_macro() {
         ofs << "void test() { PRINTF(\"test\", 42); }\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_variadic_macro: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Verify __VA_ARGS__ was replaced with 42
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_variadic_macro")) return 1;
     bool foundPrintf = false;
     bool foundTest = false;
     bool found42 = false;
-    for (const auto& t : res.tokens) {
+    bool foundPRINTF = false;
+    for (const auto& t : tokens) {
         if (t.lexeme == "printf") foundPrintf = true;
         if (t.lexeme == "test") foundTest = true;
         if (t.lexeme == "42") found42 = true;
+        if (t.lexeme == "PRINTF") foundPRINTF = true;
     }
-    
     if (!foundPrintf || !foundTest || !found42) {
         std::cerr << "test_variadic_macro: expected 'printf', '\"test\"', and '42' in output\n";
         std::cerr << "found: printf=" << foundPrintf << " test=" << foundTest << " 42=" << found42 << "\n";
         return 2;
     }
-    
+    if (foundPRINTF) {
+        std::cerr << "test_variadic_macro: macro name 'PRINTF' should not appear after expansion\n";
+        return 3;
+    }
     return 0;
 }
 
@@ -166,28 +199,19 @@ static int test_stringification() {
         ofs << "const char* s = STR(hello);\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_stringification: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Verify stringification: STR(hello) should become "hello"
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_stringification")) return 1;
     bool foundStringHello = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme == "\"hello\"") {
             foundStringHello = true;
             break;
         }
     }
-    
     if (!foundStringHello) {
         std::cerr << "test_stringification: expected string literal \"hello\" in output\n";
         std::cerr << "tokens:\n";
-        for (const auto& t : res.tokens) {
+        for (const auto& t : tokens) {
             std::cerr << "  " << t.lexeme << "\n";
         }
         return 2;
@@ -208,20 +232,11 @@ static int test_stringification_special() {
         ofs << "const char* s2 = STR(\"quoted\");\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_stringification_special: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Verify stringification of expressions: STR(1 + 2) -> "1 + 2"
-    // and STR("quoted") -> "\"quoted\"" (with escaped quotes)
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_stringification_special")) return 1;
     bool found1Plus2 = false;
     bool foundQuoted = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.kind == wvmcc::PPTokenKind::StringLiteral) {
             if (t.lexeme.find("1") != std::string::npos && t.lexeme.find("+") != std::string::npos) {
                 found1Plus2 = true;
@@ -231,7 +246,6 @@ static int test_stringification_special() {
             }
         }
     }
-    
     if (!found1Plus2 || !foundQuoted) {
         std::cerr << "test_stringification_special: expected stringified expressions\n";
         std::cerr << "found: 1Plus2=" << found1Plus2 << " quoted=" << foundQuoted << "\n";
@@ -252,28 +266,19 @@ static int test_token_pasting() {
         ofs << "int foobar = CONCAT(foo, bar);\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_token_pasting: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Verify token pasting: CONCAT(foo, bar) should become foobar
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_token_pasting")) return 1;
     bool foundFoobar = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.kind == wvmcc::PPTokenKind::Identifier && t.lexeme == "foobar") {
             foundFoobar = true;
             break;
         }
     }
-    
     if (!foundFoobar) {
         std::cerr << "test_token_pasting: expected identifier 'foobar' in output\n";
         std::cerr << "tokens:\n";
-        for (const auto& t : res.tokens) {
+        for (const auto& t : tokens) {
             std::cerr << "  " << t.lexeme << "\n";
         }
         return 2;
@@ -293,28 +298,19 @@ static int test_token_pasting_numbers() {
         ofs << "const char* ver = VERSION(1, 2);\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_token_pasting_numbers: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Verify: VERSION(1, 2) should become v1_2
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_token_pasting_numbers")) return 1;
     bool foundV1_2 = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.kind == wvmcc::PPTokenKind::Identifier && t.lexeme == "v1_2") {
             foundV1_2 = true;
             break;
         }
     }
-    
     if (!foundV1_2) {
         std::cerr << "test_token_pasting_numbers: expected identifier 'v1_2' in output\n";
         std::cerr << "tokens:\n";
-        for (const auto& t : res.tokens) {
+        for (const auto& t : tokens) {
             std::cerr << "  " << t.lexeme << "\n";
         }
         return 2;
@@ -337,20 +333,11 @@ static int test_predefined_macros() {
         ofs << "int version = __STDC_VERSION__;\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_predefined_macros: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Verify all predefined macros are present
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_predefined_macros")) return 1;
     bool foundFile = false, foundDate = false, foundTime = false;
     bool foundStdc = false, foundVersion = false;
-    
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme.find("temp_macro_predefined.c") != std::string::npos) {
             foundFile = true;
         }
@@ -369,7 +356,6 @@ static int test_predefined_macros() {
             foundVersion = true;
         }
     }
-    
     if (!foundFile || !foundDate || !foundTime || !foundStdc || !foundVersion) {
         std::cerr << "test_predefined_macros: missing predefined macros\n";
         std::cerr << "found: file=" << foundFile << " date=" << foundDate << " time=" << foundTime
@@ -392,15 +378,21 @@ static int test_undef_macro() {
         ofs << "int x = MAX;\n";  // Should be treated as identifier, not macro
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_undef_macro: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_undef_macro")) return 1;
+    bool foundMAX = false, found100 = false;
+    for (const auto &t : tokens) {
+        if (t.lexeme == "MAX") foundMAX = true;
+        if (t.lexeme == "100") found100 = true;
     }
-    
+    if (!foundMAX) {
+        std::cerr << "test_undef_macro: expected 'MAX' identifier after undef\n";
+        return 2;
+    }
+    if (found100) {
+        std::cerr << "test_undef_macro: unexpected '100' after undef\n";
+        return 3;
+    }
     return 0;
 }
 
@@ -415,22 +407,12 @@ static int test_variadic_empty() {
         ofs << "void test() { LOG(\"only message\"); }\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_variadic_empty: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // When variadic is empty, __VA_ARGS__ expands to nothing
-    // Result: log_func("only message", )
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_variadic_empty")) return 1;
     bool foundLogFunc = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "log_func") foundLogFunc = true;
     }
-    
     if (!foundLogFunc) {
         std::cerr << "test_variadic_empty: expected 'log_func' in output\n";
         return 2;
@@ -450,25 +432,16 @@ static int test_variadic_multiple() {
         ofs << "int result = CALL(add, 1, 2, 3);\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_variadic_multiple: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
-    }
-    
-    // Should expand to: add(1, 2, 3)
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_variadic_multiple")) return 1;
     bool foundAdd = false;
     bool found1 = false, found2 = false, found3 = false;
-    for (const auto& t : res.tokens) {
+    for (const auto& t : tokens) {
         if (t.lexeme == "add") foundAdd = true;
         if (t.lexeme == "1") found1 = true;
         if (t.lexeme == "2") found2 = true;
         if (t.lexeme == "3") found3 = true;
     }
-    
     if (!foundAdd || !found1 || !found2 || !found3) {
         std::cerr << "test_variadic_multiple: expected 'add', '1', '2', '3' in output\n";
         std::cerr << "found: add=" << foundAdd << " 1=" << found1 << " 2=" << found2 << " 3=" << found3 << "\n";
@@ -489,15 +462,22 @@ static int test_macro_complex_replacement() {
         ofs << "void swap_ints(int *x, int *y) SWAP(*x, *y)\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_macro_complex_replacement: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_macro_complex_replacement")) return 1;
+    bool foundSWAP = false, foundTemp = false, foundBrace = false;
+    for (const auto &t : tokens) {
+        if (t.lexeme == "SWAP") foundSWAP = true;
+        if (t.lexeme == "temp") foundTemp = true;
+        if (t.lexeme == "{") foundBrace = true;
     }
-    
+    if (foundSWAP) {
+        std::cerr << "test_macro_complex_replacement: macro name 'SWAP' should not appear after expansion\n";
+        return 2;
+    }
+    if (!foundTemp && !foundBrace) {
+        std::cerr << "test_macro_complex_replacement: expected expansion tokens (e.g. 'temp' or '{')\n";
+        return 3;
+    }
     return 0;
 }
 
@@ -513,15 +493,16 @@ static int test_macro_redefinition() {
         ofs << "int x = MAX;\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_macro_redefinition: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_macro_redefinition")) return 1;
+    bool foundMax = false;
+    for (const auto& t : tokens) {
+        if (t.lexeme == "200") foundMax = true;
     }
-    
+    if (!foundMax) {
+        std::cerr << "test_macro_redefinition: expected '200' in output\n";
+        return 2;
+    }
     return 0;
 }
 
@@ -536,15 +517,23 @@ static int test_macro_whitespace() {
         ofs << "int x = SPACES;\n";
     }
 
-    Preprocessor pp;
-    auto res = pp.run(srcName);
-    std::remove(srcName.c_str());
-
-    if (!res.success) {
-        std::cerr << "test_macro_whitespace: preprocess failed: " << res.errorMsg << "\n";
-        return 1;
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_macro_whitespace")) return 1;
+    bool found1 = false, found2 = false, found3 = false, foundSPACES = false;
+    for (const auto &t : tokens) {
+        if (t.lexeme == "1") found1 = true;
+        if (t.lexeme == "2") found2 = true;
+        if (t.lexeme == "3") found3 = true;
+        if (t.lexeme == "SPACES") foundSPACES = true;
     }
-    
+    if (!found1 || !found2 || !found3) {
+        std::cerr << "test_macro_whitespace: expected '1', '2', '3' after expansion\n";
+        return 2;
+    }
+    if (foundSPACES) {
+        std::cerr << "test_macro_whitespace: macro name 'SPACES' should not appear after expansion\n";
+        return 3;
+    }
     return 0;
 }
 

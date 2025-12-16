@@ -6,6 +6,9 @@
 #include <deque>
 #include <unordered_map>
 #include <unordered_set>
+#include <memory>
+#include <sstream>
+#include <filesystem>
 #include "Tokenizer.hpp"
 #include "MacroTable.hpp"
 #include "Diagnostics.hpp"
@@ -21,6 +24,12 @@ struct PreprocessResult {
 class Preprocessor {
 public:
     PreprocessResult run(const std::string& inputPath);
+    // Streaming interface: treat Preprocessor as a live token stream
+    bool open(const std::string& inputPath);
+    std::optional<PPToken> peek();
+    std::optional<PPToken> next();
+    void reset();
+    bool empty();
     // Include search paths management
     void addIncludePath(const std::string& path) { includePaths.push_back(path); }
     void clearIncludePaths() { includePaths.clear(); }
@@ -223,6 +232,29 @@ private:
     bool handleDirectiveInclude(Tokenizer& tokenizer, const PPToken& hashTok, 
                                const PPToken& dirToken, std::vector<PPToken>& out,
                                const std::string& currentDir, bool& hasErrors);
+
+    // Streaming helpers (migrated from PPStream)
+    struct FileCtx {
+        std::string path;
+        std::unique_ptr<std::istringstream> stream;
+        std::unique_ptr<Tokenizer> tokenizer;
+        std::string dir;
+    };
+
+    std::vector<FileCtx> fileStack;
+    std::deque<PPToken> outBuffer;
+    bool atLineStart{true};
+
+    bool pushFile(const std::string& path);
+    std::optional<PPToken> readRawToken();
+    void ensureBuffer();
+    void skipToEndOfLineTokensFromTokenizer(Tokenizer& tz);
+    void handleDirective();
+    void skipLineFromToken(PPToken t);
+    void handleDefine();
+    void handleUndef();
+    void handleInclude();
+    void handleIfdef(bool wantDefined);
 };
 
 } // namespace wvmcc
