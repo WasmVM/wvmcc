@@ -54,20 +54,21 @@ int main(int argc, char** argv) {
             std::cerr << "preprocess error: " << res.errorMsg << std::endl;
             return 1;
         }
-        // For now, just report token counts by kind
-        size_t ws = 0, nl = 0, other = 0;
+        // Report token counts by kind, including punctuators
+        size_t ws = 0, nl = 0, punct = 0, other = 0;
         for (const auto& t : res.tokens) {
             using K = wvmcc::PPTokenKind;
             switch (t.kind) {
                 case K::Whitespace: ++ws; break;
                 case K::Newline: ++nl; break;
+                case K::Punctuator: ++punct; break;
                 case K::Other: ++other; break;
                 default: break;
             }
         }
         std::cout << "preprocess: tokens=" << res.tokens.size()
                   << " whitespace=" << ws << " newline=" << nl
-                  << " other=" << other << std::endl;
+                  << " punctuator=" << punct << " other=" << other << std::endl;
     }
 
     WasmVM::WasmModule module;

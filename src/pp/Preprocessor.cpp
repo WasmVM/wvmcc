@@ -14,8 +14,8 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
     std::ostringstream oss;
     oss << ifs.rdbuf();
     std::string combined = phase1to3_process(oss.str());
-    auto toks = Tokenizer::tokenize_minimal(combined);
-    return PreprocessResult{std::move(toks), true, std::string()};
+    auto tokens = Tokenizer::tokenize_with_punctuators(combined);
+    return PreprocessResult{std::move(tokens), true, std::string()};
 }
 
 
