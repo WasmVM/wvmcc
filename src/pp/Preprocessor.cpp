@@ -33,7 +33,51 @@ PreprocessResult Preprocessor::run(const std::string& inputPath) const {
             }
         }
     }
-    return PreprocessResult{std::move(tokens), true, std::string()};
+    // Post-pass: recognize header-name tokens only within #include
+    std::vector<PPToken> transformed;
+    transformed.reserve(tokens.size());
+    for (size_t i=0;i<tokens.size();) {
+        const auto& t = tokens[i];
+        if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
+            size_t j = i + 1;
+            while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
+            // Leverage Identifier recognition for 'include'
+            if (j < tokens.size() && tokens[j].kind == PPTokenKind::Identifier && tokens[j].lexeme == "include") {
+                transformed.push_back(t);
+                transformed.push_back(tokens[j]);
+                j++;
+                while (j < tokens.size() && tokens[j].kind == PPTokenKind::Whitespace) j++;
+                if (j < tokens.size()) {
+                    if (tokens[j].kind == PPTokenKind::Punctuator && tokens[j].lexeme == "<") {
+                        SourcePos begin = tokens[j].span.begin;
+                        std::string acc;
+                        size_t k = j + 1;
+                        bool terminated = false;
+                        while (k < tokens.size()) {
+                            if (tokens[k].kind == PPTokenKind::Newline) break;
+                            if (tokens[k].kind == PPTokenKind::Punctuator && tokens[k].lexeme == ">") { terminated = true; break; }
+                            acc += tokens[k].lexeme;
+                            k++;
+                        }
+                        if (terminated) {
+                            SourcePos end = tokens[k].span.end;
+                            transformed.push_back(PPToken{PPTokenKind::HeaderName, SourceSpan{begin, end}, std::string("<") + acc + ">"});
+                            i = k + 1;
+                            continue;
+                        }
+                    } else if (tokens[j].kind == PPTokenKind::StringLiteral) {
+                        transformed.push_back(PPToken{PPTokenKind::HeaderName, tokens[j].span, tokens[j].lexeme});
+                        i = j + 1;
+                        continue;
+                    }
+                }
+            }
+        }
+        transformed.push_back(t);
+        i++;
+    }
+
+    return PreprocessResult{std::move(transformed), true, std::string()};
 }
 
 

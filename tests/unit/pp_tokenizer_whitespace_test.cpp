@@ -13,8 +13,8 @@ int main() {
     all_ok &= expectKindsLex(
         "spaces and letters",
         "  abc\n",
-        {K::Whitespace, K::Other, K::Other, K::Other, K::Newline},
-        {"  ", "a", "b", "c", "\n"}
+        {K::Whitespace, K::Identifier, K::Newline},
+        {"  ", "abc", "\n"}
     );
 
     all_ok &= expectKindsLex(
@@ -27,7 +27,7 @@ int main() {
     all_ok &= expectKindsLex(
         "mixed vtab/ff",
         "\v\fX\n",
-        {K::Whitespace, K::Other, K::Newline},
+        {K::Whitespace, K::Identifier, K::Newline},
         {"\v\f", "X", "\n"}
     );
 

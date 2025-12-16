@@ -76,8 +76,8 @@ int main() {
     all_ok &= expectKindsLex(
         "mixed nondigits",
         "7abc+def\n",
-        {K::PPNumber, K::Punctuator, K::Other, K::Other, K::Other, K::Newline},
-        {"7abc", "+", "d", "e", "f", "\n"}
+        {K::PPNumber, K::Punctuator, K::Identifier, K::Newline},
+        {"7abc", "+", "def", "\n"}
     );
 
     if (!all_ok) return 1;
