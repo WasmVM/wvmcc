@@ -149,3 +149,29 @@ struct SymbolRef {
 };
 
 } // namespace wvmcc::parser
+
+// Small factory helpers to reduce repetitive std::make_shared<T>() usage
+// Usage:
+//   auto id = make_ast<IdentifierExpr>();
+//   auto lit = make_ast<IntegerLiteral>();
+//   auto node_with_span = make_ast_with_span<FunctionDef>(span);
+namespace wvmcc::parser {
+
+template<typename T, typename... Args>
+inline std::shared_ptr<T> make_ast(Args&&... args) {
+    return std::make_shared<T>(std::forward<Args>(args)...);
+}
+
+inline std::shared_ptr<Node> make_node() {
+    return std::make_shared<Node>();
+}
+
+// Create an AST node and set its SourceSpan in one call
+template<typename T>
+inline std::shared_ptr<T> make_ast_with_span(const SourceSpan &span) {
+    auto p = std::make_shared<T>();
+    p->span = span;
+    return p;
+}
+
+} // namespace wvmcc::parser
