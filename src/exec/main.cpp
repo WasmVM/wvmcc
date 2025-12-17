@@ -150,6 +150,8 @@ int main(int argc, char** argv) {
             using namespace wvmcc::parser;
             Parser parser(lex);
             TranslationUnitPtr main_translation_unit = parser.parseTranslationUnit();
+            // print parser diagnostics if any
+            printDiagnostics(parser.getDiagnostics());
             // determine output path by replacing extension of input path with _ast.xml
             std::string astPath = "ast.xml";
             if (args.inputPath.has_value()) {

@@ -82,6 +82,11 @@ if(EXISTS ${PARSER_TU_TEST})
     
     add_test(NAME parser-translation-unit COMMAND wvmcc-parser-translation-unit-test)
 endif()
+set(PARSER_EXTERNAL_DECL_DIAG_TEST ${TEST_ROOT}/unit/parser/external_decl_diagnostics_test.cpp)
+if(EXISTS ${PARSER_EXTERNAL_DECL_DIAG_TEST})
+    add_executable(wvmcc-parser-external-decl-diag-test ${PARSER_EXTERNAL_DECL_DIAG_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp)
+    add_test(NAME parser-external-decl-diag COMMAND wvmcc-parser-external-decl-diag-test)
+endif()
 
 # Lexer punctuator classification test
 set(LEXER_PUNCTUATOR_TEST ${TEST_ROOT}/unit/pp/lexer_punctuator_test.cpp)
