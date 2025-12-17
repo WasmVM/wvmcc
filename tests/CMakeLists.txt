@@ -92,6 +92,14 @@ if(EXISTS ${LEXER_INTEGER_TEST})
     add_test(NAME lexer-integer COMMAND wvmcc-lexer-integer-test)
 endif()
 
+# Lexer floating constant parsing test
+set(LEXER_FLOATING_TEST ${TEST_ROOT}/unit/lexer_floating_test.cpp)
+if(EXISTS ${LEXER_FLOATING_TEST})
+    add_executable(wvmcc-lexer-floating-test ${LEXER_FLOATING_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
+    target_include_directories(wvmcc-lexer-floating-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME lexer-floating COMMAND wvmcc-lexer-floating-test)
+endif()
+
 # Tokenizer istream test
 set(TOKENIZER_ISTREAM_TEST ${TEST_ROOT}/unit/tokenizer_istream_test.cpp)
 if(EXISTS ${TOKENIZER_ISTREAM_TEST})

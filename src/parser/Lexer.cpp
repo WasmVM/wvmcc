@@ -30,7 +30,18 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
             for (char c : s) {
                 if (c == '.' || c == 'e' || c == 'E' || c == 'p' || c == 'P') { isFloat = true; break; }
             }
-            if (isFloat) return Token(FloatingToken{pp.lexeme}, pp.span);
+            if (isFloat) {
+                // parse optional floating suffix: f/F => float, l/L => long double, otherwise double
+                FloatingToken ftok;
+                ftok.lexeme = s;
+                if (!s.empty()) {
+                    char last = s.back();
+                    if (last == 'f' || last == 'F') ftok.resolved = FloatingToken::ResolvedType::Float;
+                    else if (last == 'l' || last == 'L') ftok.resolved = FloatingToken::ResolvedType::LongDouble;
+                    else ftok.resolved = FloatingToken::ResolvedType::Double;
+                }
+                return Token(ftok, pp.span);
+            }
 
             // Parse integer constant: split suffix (u/U, l/L, ll/LL) from digits
             size_t j = s.size();

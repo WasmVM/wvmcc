@@ -53,7 +53,10 @@ struct IntegerInfo {
 };
 
 struct IntegerToken { IntegerInfo info; };
-struct FloatingToken { std::string lexeme; };
+struct FloatingToken {
+    std::string lexeme;
+    enum class ResolvedType { Float, Double, LongDouble } resolved{ResolvedType::Double};
+};
 struct EndOfFileToken {};
 
 using TokenVariant = std::variant<KeywordToken, IdentifierToken, IntegerToken, FloatingToken, EnumerationToken, CharacterToken, StringLiteralToken, PunctuatorToken, EndOfFileToken>;
