@@ -25,11 +25,13 @@ private:
     bool acceptPunct(const std::string &p);
     bool acceptKeyword(const std::string &k);
 
+    // collect consecutive keyword specifiers (e.g., 'static', 'int')
+    std::vector<std::string> parseDeclarationSpecifiers();
+
     
     ExternalDeclPtr parseExternalDecl();
     FunctionDefPtr parseFunctionDef(const std::vector<std::string>& specs, const std::string &name);
     DeclarationPtr parseDeclaration(const std::vector<std::string>& specs, const std::string &name);
-    DeclaratorPtr makeSimpleDeclarator(const Token &t);
 
     // statements/expressions (very small subset)
     std::vector<BlockItemPtr> parseCompoundBody();

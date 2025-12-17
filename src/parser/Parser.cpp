@@ -6,6 +6,16 @@ namespace wvmcc::parser {
 
 Parser::Parser(Lexer &lexer) : lex(lexer) {}
 
+std::vector<std::string> Parser::parseDeclarationSpecifiers() {
+    std::vector<std::string> specs;
+    while (auto t = lex.peek()) {
+        if (t->kind() != TokenKind::Keyword) break;
+        specs.push_back(t->lexeme());
+        lex.next();
+    }
+    return specs;
+}
+
 bool Parser::acceptPunct(const std::string &p) {
     auto t = lex.peek();
     if (t && t->kind() == TokenKind::Punctuator && t->lexeme() == p) {
@@ -36,13 +46,7 @@ TranslationUnitPtr Parser::parseTranslationUnit() {
 
 ExternalDeclPtr Parser::parseExternalDecl() {
     // gather specifiers (keywords like 'int', 'static', etc.)
-    std::vector<std::string> specs;
-    // collect leading keyword specifiers (e.g., 'static', 'int')
-    while (auto t = lex.peek()) {
-        if (t->kind() != TokenKind::Keyword) break;
-        specs.push_back(t->lexeme());
-        lex.next();
-    }
+    auto specs = parseDeclarationSpecifiers();
 
     auto nameTok = lex.peek();
     if (!nameTok) return nullptr;
@@ -209,11 +213,7 @@ DeclarationPtr Parser::parseDeclaration(const std::vector<std::string>& specs, c
     return decl;
 }
 
-DeclaratorPtr Parser::makeSimpleDeclarator(const Token &t) {
-    auto d = make_ast_with_span<Declarator>(t.span);
-    d->id.name = t.lexeme();
-    return d;
-}
+
 
 std::vector<BlockItemPtr> Parser::parseCompoundBody() {
     std::vector<BlockItemPtr> body;
@@ -233,8 +233,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
         }
 
         if (p->kind() == TokenKind::Keyword) {
-            std::vector<std::string> specs;
-            specs.push_back(p->lexeme()); lex.next();
+            auto specs = parseDeclarationSpecifiers();
             std::string name;
             if (lex.peek() && lex.peek()->kind()==TokenKind::Identifier) { name = lex.peek()->lexeme(); lex.next(); }
             auto decl = parseDeclaration(specs, name);
