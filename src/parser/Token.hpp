@@ -24,7 +24,12 @@ enum class TokenKind {
 struct KeywordToken { std::string lexeme; };
 struct IdentifierToken { std::string name; };
 struct EnumerationToken { std::string name; };
-struct CharacterToken { std::string lexeme; };
+struct CharacterInfo {
+    enum class ResolvedType { UChar, WChar, Char16, Char32 } resolved{ResolvedType::UChar};
+    std::uint32_t value{0};
+    std::string lexeme;
+};
+struct CharacterToken { CharacterInfo info; };
 struct StringLiteralToken { std::string lexeme; };
 struct PunctuatorToken { std::string lexeme; };
 
@@ -90,7 +95,7 @@ struct Token {
             if constexpr (std::is_same_v<T, IntegerToken>) return arg.info.lexeme;
             if constexpr (std::is_same_v<T, FloatingToken>) return arg.lexeme;
             if constexpr (std::is_same_v<T, EnumerationToken>) return arg.name;
-            if constexpr (std::is_same_v<T, CharacterToken>) return arg.lexeme;
+            if constexpr (std::is_same_v<T, CharacterToken>) return arg.info.lexeme;
             if constexpr (std::is_same_v<T, StringLiteralToken>) return arg.lexeme;
             if constexpr (std::is_same_v<T, PunctuatorToken>) return arg.lexeme;
             return std::string();

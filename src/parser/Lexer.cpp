@@ -168,8 +168,88 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
 
             return Token(IntegerToken{info}, pp.span);
         }
-        case K::CharConst:
-            return Token(CharacterToken{pp.lexeme}, pp.span);
+        case K::CharConst: {
+            const std::string s = pp.lexeme; // includes optional prefix and quotes
+            CharacterInfo info;
+            info.lexeme = s;
+            // determine prefix
+            size_t pos = 0;
+            if (s.size() >= 2) {
+                if (s[0] == 'L') { info.resolved = CharacterInfo::ResolvedType::WChar; pos = 1; }
+                else if (s[0] == 'u') { info.resolved = CharacterInfo::ResolvedType::Char16; pos = 1; }
+                else if (s[0] == 'U') { info.resolved = CharacterInfo::ResolvedType::Char32; pos = 1; }
+            }
+            // find opening quote
+            if (pos >= s.size() || s[pos] != '\'') { /* malformed, leave defaults */ return Token(CharacterToken{info}, pp.span); }
+            // content is between single quotes at pos and last char
+            if (s.size() < pos + 3) { return Token(CharacterToken{info}, pp.span); }
+            std::string inner = s.substr(pos + 1, s.size() - (pos + 2) - 0); // between quotes
+            // handle simple cases and escapes
+            auto parse_escape = [&](const std::string &str, size_t &i)->unsigned int {
+                // assume str[i] == '\\'
+                ++i;
+                if (i >= str.size()) return 0;
+                char c = str[i];
+                switch (c) {
+                    case '\\' : return '\\';
+                    case '\'' : return '\'';
+                    case '"' : return '"';
+                    case '?' : return '?';
+                    case 'a': return '\a';
+                    case 'b': return '\b';
+                    case 'f': return '\f';
+                    case 'n': return '\n';
+                    case 'r': return '\r';
+                    case 't': return '\t';
+                    case 'v': return '\v';
+                    case 'x': {
+                        // hex digits following
+                        ++i;
+                        unsigned int val = 0;
+                        while (i < str.size()) {
+                            char h = str[i];
+                            int d = -1;
+                            if (h >= '0' && h <= '9') d = h - '0';
+                            else if (h >= 'a' && h <= 'f') d = 10 + (h - 'a');
+                            else if (h >= 'A' && h <= 'F') d = 10 + (h - 'A');
+                            else break;
+                            val = (val << 4) | (unsigned)d;
+                            ++i;
+                        }
+                        --i;
+                        return val;
+                    }
+                    default: {
+                        // octal escape: up to 3 octal digits
+                        if (c >= '0' && c <= '7') {
+                            unsigned int val = c - '0';
+                            size_t cnt = 1; ++i;
+                            while (cnt < 3 && i < str.size() && str[i] >= '0' && str[i] <= '7') {
+                                val = (val << 3) | (str[i] - '0'); ++i; ++cnt;
+                            }
+                            --i;
+                            return val;
+                        }
+                        return (unsigned int)c;
+                    }
+                }
+            };
+
+            // Extract characters from inner and compute value
+            unsigned int acc = 0;
+            for (size_t i = 0; i < inner.size(); ++i) {
+                unsigned int ch = 0;
+                if (inner[i] == '\\') {
+                    ch = parse_escape(inner, i);
+                } else {
+                    ch = static_cast<unsigned char>(inner[i]);
+                }
+                // pack bytes: shift accumulator left 8 and append
+                acc = (acc << 8) | (ch & 0xFFu);
+            }
+            info.value = acc;
+            return Token(CharacterToken{info}, pp.span);
+        }
         case K::StringLiteral:
             return Token(StringLiteralToken{pp.lexeme}, pp.span);
         case K::Punctuator:
