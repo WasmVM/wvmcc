@@ -14,6 +14,7 @@ enum class TokenKind {
     Identifier,
     IntegerConstant,
     FloatingConstant,
+    EnumerationConstant,
     CharacterConstant,
     StringLiteral,
     Punctuator,
@@ -78,6 +79,7 @@ struct Token {
             if constexpr (std::is_same_v<T, IdentifierToken>) return TokenKind::Identifier;
             if constexpr (std::is_same_v<T, IntegerToken>) return TokenKind::IntegerConstant;
             if constexpr (std::is_same_v<T, FloatingToken>) return TokenKind::FloatingConstant;
+            if constexpr (std::is_same_v<T, EnumerationToken>) return TokenKind::EnumerationConstant;
             if constexpr (std::is_same_v<T, CharacterToken>) return TokenKind::CharacterConstant;
             if constexpr (std::is_same_v<T, StringLiteralToken>) return TokenKind::StringLiteral;
             if constexpr (std::is_same_v<T, PunctuatorToken>) return TokenKind::Punctuator;
