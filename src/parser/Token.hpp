@@ -1,31 +1,88 @@
-// Parser-facing token type (language tokens after preprocessing)
+// Parser-facing token types (language tokens after preprocessing)
 #pragma once
 
 #include <string>
 #include <variant>
 #include <optional>
 #include "../common.hpp"
-#include <optional>
+#include <cstdint>
 
 namespace wvmcc::parser {
 
 enum class TokenKind {
     Keyword,
     Identifier,
-    Constant,        // numeric or character
+    IntegerConstant,
+    FloatingConstant,
+    EnumerationConstant,
+    CharacterConstant,
     StringLiteral,
     Punctuator,
     EndOfFile
 };
 
+struct KeywordToken { std::string lexeme; };
+struct IdentifierToken { std::string name; };
+struct EnumerationToken { std::string name; };
+struct CharacterToken { std::string lexeme; };
+struct StringLiteralToken { std::string lexeme; };
+struct PunctuatorToken { std::string lexeme; };
+
+struct IntegerInfo {
+    enum class Base { Decimal, Octal, Hexadecimal } base;
+    std::uint64_t value;
+    // flags bitfield: can combine Unsigned and length modifiers
+    enum Flags : uint32_t {
+        FLAG_NONE = 0,
+        FLAG_UNSIGNED = 1u << 0,
+        FLAG_LONG = 1u << 1,
+        FLAG_LONG_LONG = 1u << 2
+    };
+    uint32_t flags{FLAG_NONE};
+    std::string lexeme;
+};
+
+struct IntegerToken { IntegerInfo info; };
+struct FloatingToken { std::string lexeme; };
+struct EndOfFileToken {};
+
+using TokenVariant = std::variant<KeywordToken, IdentifierToken, IntegerToken, FloatingToken, EnumerationToken, CharacterToken, StringLiteralToken, PunctuatorToken, EndOfFileToken>;
+
 struct Token {
-    TokenKind kind;
-    std::string lexeme;    // exact source lexeme
+    TokenVariant v;
     wvmcc::SourceSpan span;
 
-    // For punctuators we keep the lexeme (e.g., ";", "->", "==")
-    Token(TokenKind k, std::string lex, const wvmcc::SourceSpan& s)
-        : kind(k), lexeme(std::move(lex)), span(s) {}
+    Token(TokenVariant vv, const wvmcc::SourceSpan& s) : v(std::move(vv)), span(s) {}
+
+    TokenKind kind() const {
+        return std::visit([](auto&& arg) -> TokenKind {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, KeywordToken>) return TokenKind::Keyword;
+            if constexpr (std::is_same_v<T, IdentifierToken>) return TokenKind::Identifier;
+            if constexpr (std::is_same_v<T, IntegerToken>) return TokenKind::IntegerConstant;
+            if constexpr (std::is_same_v<T, FloatingToken>) return TokenKind::FloatingConstant;
+            if constexpr (std::is_same_v<T, EnumerationToken>) return TokenKind::EnumerationConstant;
+            if constexpr (std::is_same_v<T, CharacterToken>) return TokenKind::CharacterConstant;
+            if constexpr (std::is_same_v<T, StringLiteralToken>) return TokenKind::StringLiteral;
+            if constexpr (std::is_same_v<T, PunctuatorToken>) return TokenKind::Punctuator;
+            return TokenKind::EndOfFile;
+        }, v);
+    }
+
+    std::string lexeme() const {
+        return std::visit([](auto&& arg) -> std::string {
+            using T = std::decay_t<decltype(arg)>;
+            if constexpr (std::is_same_v<T, KeywordToken>) return arg.lexeme;
+            if constexpr (std::is_same_v<T, IdentifierToken>) return arg.name;
+            if constexpr (std::is_same_v<T, IntegerToken>) return arg.info.lexeme;
+            if constexpr (std::is_same_v<T, FloatingToken>) return arg.lexeme;
+            if constexpr (std::is_same_v<T, EnumerationToken>) return arg.name;
+            if constexpr (std::is_same_v<T, CharacterToken>) return arg.lexeme;
+            if constexpr (std::is_same_v<T, StringLiteralToken>) return arg.lexeme;
+            if constexpr (std::is_same_v<T, PunctuatorToken>) return arg.lexeme;
+            return std::string();
+        }, v);
+    }
 };
 
 } // namespace wvmcc::parser

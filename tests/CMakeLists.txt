@@ -84,6 +84,14 @@ if(EXISTS ${LEXER_PUNCTUATOR_TEST})
     add_test(NAME lexer-punctuator COMMAND wvmcc-lexer-punctuator-test)
 endif()
 
+# Lexer integer constant parsing test
+set(LEXER_INTEGER_TEST ${TEST_ROOT}/unit/lexer_integer_test.cpp)
+if(EXISTS ${LEXER_INTEGER_TEST})
+    add_executable(wvmcc-lexer-integer-test ${LEXER_INTEGER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
+    target_include_directories(wvmcc-lexer-integer-test PRIVATE ${SRC_ROOT} ${TEST_ROOT}/include)
+    add_test(NAME lexer-integer COMMAND wvmcc-lexer-integer-test)
+endif()
+
 # Tokenizer istream test
 set(TOKENIZER_ISTREAM_TEST ${TEST_ROOT}/unit/tokenizer_istream_test.cpp)
 if(EXISTS ${TOKENIZER_ISTREAM_TEST})

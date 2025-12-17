@@ -35,12 +35,12 @@ int main() {
     }
 
     for (size_t i = 0; i < puncs.size(); ++i) {
-        if (toks[i].kind != wvmcc::parser::TokenKind::Punctuator) {
-            std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind << " expected Punctuator\n";
+        if (toks[i].kind() != wvmcc::parser::TokenKind::Punctuator) {
+            std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind() << " expected Punctuator\n";
             return 3;
         }
-        if (toks[i].lexeme != puncs[i]) {
-            std::cerr << "Token " << i << " lexeme mismatch: got '" << toks[i].lexeme << "' expected '" << puncs[i] << "'\n";
+        if (toks[i].lexeme() != puncs[i]) {
+            std::cerr << "Token " << i << " lexeme mismatch: got '" << toks[i].lexeme() << "' expected '" << puncs[i] << "'\n";
             return 4;
         }
     }

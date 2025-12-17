@@ -40,12 +40,12 @@ int main() {
     }
 
     for (size_t i = 0; i < keywords.size(); ++i) {
-        if (toks[i].kind != wvmcc::parser::TokenKind::Keyword) {
-            std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind << " expected Keyword\n";
+        if (toks[i].kind() != wvmcc::parser::TokenKind::Keyword) {
+            std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind() << " expected Keyword\n";
             return 3;
         }
-        if (toks[i].lexeme != keywords[i]) {
-            std::cerr << "Token " << i << " lexeme mismatch: got '" << toks[i].lexeme << "' expected '" << keywords[i] << "'\n";
+        if (toks[i].lexeme() != keywords[i]) {
+            std::cerr << "Token " << i << " lexeme mismatch: got '" << toks[i].lexeme() << "' expected '" << keywords[i] << "'\n";
             return 4;
         }
     }

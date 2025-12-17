@@ -101,21 +101,24 @@ void printDiagnostics(const std::vector<wvmcc::Diagnostic>& diagnostics) {
 }
 
 void printTokenStats(const std::vector<wvmcc::parser::Token>& tokens) {
-    size_t kw = 0, id = 0, cn = 0, str = 0, punct = 0;
+    size_t kw = 0, id = 0, intc = 0, floatc = 0, enumc = 0, chart = 0, str = 0, punct = 0;
     for (const auto& t : tokens) {
-        switch (t.kind) {
-            case wvmcc::parser::TokenKind::Keyword: ++kw; break;
-            case wvmcc::parser::TokenKind::Identifier: ++id; break;
-            case wvmcc::parser::TokenKind::Constant: ++cn; break;
-            case wvmcc::parser::TokenKind::StringLiteral: ++str; break;
-            case wvmcc::parser::TokenKind::Punctuator: ++punct; break;
-            default: break;
-        }
+        std::visit([&](auto&& tok){
+            using T = std::decay_t<decltype(tok)>;
+            if constexpr (std::is_same_v<T, wvmcc::parser::KeywordToken>) ++kw;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::IdentifierToken>) ++id;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::IntegerToken>) ++intc;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::FloatingToken>) ++floatc;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::EnumerationToken>) ++enumc;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::CharacterToken>) ++chart;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::StringLiteralToken>) ++str;
+            else if constexpr (std::is_same_v<T, wvmcc::parser::PunctuatorToken>) ++punct;
+        }, t.v);
     }
     std::cout << "tokens=" << tokens.size()
               << " keywords=" << kw << " identifiers=" << id
-              << " constants=" << cn << " strings=" << str
-              << " punctuators=" << punct << std::endl;
+              << " int_consts=" << intc << " float_consts=" << floatc << " enum_consts=" << enumc << " char_consts=" << chart
+              << " strings=" << str << " punctuators=" << punct << std::endl;
 }
 
 int main(int argc, char** argv) {

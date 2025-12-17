@@ -32,12 +32,12 @@ int main() {
     }
 
     for (size_t i = 0; i < ids.size(); ++i) {
-        if (toks[i].kind != wvmcc::parser::TokenKind::Identifier) {
-            std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind << " expected Identifier\n";
+        if (toks[i].kind() != wvmcc::parser::TokenKind::Identifier) {
+            std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind() << " expected Identifier\n";
             return 3;
         }
-        if (toks[i].lexeme != ids[i]) {
-            std::cerr << "Token " << i << " lexeme mismatch: got '" << toks[i].lexeme << "' expected '" << ids[i] << "'\n";
+        if (toks[i].lexeme() != ids[i]) {
+            std::cerr << "Token " << i << " lexeme mismatch: got '" << toks[i].lexeme() << "' expected '" << ids[i] << "'\n";
             return 4;
         }
     }
