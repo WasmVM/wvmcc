@@ -9,6 +9,7 @@
 #include "../parser/Lexer.hpp"
 #include "../parser/ASTPrinter.hpp"
 #include "../parser/AST.hpp"
+#include "../parser/Parser.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
     std::ofstream ofs(path, std::ios::binary);
@@ -144,13 +145,11 @@ int main(int argc, char** argv) {
             return 1;
         }
         wvmcc::parser::Lexer lex(pp);
-        std::vector<wvmcc::parser::Token> tokens;
-        while (auto t = lex.next()) tokens.push_back(*t);
         printDiagnostics(pp.getDiagnostics());
-        printTokenStats(tokens);
-        wvmcc::parser::TranslationUnitPtr main_translation_unit = std::make_shared<wvmcc::parser::TranslationUnit>();
         if (args.dumpAst) {
             using namespace wvmcc::parser;
+            Parser parser(lex);
+            TranslationUnitPtr main_translation_unit = parser.parseTranslationUnit();
             // determine output path by replacing extension of input path with _ast.xml
             std::string astPath = "ast.xml";
             if (args.inputPath.has_value()) {
@@ -170,6 +169,10 @@ int main(int argc, char** argv) {
                 printer.print(main_translation_unit);
                 ofs.flush();
             }
+        } else {
+            std::vector<wvmcc::parser::Token> tokens;
+            while (auto t = lex.next()) tokens.push_back(*t);
+            printTokenStats(tokens);
         }
     }
 

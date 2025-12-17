@@ -3,7 +3,7 @@
 #include <sstream>
 #include <vector>
 
-#include "../../src/pp/Tokenizer.hpp"
+#include "../../../src/pp/Tokenizer.hpp"
 
 struct Case {
     const char* name;

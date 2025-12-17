@@ -2,7 +2,7 @@
 #include <vector>
 #include <string>
 
-#include "../../src/pp/Tokenizer.hpp"
+#include "../../../src/pp/Tokenizer.hpp"
 #include "../include/test_utils.hpp"
 
 int main() {

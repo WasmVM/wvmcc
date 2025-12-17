@@ -2,10 +2,10 @@
 #include <cassert>
 #include <fstream>
 #include <cstdio>
-#include "../src/pp/ConstExprParser.hpp"
-#include "../src/pp/MacroTable.hpp"
-#include "../src/pp/Diagnostics.hpp"
-#include "../src/pp/Preprocessor.hpp"
+#include "../../../src/pp/ConstExprParser.hpp"
+#include "../../../src/pp/MacroTable.hpp"
+#include "../../../src/pp/Diagnostics.hpp"
+#include "../../../src/pp/Preprocessor.hpp"
 
 // Test 1: Simple integer literal
 static int test_integer_literal() {

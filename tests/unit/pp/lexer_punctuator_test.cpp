@@ -2,7 +2,7 @@
 #include <iostream>
 #include <vector>
 
-#include "../../src/pp/Preprocessor.hpp"
+#include "../../../src/pp/Preprocessor.hpp"
 #include "../../src/parser/Lexer.hpp"
 
 int main() {

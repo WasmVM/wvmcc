@@ -3,7 +3,7 @@
 #include <string>
 #include <filesystem>
 #include <cassert>
-#include "../src/pp/Preprocessor.hpp"
+#include "../../../src/pp/Preprocessor.hpp"
 
 // Test 1: Simple #if with true condition
 static int test_if_true() {
