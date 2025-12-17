@@ -90,16 +90,16 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
             info.lexeme = s;
 
             // Resolve semantic type according to C rules and host limits
-            auto fitsSigned = [](unsigned __int128 v, unsigned __int128 max)->bool { return v <= max; };
-            // helpers for max values
-            const unsigned __int128 max_int = static_cast<unsigned __int128>(std::numeric_limits<int>::max());
-            const unsigned __int128 max_long = static_cast<unsigned __int128>(std::numeric_limits<long>::max());
-            const unsigned __int128 max_ll = static_cast<unsigned __int128>(std::numeric_limits<long long>::max());
-            const unsigned __int128 max_uint = static_cast<unsigned __int128>(std::numeric_limits<unsigned int>::max());
-            const unsigned __int128 max_ulong = static_cast<unsigned __int128>(std::numeric_limits<unsigned long>::max());
-            const unsigned __int128 max_ull = static_cast<unsigned __int128>(std::numeric_limits<unsigned long long>::max());
+            auto fitsSigned = [](std::uint64_t v, std::uint64_t max)->bool { return v <= max; };
+            // helpers for max values (use 64-bit unsigned to compare against parsed uint64_t values)
+            const std::uint64_t max_int = static_cast<std::uint64_t>(std::numeric_limits<int>::max());
+            const std::uint64_t max_long = static_cast<std::uint64_t>(std::numeric_limits<long>::max());
+            const std::uint64_t max_ll = static_cast<std::uint64_t>(std::numeric_limits<long long>::max());
+            const std::uint64_t max_uint = static_cast<std::uint64_t>(std::numeric_limits<unsigned int>::max());
+            const std::uint64_t max_ulong = static_cast<std::uint64_t>(std::numeric_limits<unsigned long>::max());
+            const std::uint64_t max_ull = static_cast<std::uint64_t>(std::numeric_limits<unsigned long long>::max());
 
-            unsigned __int128 val = info.value;
+            std::uint64_t val = info.value;
 
             // Build candidate lists based on suffix flags and base per C table
             bool isU = (info.flags & IntegerInfo::FLAG_UNSIGNED) != 0;
