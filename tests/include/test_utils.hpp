@@ -4,7 +4,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
-#include "../../src/pp/Tokenizer.hpp"
+#include "pp/Tokenizer.hpp"
 
 namespace testutil {
 

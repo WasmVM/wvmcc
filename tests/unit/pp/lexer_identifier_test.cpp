@@ -2,8 +2,8 @@
 #include <iostream>
 #include <vector>
 
-#include "../../src/pp/Preprocessor.hpp"
-#include "../../src/parser/Lexer.hpp"
+#include "pp/Preprocessor.hpp"
+#include "parser/Lexer.hpp"
 
 int main() {
     using namespace wvmcc;

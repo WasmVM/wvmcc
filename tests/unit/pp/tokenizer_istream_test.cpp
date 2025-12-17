@@ -1,4 +1,4 @@
-#include "../../src/pp/Tokenizer.hpp"
+#include "pp/Tokenizer.hpp"
 #include <sstream>
 #include <vector>
 #include <iostream>

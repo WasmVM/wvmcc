@@ -4,9 +4,9 @@
 #include <sstream>
 #include <fstream>
 #include <cstdio>
-#include "../../src/pp/Preprocessor.hpp"
-#include "../../src/parser/Lexer.hpp"
-#include "../../src/parser/Parser.hpp"
+#include "pp/Preprocessor.hpp"
+#include "parser/Lexer.hpp"
+#include "parser/Parser.hpp"
 
 int main() {
     using namespace wvmcc;
