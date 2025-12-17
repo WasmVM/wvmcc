@@ -40,6 +40,16 @@ struct IntegerInfo {
     };
     uint32_t flags{FLAG_NONE};
     std::string lexeme;
+    // Resolved semantic type for the integer literal
+    enum class ResolvedType {
+        Int,
+        UnsignedInt,
+        Long,
+        UnsignedLong,
+        LongLong,
+        UnsignedLongLong,
+        None
+    } resolved{ResolvedType::None};
 };
 
 struct IntegerToken { IntegerInfo info; };

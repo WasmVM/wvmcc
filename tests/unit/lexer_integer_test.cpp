@@ -11,18 +11,18 @@ int main() {
     using namespace wvmcc::parser;
     const std::string fname = "temp_lexer_int.c";
 
-    // lexeme, base (0=dec,1=oct,2=hex), value, isUnsigned, longCount
-    const std::vector<std::tuple<std::string,int,std::uint64_t,bool,int>> cases = {
-        {"0", 0, 0ULL, false, 0},
-        {"123", 0, 123ULL, false, 0},
-        {"0123", 1, 83ULL, false, 0},
-        {"0x1A", 2, 0x1AULL, false, 0},
-        {"0XFFu", 2, 0xFFULL, true, 0},
-        {"0777u", 1, 0777ULL, true, 0},
-        {"42ul", 0, 42ULL, true, 1},
-        {"42LLU", 0, 42ULL, true, 2},
-        {"0x10LL", 2, 0x10ULL, false, 2},
-        {"0x10LLU", 2, 0x10ULL, true, 2}
+    // lexeme, base (0=dec,1=oct,2=hex), value, isUnsigned, longCount, expected resolved type
+    const std::vector<std::tuple<std::string,int,std::uint64_t,bool,int,IntegerInfo::ResolvedType>> cases = {
+        {"0", 0, 0ULL, false, 0, IntegerInfo::ResolvedType::Int},
+        {"123", 0, 123ULL, false, 0, IntegerInfo::ResolvedType::Int},
+        {"0123", 1, 83ULL, false, 0, IntegerInfo::ResolvedType::Int},
+        {"0x1A", 2, 0x1AULL, false, 0, IntegerInfo::ResolvedType::Int},
+        {"0XFFu", 2, 0xFFULL, true, 0, IntegerInfo::ResolvedType::UnsignedInt},
+        {"0777u", 1, 0777ULL, true, 0, IntegerInfo::ResolvedType::UnsignedInt},
+        {"42ul", 0, 42ULL, true, 1, IntegerInfo::ResolvedType::UnsignedLong},
+        {"42LLU", 0, 42ULL, true, 2, IntegerInfo::ResolvedType::UnsignedLongLong},
+        {"0x10LL", 2, 0x10ULL, false, 2, IntegerInfo::ResolvedType::LongLong},
+        {"0x10LLU", 2, 0x10ULL, true, 2, IntegerInfo::ResolvedType::UnsignedLongLong}
     };
 
     {
@@ -47,7 +47,7 @@ int main() {
     }
 
     for (size_t i = 0; i < cases.size(); ++i) {
-        const auto& [lex, base, val, isU, lc] = cases[i];
+        const auto& [lex, base, val, isU, lc, expectedResolved] = cases[i];
         if (toks[i].kind() != TokenKind::IntegerConstant) {
             std::cerr << "Token " << i << " kind mismatch: got " << (int)toks[i].kind() << " expected IntegerConstant\n";
             return 3;
@@ -68,6 +68,7 @@ int main() {
                 else if (info.flags & IntegerInfo::FLAG_LONG) gotLc = 1;
                 if (gotLc != lc) { std::cerr << "Token "<<i<<" longCount mismatch: got "<<gotLc<<" expected "<<lc<<"\n"; return; }
                 if (info.lexeme != lex) { std::cerr << "Token "<<i<<" lexeme mismatch: got '"<<info.lexeme<<"' expected '"<<lex<<"'\n"; return; }
+                if (info.resolved != expectedResolved) { std::cerr << "Token "<<i<<" resolved type mismatch\n"; return; }
                 ok = true;
             }
         }, toks[i].v);

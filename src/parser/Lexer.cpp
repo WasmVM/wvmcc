@@ -1,6 +1,8 @@
 // Lexer implementation moved out of header
 #include "Lexer.hpp"
 #include <unordered_set>
+#include <limits>
+#include <type_traits>
 
 namespace wvmcc::parser {
 
@@ -70,11 +72,89 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
                 info.value = 0;
                 if (!digits.empty() && digits[0] == '0') info.base = IntegerInfo::Base::Octal; else info.base = IntegerInfo::Base::Decimal;
             }
-                info.flags = IntegerInfo::FLAG_NONE;
-                if (isUnsigned) info.flags |= IntegerInfo::FLAG_UNSIGNED;
-                if (longCount == 1) info.flags |= IntegerInfo::FLAG_LONG;
-                if (longCount == 2) info.flags |= IntegerInfo::FLAG_LONG_LONG;
+            info.flags = IntegerInfo::FLAG_NONE;
+            if (isUnsigned) info.flags |= IntegerInfo::FLAG_UNSIGNED;
+            if (longCount == 1) info.flags |= IntegerInfo::FLAG_LONG;
+            if (longCount == 2) info.flags |= IntegerInfo::FLAG_LONG_LONG;
             info.lexeme = s;
+
+            // Resolve semantic type according to C rules and host limits
+            auto fitsSigned = [](unsigned __int128 v, unsigned __int128 max)->bool { return v <= max; };
+            // helpers for max values
+            const unsigned __int128 max_int = static_cast<unsigned __int128>(std::numeric_limits<int>::max());
+            const unsigned __int128 max_long = static_cast<unsigned __int128>(std::numeric_limits<long>::max());
+            const unsigned __int128 max_ll = static_cast<unsigned __int128>(std::numeric_limits<long long>::max());
+            const unsigned __int128 max_uint = static_cast<unsigned __int128>(std::numeric_limits<unsigned int>::max());
+            const unsigned __int128 max_ulong = static_cast<unsigned __int128>(std::numeric_limits<unsigned long>::max());
+            const unsigned __int128 max_ull = static_cast<unsigned __int128>(std::numeric_limits<unsigned long long>::max());
+
+            unsigned __int128 val = info.value;
+
+            // Build candidate lists based on suffix flags and base per C table
+            bool isU = (info.flags & IntegerInfo::FLAG_UNSIGNED) != 0;
+            bool isL = (info.flags & IntegerInfo::FLAG_LONG) != 0;
+            bool isLL = (info.flags & IntegerInfo::FLAG_LONG_LONG) != 0;
+
+            // helper lambdas to set resolved type
+            auto set = [&](IntegerInfo::ResolvedType r){ info.resolved = r; };
+
+            if (!isU && !isL && !isLL) {
+                // no suffix
+                if (info.base == IntegerInfo::Base::Decimal) {
+                    if (fitsSigned(val, max_int)) { set(IntegerInfo::ResolvedType::Int); }
+                    else if (fitsSigned(val, max_long)) { set(IntegerInfo::ResolvedType::Long); }
+                    else if (fitsSigned(val, max_ll)) { set(IntegerInfo::ResolvedType::LongLong); }
+                    else {
+                        // no extended integer support: mark as None
+                        set(IntegerInfo::ResolvedType::None);
+                    }
+                } else {
+                    // octal/hex: try signed int, unsigned int, long, unsigned long, long long, unsigned long long
+                    if (fitsSigned(val, max_int)) { set(IntegerInfo::ResolvedType::Int); }
+                    else if (val <= max_uint) { set(IntegerInfo::ResolvedType::UnsignedInt); }
+                    else if (fitsSigned(val, max_long)) { set(IntegerInfo::ResolvedType::Long); }
+                    else if (val <= max_ulong) { set(IntegerInfo::ResolvedType::UnsignedLong); }
+                    else if (fitsSigned(val, max_ll)) { set(IntegerInfo::ResolvedType::LongLong); }
+                    else if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
+                    else {
+                        set(IntegerInfo::ResolvedType::None);
+                    }
+                }
+            } else if (isU && !isL && !isLL) {
+                // u suffix
+                if (val <= max_uint) { set(IntegerInfo::ResolvedType::UnsignedInt); }
+                else if (val <= max_ulong) { set(IntegerInfo::ResolvedType::UnsignedLong); }
+                else if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
+                else { set(IntegerInfo::ResolvedType::None); }
+            } else if (!isU && isL && !isLL) {
+                // l suffix
+                if (info.base == IntegerInfo::Base::Decimal) {
+                    if (fitsSigned(val, max_long)) { set(IntegerInfo::ResolvedType::Long); }
+                    else if (fitsSigned(val, max_ll)) { set(IntegerInfo::ResolvedType::LongLong); }
+                    else { set(IntegerInfo::ResolvedType::None); }
+                } else {
+                    if (fitsSigned(val, max_long)) { set(IntegerInfo::ResolvedType::Long); }
+                    else if (val <= max_ulong) { set(IntegerInfo::ResolvedType::UnsignedLong); }
+                    else if (fitsSigned(val, max_ll)) { set(IntegerInfo::ResolvedType::LongLong); }
+                    else if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
+                    else { set(IntegerInfo::ResolvedType::None); }
+                }
+            } else if (isU && isL && !isLL) {
+                // u and l
+                if (val <= max_ulong) { set(IntegerInfo::ResolvedType::UnsignedLong); }
+                else if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
+                else { set(IntegerInfo::ResolvedType::None); }
+            } else if (!isU && isLL) {
+                // ll suffix
+                if (fitsSigned(val, max_ll)) { set(IntegerInfo::ResolvedType::LongLong); }
+                else if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
+                else { set(IntegerInfo::ResolvedType::None); }
+            } else if (isU && isLL) {
+                // u + ll
+                if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
+                else { set(IntegerInfo::ResolvedType::None); }
+            }
+
             return Token(IntegerToken{info}, pp.span);
         }
         case K::CharConst:
