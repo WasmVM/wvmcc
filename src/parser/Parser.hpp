@@ -26,12 +26,13 @@ private:
     bool acceptKeyword(const std::string &k);
 
     // collect consecutive keyword specifiers (e.g., 'static', 'int')
-    std::vector<std::string> parseDeclarationSpecifiers();
+    // DeclarationSpecifiers is defined in AST.hpp and reused here
+    DeclarationSpecifiers parseDeclarationSpecifiers();
 
     
     ExternalDeclPtr parseExternalDecl();
-    FunctionDefPtr parseFunctionDef(const std::vector<std::string>& specs, const std::string &name);
-    DeclarationPtr parseDeclaration(const std::vector<std::string>& specs, const std::string &name);
+    FunctionDefPtr parseFunctionDef(const DeclarationSpecifiers& specs, const std::string &name);
+    DeclarationPtr parseDeclaration(const DeclarationSpecifiers& specs, const std::string &name);
 
     // statements/expressions (very small subset)
     std::vector<BlockItemPtr> parseCompoundBody();
@@ -42,6 +43,8 @@ private:
     std::vector<wvmcc::Diagnostic> diagnostics{};
     // track internal linkage (static) definitions by name -> (span, has_definitive_definition)
     std::unordered_map<std::string, std::pair<SourceSpan, bool>> internal_definitions{};
+    // known typedef names (updated when parsing typedef declarations)
+    std::unordered_set<std::string> typedef_names{};
 };
 
 } // namespace wvmcc::parser

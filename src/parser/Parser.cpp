@@ -6,12 +6,67 @@ namespace wvmcc::parser {
 
 Parser::Parser(Lexer &lexer) : lex(lexer) {}
 
-std::vector<std::string> Parser::parseDeclarationSpecifiers() {
-    std::vector<std::string> specs;
+DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
+    DeclarationSpecifiers specs;
+
+    static const std::unordered_set<std::string> storage = {"typedef","extern","static","auto","register"};
+    static const std::unordered_set<std::string> typequal = {"const","volatile","restrict","_Atomic"};
+    static const std::unordered_set<std::string> funcspec = {"inline","_Noreturn"};
+    static const std::unordered_set<std::string> alignspec = {"_Alignas"};
+    static const std::unordered_set<std::string> types = {
+        "void","char","short","int","long","float","double","signed","unsigned",
+        "_Bool","_Complex","_Imaginary","struct","union","enum"
+    };
+
     while (auto t = lex.peek()) {
+        // If identifier and it's a known typedef-name, treat as type-specifier.
+        if (t->kind() == TokenKind::Identifier) {
+            if (typedef_names.count(t->lexeme())) {
+                specs.typeSpec.push_back(t->lexeme());
+                lex.next();
+                continue;
+            }
+            // otherwise it's the start of a declarator/name
+            break;
+        }
         if (t->kind() != TokenKind::Keyword) break;
-        specs.push_back(t->lexeme());
-        lex.next();
+        const std::string s = t->lexeme();
+        if (storage.count(s)) {
+            if (s == "typedef") specs.addStorage(StorageClass::Typedef);
+            else if (s == "extern") specs.addStorage(StorageClass::Extern);
+            else if (s == "static") specs.addStorage(StorageClass::Static);
+            else if (s == "auto") specs.addStorage(StorageClass::Auto);
+            else if (s == "register") specs.addStorage(StorageClass::Register);
+            else if (s == "_Thread_local") specs.addStorage(StorageClass::ThreadLocal);
+            lex.next();
+            continue;
+        }
+        if (typequal.count(s)) {
+            if (s == "const") specs.addTypeQual(TypeQualifier::Const);
+            else if (s == "volatile") specs.addTypeQual(TypeQualifier::Volatile);
+            else if (s == "restrict") specs.addTypeQual(TypeQualifier::Restrict);
+            else if (s == "_Atomic") specs.addTypeQual(TypeQualifier::Atomic);
+            lex.next();
+            continue;
+        }
+        if (funcspec.count(s)) {
+            if (s == "inline") specs.addFuncSpec(FunctionSpecifier::Inline);
+            else if (s == "_Noreturn") specs.addFuncSpec(FunctionSpecifier::NoReturn);
+            lex.next();
+            continue;
+        }
+        if (alignspec.count(s)) {
+            specs.alignSpec.push_back(s);
+            lex.next();
+            continue;
+        }
+        if (types.count(s)) {
+            specs.typeSpec.push_back(s);
+            lex.next();
+            continue;
+        }
+        // not a declaration-specifier keyword
+        break;
     }
     return specs;
 }
@@ -59,11 +114,18 @@ ExternalDeclPtr Parser::parseExternalDecl() {
 
     // Early constraint check: storage-class specifiers 'auto' and 'register' are invalid
     // in external declarations (C standard 6.9).
-    for (const auto &s : specs) {
-        if (s == "auto" || s == "register") {
+    if (specs.hasStorage(StorageClass::Auto) || specs.hasStorage(StorageClass::Register)) {
+        if (specs.hasStorage(StorageClass::Auto)) {
             wvmcc::Diagnostic d;
             d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "storage-class specifier '" + s + "' is not allowed in external declarations";
+            d.message = "storage-class specifier 'auto' is not allowed in external declarations";
+            if (nameTok) d.span = nameTok->span;
+            diagnostics.push_back(std::move(d));
+        }
+        if (specs.hasStorage(StorageClass::Register)) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "storage-class specifier 'register' is not allowed in external declarations";
             if (nameTok) d.span = nameTok->span;
             diagnostics.push_back(std::move(d));
         }
@@ -95,7 +157,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
             ext->decl = f;
 
             // duplicate internal definition check for 'static' functions
-            if (!name.empty() && std::find(specs.begin(), specs.end(), std::string("static")) != specs.end()) {
+            if (!name.empty() && specs.hasStorage(StorageClass::Static)) {
                 auto it = internal_definitions.find(name);
                 bool is_definitive = true; // function definition is definitive
                 if (it != internal_definitions.end()) {
@@ -131,7 +193,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         if (!d) return nullptr;
 
         // For object declarations with internal linkage (static): consider tentative/definitive semantics
-        if (std::find(specs.begin(), specs.end(), std::string("static")) != specs.end()) {
+        if (specs.hasStorage(StorageClass::Static)) {
             bool is_definitive = d->initializer.has_value();
             auto it = internal_definitions.find(name);
             if (is_definitive) {
@@ -180,7 +242,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     return nullptr;
 }
 
-FunctionDefPtr Parser::parseFunctionDef(const std::vector<std::string>& specs, const std::string &name) {
+FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, const std::string &name) {
     if (!acceptPunct("{")) return nullptr;
     auto f = make_ast<FunctionDef>();
     f->specifiers = specs;
@@ -191,7 +253,7 @@ FunctionDefPtr Parser::parseFunctionDef(const std::vector<std::string>& specs, c
     return f;
 }
 
-DeclarationPtr Parser::parseDeclaration(const std::vector<std::string>& specs, const std::string &name) {
+DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, const std::string &name) {
     auto decl = make_ast<Declaration>();
     decl->specifiers = specs;
     if (!name.empty()) {
@@ -210,6 +272,14 @@ DeclarationPtr Parser::parseDeclaration(const std::vector<std::string>& specs, c
         }
         lex.next();
     }
+    // If this declaration introduces a typedef-name, record it for future
+    // recognition in `parseDeclarationSpecifiers()`.
+    if (specs.hasStorage(StorageClass::Typedef)) {
+        if (decl->declarator && !decl->declarator->id.name.empty()) {
+            typedef_names.insert(decl->declarator->id.name);
+        }
+    }
+
     return decl;
 }
 
@@ -232,7 +302,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             continue;
         }
 
-        if (p->kind() == TokenKind::Keyword) {
+        if (p->kind() == TokenKind::Keyword || p->kind() == TokenKind::Identifier) {
             auto specs = parseDeclarationSpecifiers();
             std::string name;
             if (lex.peek() && lex.peek()->kind()==TokenKind::Identifier) { name = lex.peek()->lexeme(); lex.next(); }

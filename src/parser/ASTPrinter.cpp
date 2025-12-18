@@ -72,7 +72,7 @@ void ASTPrinter::visitFunctionDef(const FunctionDefPtr &f) {
     // specifiers
     if (!f->specifiers.empty()) {
         openTag("Specifiers");
-        for (auto &s : f->specifiers) simpleTag("Spec", s);
+        for (auto &s : f->specifiers.to_vector()) simpleTag("Spec", s);
         closeTag("Specifiers");
     }
     visitDeclarator(f->declarator);
@@ -97,7 +97,7 @@ void ASTPrinter::visitDeclaration(const DeclarationPtr &d) {
     openTag("Declaration", "span=\"" + esc(toString(d->span)) + "\"");
     if (!d->specifiers.empty()) {
         openTag("Specifiers");
-        for (auto &s : d->specifiers) simpleTag("Spec", s);
+        for (auto &s : d->specifiers.to_vector()) simpleTag("Spec", s);
         closeTag("Specifiers");
     }
     if (d->declarator) visitDeclarator(d->declarator);

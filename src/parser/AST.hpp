@@ -48,6 +48,46 @@ struct TranslationUnit : Node {
     std::vector<ExternalDeclPtr> externals;
 };
 
+// Bitmask-based specifier flags for compact representation and fast tests
+enum class StorageClass : uint32_t { None = 0, Typedef = 1u<<0, Extern = 1u<<1, Static = 1u<<2, Auto = 1u<<3, Register = 1u<<4, ThreadLocal = 1u<<5 };
+enum class TypeQualifier : uint32_t { None = 0, Const = 1u<<0, Volatile = 1u<<1, Restrict = 1u<<2, Atomic = 1u<<3 };
+enum class FunctionSpecifier : uint32_t { None = 0, Inline = 1u<<0, NoReturn = 1u<<1 };
+
+inline StorageClass operator|(StorageClass a, StorageClass b) { return static_cast<StorageClass>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); }
+inline StorageClass& operator|=(StorageClass &a, StorageClass b) { a = a | b; return a; }
+inline bool hasStorage(StorageClass flags, StorageClass bit) { return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bit)) != 0; }
+
+inline TypeQualifier operator|(TypeQualifier a, TypeQualifier b) { return static_cast<TypeQualifier>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); }
+inline TypeQualifier& operator|=(TypeQualifier &a, TypeQualifier b) { a = a | b; return a; }
+inline bool hasTypeQual(TypeQualifier flags, TypeQualifier bit) { return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bit)) != 0; }
+
+inline FunctionSpecifier operator|(FunctionSpecifier a, FunctionSpecifier b) { return static_cast<FunctionSpecifier>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b)); }
+inline FunctionSpecifier& operator|=(FunctionSpecifier &a, FunctionSpecifier b) { a = a | b; return a; }
+inline bool hasFuncSpec(FunctionSpecifier flags, FunctionSpecifier bit) { return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(bit)) != 0; }
+
+struct DeclarationSpecifiers {
+    StorageClass storageFlags{StorageClass::None};
+    std::vector<std::string> typeSpec; // keep structured/multi-token forms as strings for now
+    TypeQualifier typeQualFlags{TypeQualifier::None};
+    FunctionSpecifier funcSpecFlags{FunctionSpecifier::None};
+    std::vector<std::string> alignSpec; // alignment specifiers may contain expressions
+
+    bool empty() const {
+        return storageFlags == StorageClass::None && typeSpec.empty() && typeQualFlags == TypeQualifier::None && funcSpecFlags == FunctionSpecifier::None && alignSpec.empty();
+    }
+
+    void addStorage(StorageClass s) { storageFlags |= s; }
+    void addTypeQual(TypeQualifier q) { typeQualFlags |= q; }
+    void addFuncSpec(FunctionSpecifier f) { funcSpecFlags |= f; }
+
+    bool hasStorage(StorageClass s) const { return wvmcc::parser::hasStorage(storageFlags, s); }
+    bool hasTypeQual(TypeQualifier q) const { return wvmcc::parser::hasTypeQual(typeQualFlags, q); }
+    bool hasFuncSpec(FunctionSpecifier f) const { return wvmcc::parser::hasFuncSpec(funcSpecFlags, f); }
+
+    // helper: produce human-readable strings for printing/debugging
+    std::vector<std::string> to_vector() const;
+};
+
 // ExternalDecl is either a function definition or a declaration
 struct ExternalDecl : Node {
     std::variant<FunctionDefPtr, DeclarationPtr> decl;
@@ -75,14 +115,14 @@ struct Parameter {
 
 // Declaration: specifiers + declarator + optional initializer
 struct Declaration : Node {
-    std::vector<std::string> specifiers; // storage-class, type-specifiers, qualifiers
+    DeclarationSpecifiers specifiers; // storage-class, type-specifiers, qualifiers
     DeclaratorPtr declarator;
     std::optional<ExprPtr> initializer;
 };
 
 // Function definition: specifiers + declarator + params + body
 struct FunctionDef : Node {
-    std::vector<std::string> specifiers;
+    DeclarationSpecifiers specifiers;
     DeclaratorPtr declarator; // name and type
     std::vector<Parameter> params;
     std::vector<BlockItemPtr> body; // compound-stmt flattened for now
