@@ -88,6 +88,13 @@ if(EXISTS ${PARSER_EXTERNAL_DECL_DIAG_TEST})
     add_test(NAME parser-external-decl-diag COMMAND wvmcc-parser-external-decl-diag-test)
 endif()
 
+# Parser struct/union tests
+set(PARSER_STRUCT_UNION_TEST ${TEST_ROOT}/unit/parser/struct_union_test.cpp)
+if(EXISTS ${PARSER_STRUCT_UNION_TEST})
+    add_executable(wvmcc-parser-struct-union-test ${PARSER_STRUCT_UNION_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
+    add_test(NAME parser-struct-union COMMAND wvmcc-parser-struct-union-test)
+endif()
+
 # Lexer punctuator classification test
 set(LEXER_PUNCTUATOR_TEST ${TEST_ROOT}/unit/pp/lexer_punctuator_test.cpp)
 if(EXISTS ${LEXER_PUNCTUATOR_TEST})

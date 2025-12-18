@@ -32,6 +32,8 @@ private:
     void visitBlockItem(const BlockItemPtr &b);
     void visitStmt(const StmtPtr &s);
     void visitExpr(const ExprPtr &e);
+    // emit textual specifier entries for printing (replaces DeclarationSpecifiers::to_vector)
+    void emitSpecifiersEntries(const DeclarationSpecifiers &specs);
 };
 
 } // namespace wvmcc::parser

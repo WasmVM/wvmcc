@@ -18,11 +18,31 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
         "_Bool","_Complex","_Imaginary","struct","union","enum"
     };
 
+    auto map_simple = [](const std::string &s) -> std::optional<DeclarationSpecifiers::SimpleTypeSpecifier> {
+        using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+        if (s == "void") return S::Void;
+        if (s == "char") return S::Char;
+        if (s == "short") return S::Short;
+        if (s == "int") return S::Int;
+        if (s == "long") return S::Long;
+        if (s == "float") return S::Float;
+        if (s == "double") return S::Double;
+        if (s == "signed") return S::Signed;
+        if (s == "unsigned") return S::Unsigned;
+        if (s == "_Bool") return S::Bool;
+        if (s == "_Complex") return S::Complex;
+        if (s == "_Imaginary") return S::Imaginary;
+        return std::nullopt;
+    };
+
     while (auto t = lex.peek()) {
         // If identifier and it's a known typedef-name, treat as type-specifier.
         if (t->kind() == TokenKind::Identifier) {
             if (typedef_names.count(t->lexeme())) {
-                specs.typeSpec.push_back(t->lexeme());
+                DeclarationSpecifiers::TypeSpecifier ts;
+                ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName;
+                ts.text = t->lexeme();
+                specs.typeSpecifiers.push_back(ts);
                 lex.next();
                 continue;
             }
@@ -31,22 +51,47 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
         }
         if (t->kind() != TokenKind::Keyword) break;
         const std::string s = t->lexeme();
-        if (storage.count(s)) {
-            if (s == "typedef") specs.addStorage(StorageClass::Typedef);
-            else if (s == "extern") specs.addStorage(StorageClass::Extern);
-            else if (s == "static") specs.addStorage(StorageClass::Static);
-            else if (s == "auto") specs.addStorage(StorageClass::Auto);
-            else if (s == "register") specs.addStorage(StorageClass::Register);
-            else if (s == "_Thread_local") specs.addStorage(StorageClass::ThreadLocal);
-            lex.next();
-            continue;
-        }
-        if (typequal.count(s)) {
-            if (s == "const") specs.addTypeQual(TypeQualifier::Const);
-            else if (s == "volatile") specs.addTypeQual(TypeQualifier::Volatile);
-            else if (s == "restrict") specs.addTypeQual(TypeQualifier::Restrict);
-            else if (s == "_Atomic") specs.addTypeQual(TypeQualifier::Atomic);
-            lex.next();
+        if (types.count(s)) {
+                // Handle compound type-specifiers. Special-case struct/union/enum
+                // to consume their optional name and optional braced definition.
+                if (s == "struct" || s == "union" || s == "enum") {
+                    auto ts = parseStructOrUnionSpecifier();
+                    specs.typeSpecifiers.push_back(ts);
+                    continue;
+                }
+
+            // Collect contiguous type-specifier keywords (e.g., "unsigned long int",
+            // "long double", "float _Complex") and attempt to store as simple tokens.
+            std::vector<std::string> parts;
+            while (auto u = lex.peek()) {
+                if (u->kind() != TokenKind::Keyword) break;
+                const std::string us = u->lexeme();
+                if (!types.count(us)) break;
+                parts.push_back(us);
+                lex.next();
+            }
+            if (!parts.empty()) {
+                bool all_simple = true;
+                std::vector<DeclarationSpecifiers::SimpleTypeSpecifier> toks;
+                for (auto &p : parts) {
+                    auto st = map_simple(p);
+                    if (st.has_value()) toks.push_back(*st);
+                    else { all_simple = false; break; }
+                }
+                if (all_simple) {
+                    DeclarationSpecifiers::TypeSpecifier nts;
+                    nts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+                    nts.simple = toks;
+                    specs.typeSpecifiers.push_back(std::move(nts));
+                } else {
+                    std::string combined = parts[0];
+                    for (size_t i = 1; i < parts.size(); ++i) { combined += " "; combined += parts[i]; }
+                    DeclarationSpecifiers::TypeSpecifier nts;
+                    nts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Other;
+                    nts.text = combined;
+                    specs.typeSpecifiers.push_back(std::move(nts));
+                }
+            }
             continue;
         }
         if (funcspec.count(s)) {
@@ -61,14 +106,162 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
             continue;
         }
         if (types.count(s)) {
-            specs.typeSpec.push_back(s);
-            lex.next();
+            // Collect contiguous type-specifier keywords and store simple tokens
+            // (e.g., unsigned,long,int -> [Unsigned,Long,Int]). If the block
+            // contains non-simple specifiers (e.g., struct/union/enum) fall back
+            // to storing the combined string in `typeSpec`.
+            std::vector<std::string> parts;
+            while (auto u = lex.peek()) {
+                if (u->kind() != TokenKind::Keyword && u->kind() != TokenKind::Identifier) break;
+                const std::string us = u->lexeme();
+                if (!types.count(us) && !(u->kind() == TokenKind::Identifier && typedef_names.count(us))) break;
+                parts.push_back(us);
+                lex.next();
+            }
+            if (!parts.empty()) {
+                bool all_simple = true;
+                std::vector<DeclarationSpecifiers::SimpleTypeSpecifier> toks;
+                for (auto &p : parts) {
+                    auto st = map_simple(p);
+                    if (st.has_value()) toks.push_back(*st);
+                    else {
+                        all_simple = false;
+                        break;
+                    }
+                }
+                if (all_simple) {
+                    DeclarationSpecifiers::TypeSpecifier nts;
+                    nts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+                    nts.simple = toks;
+                    specs.typeSpecifiers.push_back(std::move(nts));
+                } else {
+                    // fallback: keep combined textual form (struct/enum or typedef-name)
+                    std::string combined = parts[0];
+                    for (size_t i = 1; i < parts.size(); ++i) { combined += " "; combined += parts[i]; }
+                    DeclarationSpecifiers::TypeSpecifier nts;
+                    nts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Other;
+                    nts.text = combined;
+                    specs.typeSpecifiers.push_back(std::move(nts));
+                }
+            }
             continue;
         }
         // not a declaration-specifier keyword
         break;
     }
     return specs;
+}
+
+DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
+    DeclarationSpecifiers::TypeSpecifier ts;
+    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion;
+    auto su = std::make_shared<StructOrUnionSpecifier>();
+
+    // current token should be 'struct'/'union'/'enum'
+    auto kw = lex.peek();
+    if (!kw) return ts;
+    const std::string k = kw->lexeme();
+    su->kind = (k == "struct") ? StructOrUnionSpecifier::Kind::Struct : StructOrUnionSpecifier::Kind::Union;
+    // consume keyword
+    lex.next();
+
+    // optional identifier
+    std::optional<std::string> tagName;
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+        tagName = lex.peek()->lexeme();
+        su->name = *tagName;
+        lex.next();
+    }
+
+    // optional body
+    bool hasBodyNow = false;
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
+        // consume '{'
+        lex.next();
+        hasBodyNow = true;
+        su->hasBody = true;
+
+        // parse member list until matching '}'
+        while (auto p = lex.peek()) {
+            if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
+
+            // parse a member-declaration: specifiers + optional declarator-list + ';'
+            auto memberSpecs = parseDeclarationSpecifiers();
+
+            // if next is ';' -> anonymous/member without declarators
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
+                // consume ';'
+                lex.next();
+                StructMember m;
+                m.specifiers = memberSpecs;
+                su->members.push_back(std::move(m));
+                continue;
+            }
+
+            // otherwise parse declarator-list
+            StructMember m;
+            m.specifiers = memberSpecs;
+            while (true) {
+                // simplistic declarator: identifier (fallback)
+                StructDeclarator sd;
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+                    auto id = make_ast<Declarator>();
+                    id->id.name = lex.peek()->lexeme();
+                    sd.declarator = id;
+                    lex.next();
+                }
+
+                // optional bit-field width ': const-expr'
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":") {
+                    lex.next();
+                    sd.bitfieldWidth = parseExpr();
+                }
+
+                m.declarators.push_back(std::move(sd));
+
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                    lex.next();
+                    continue;
+                }
+                break;
+            }
+
+            // require terminating ';'
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") lex.next();
+
+            su->members.push_back(std::move(m));
+        }
+    }
+
+    ts.su = su;
+    // register or merge into tag registry if we have a tag name
+    if (tagName.has_value()) {
+        auto it = tag_registry.find(*tagName);
+        if (it == tag_registry.end()) {
+            // no prior tag: insert current specifier (may be incomplete if no body)
+            tag_registry[*tagName] = su;
+        } else {
+            auto existing = it->second;
+            if (existing && existing->hasBody && hasBodyNow) {
+                // duplicate tag definition
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "redefinition of struct/union tag '" + *tagName + "'";
+                d.span = kw->span;
+                diagnostics.push_back(std::move(d));
+            } else if (existing && !existing->hasBody && hasBodyNow) {
+                // complete previously incomplete tag: copy members into the registered specifier
+                existing->hasBody = true;
+                existing->members = su->members;
+                // point ts.su to the canonical registered specifier
+                ts.su = existing;
+            } else {
+                // keep registered specifier (either both incomplete or existing complete and new incomplete)
+                ts.su = existing;
+            }
+        }
+    }
+    return ts;
 }
 
 bool Parser::acceptPunct(const std::string &p) {
@@ -185,6 +378,15 @@ ExternalDeclPtr Parser::parseExternalDecl() {
             ext->decl = d;
             return ext;
         }
+    }
+
+    // otherwise if the next token is a semicolon (e.g., "struct S;" or "typedef int;") treat as declaration with no declarator
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
+        auto d = parseDeclaration(specs, "");
+        if (!d) return nullptr;
+        auto ext = make_ast_with_span<ExternalDecl>(d->span);
+        ext->decl = d;
+        return ext;
     }
 
     // otherwise if the name exists, treat as declaration

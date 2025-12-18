@@ -72,7 +72,7 @@ void ASTPrinter::visitFunctionDef(const FunctionDefPtr &f) {
     // specifiers
     if (!f->specifiers.empty()) {
         openTag("Specifiers");
-        for (auto &s : f->specifiers.to_vector()) simpleTag("Spec", s);
+        emitSpecifiersEntries(f->specifiers);
         closeTag("Specifiers");
     }
     visitDeclarator(f->declarator);
@@ -97,7 +97,7 @@ void ASTPrinter::visitDeclaration(const DeclarationPtr &d) {
     openTag("Declaration", "span=\"" + esc(toString(d->span)) + "\"");
     if (!d->specifiers.empty()) {
         openTag("Specifiers");
-        for (auto &s : d->specifiers.to_vector()) simpleTag("Spec", s);
+        emitSpecifiersEntries(d->specifiers);
         closeTag("Specifiers");
     }
     if (d->declarator) visitDeclarator(d->declarator);
@@ -107,6 +107,94 @@ void ASTPrinter::visitDeclaration(const DeclarationPtr &d) {
         closeTag("Initializer");
     }
     closeTag("Declaration");
+}
+
+void ASTPrinter::emitSpecifiersEntries(const DeclarationSpecifiers &specs) {
+    if (specs.hasStorage(StorageClass::Typedef)) simpleTag("Spec", "typedef");
+    if (specs.hasStorage(StorageClass::Extern)) simpleTag("Spec", "extern");
+    if (specs.hasStorage(StorageClass::Static)) simpleTag("Spec", "static");
+    if (specs.hasStorage(StorageClass::Auto)) simpleTag("Spec", "auto");
+    if (specs.hasStorage(StorageClass::Register)) simpleTag("Spec", "register");
+    if (specs.hasStorage(StorageClass::ThreadLocal)) simpleTag("Spec", "_Thread_local");
+
+    for (auto &ts : specs.typeSpecifiers) {
+        switch (ts.kind) {
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Simple: {
+                for (auto &tok : ts.simple) {
+                    switch (tok) {
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Void: simpleTag("Spec", "void"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Char: simpleTag("Spec", "char"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Short: simpleTag("Spec", "short"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Int: simpleTag("Spec", "int"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Long: simpleTag("Spec", "long"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Float: simpleTag("Spec", "float"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Double: simpleTag("Spec", "double"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Signed: simpleTag("Spec", "signed"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Unsigned: simpleTag("Spec", "unsigned"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Bool: simpleTag("Spec", "_Bool"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Complex: simpleTag("Spec", "_Complex"); break;
+                        case DeclarationSpecifiers::SimpleTypeSpecifier::Imaginary: simpleTag("Spec", "_Imaginary"); break;
+                        default: break;
+                    }
+                }
+                break;
+            }
+            case DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion:
+                if (ts.su) {
+                    std::string kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? "struct" : "union";
+                    std::string name;
+                    if (ts.su->name.has_value()) name = *ts.su->name;
+                    if (!ts.su->hasBody) {
+                        std::string repr = kind;
+                        if (!name.empty()) { repr += " "; repr += name; }
+                        simpleTag("Spec", repr);
+                    } else {
+                        // print detailed struct/union with members
+                        openTag(kind + "", (!name.empty() ? std::string("name=\"") + esc(name) + std::string("\"") : std::string()));
+                        openTag("Members");
+                        for (auto &m : ts.su->members) {
+                            openTag("Member");
+                            if (!m.specifiers.empty()) {
+                                openTag("MemberSpecifiers");
+                                emitSpecifiersEntries(m.specifiers);
+                                closeTag("MemberSpecifiers");
+                            }
+                            openTag("Declarators");
+                            for (auto &sd : m.declarators) {
+                                openTag("Declarator");
+                                if (sd.declarator) {
+                                    if (!sd.declarator->id.name.empty()) simpleTag("Id", sd.declarator->id.name);
+                                    if (sd.declarator->inner) visitDeclarator(*sd.declarator->inner);
+                                }
+                                if (sd.bitfieldWidth) {
+                                    openTag("Bitfield");
+                                    visitExpr(*sd.bitfieldWidth);
+                                    closeTag("Bitfield");
+                                }
+                                closeTag("Declarator");
+                            }
+                            closeTag("Declarators");
+                            closeTag("Member");
+                        }
+                        closeTag("Members");
+                        closeTag(kind + "");
+                    }
+                } else if (!ts.text.empty()) simpleTag("Spec", ts.text);
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
+                if (!ts.text.empty()) simpleTag("Spec", ts.text);
+                break;
+        }
+    }
+
+    if (specs.hasTypeQual(TypeQualifier::Const)) simpleTag("Spec", "const");
+    if (specs.hasTypeQual(TypeQualifier::Volatile)) simpleTag("Spec", "volatile");
+    if (specs.hasTypeQual(TypeQualifier::Restrict)) simpleTag("Spec", "restrict");
+    if (specs.hasTypeQual(TypeQualifier::Atomic)) simpleTag("Spec", "_Atomic");
+    if (specs.hasFuncSpec(FunctionSpecifier::Inline)) simpleTag("Spec", "inline");
+    if (specs.hasFuncSpec(FunctionSpecifier::NoReturn)) simpleTag("Spec", "_Noreturn");
+    for (auto &a : specs.alignSpec) simpleTag("Spec", a);
 }
 
 void ASTPrinter::visitDeclarator(const DeclaratorPtr &d) {

@@ -28,6 +28,8 @@ private:
     // collect consecutive keyword specifiers (e.g., 'static', 'int')
     // DeclarationSpecifiers is defined in AST.hpp and reused here
     DeclarationSpecifiers parseDeclarationSpecifiers();
+    // parse a struct/union/enum specifier including member list when present
+    DeclarationSpecifiers::TypeSpecifier parseStructOrUnionSpecifier();
 
     
     ExternalDeclPtr parseExternalDecl();
@@ -45,6 +47,8 @@ private:
     std::unordered_map<std::string, std::pair<SourceSpan, bool>> internal_definitions{};
     // known typedef names (updated when parsing typedef declarations)
     std::unordered_set<std::string> typedef_names{};
+    // tag registry for struct/union names -> specifier (incomplete or complete)
+    std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> tag_registry{};
 };
 
 } // namespace wvmcc::parser

@@ -29,6 +29,7 @@ struct FunctionDef;
 struct Declaration;
 struct Declarator;
 struct TypeNode;
+struct StructOrUnionSpecifier;
 struct Expr;
 struct Stmt;
 struct BlockItem;
@@ -67,13 +68,38 @@ inline bool hasFuncSpec(FunctionSpecifier flags, FunctionSpecifier bit) { return
 
 struct DeclarationSpecifiers {
     StorageClass storageFlags{StorageClass::None};
-    std::vector<std::string> typeSpec; // keep structured/multi-token forms as strings for now
+    // Simple type-specifier tokens (keywords like 'int', 'long', 'unsigned')
+    enum class SimpleTypeSpecifier : uint32_t {
+        None = 0,
+        Void,
+        Char,
+        Short,
+        Int,
+        Long,
+        Float,
+        Double,
+        Signed,
+        Unsigned,
+        Bool,
+        Complex,
+        Imaginary
+    };
+    // Aggregate representation for type-specifiers (simple keyword sequences,
+    // struct/union specifiers, typedef-names, or other combined forms).
+    struct TypeSpecifier {
+        enum class Kind { Simple, StructOrUnion, TypedefName, Other } kind{Kind::Other};
+        std::vector<SimpleTypeSpecifier> simple; // used when Kind==Simple
+        std::shared_ptr<StructOrUnionSpecifier> su; // used when Kind==StructOrUnion
+        std::string text; // textual fallback (typedef-name or other combined form)
+    };
+
+    std::vector<TypeSpecifier> typeSpecifiers;
     TypeQualifier typeQualFlags{TypeQualifier::None};
     FunctionSpecifier funcSpecFlags{FunctionSpecifier::None};
     std::vector<std::string> alignSpec; // alignment specifiers may contain expressions
 
     bool empty() const {
-        return storageFlags == StorageClass::None && typeSpec.empty() && typeQualFlags == TypeQualifier::None && funcSpecFlags == FunctionSpecifier::None && alignSpec.empty();
+        return storageFlags == StorageClass::None && typeSpecifiers.empty() && typeQualFlags == TypeQualifier::None && funcSpecFlags == FunctionSpecifier::None && alignSpec.empty();
     }
 
     void addStorage(StorageClass s) { storageFlags |= s; }
@@ -84,8 +110,27 @@ struct DeclarationSpecifiers {
     bool hasTypeQual(TypeQualifier q) const { return wvmcc::parser::hasTypeQual(typeQualFlags, q); }
     bool hasFuncSpec(FunctionSpecifier f) const { return wvmcc::parser::hasFuncSpec(funcSpecFlags, f); }
 
-    // helper: produce human-readable strings for printing/debugging
-    std::vector<std::string> to_vector() const;
+    // Note: formatting/printing helpers moved to ASTPrinter.
+};
+
+// Declarator with optional bit-field width used inside struct/union members
+struct StructDeclarator {
+    DeclaratorPtr declarator; // may be null for anonymous bit-field or unnamed member
+    std::optional<ExprPtr> bitfieldWidth;
+};
+
+// A struct/union member (a declaration with possibly multiple declarators)
+struct StructMember {
+    DeclarationSpecifiers specifiers;
+    std::vector<StructDeclarator> declarators; // empty means unnamed/anonymous declaration
+};
+
+// Minimal holder for struct-or-union specifiers (name + whether body present).
+struct StructOrUnionSpecifier {
+    enum class Kind { Struct, Union } kind{Kind::Struct};
+    std::optional<std::string> name;
+    bool hasBody{false};
+    std::vector<StructMember> members;
 };
 
 // ExternalDecl is either a function definition or a declaration
