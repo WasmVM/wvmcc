@@ -8,9 +8,14 @@
 #include <iostream>
 #include <sstream>
 #include <unordered_set>
+#include <cctype>
 #include "Tokenizer.hpp"
 
 namespace wvmcc {
+
+// Forward declarations for helpers used by methods defined earlier in this file
+static std::string extractLiteralPrefix(const std::string &lex);
+static bool extractLiteralInnerAndQuote(const std::string &lex, std::string &outInner, char &outQuote);
 
 // Helper function to stringify tokens (for # operator in macros)
 // Now a member method (forward reference removed)
@@ -26,13 +31,71 @@ bool Preprocessor::open(const std::string& inputPath) {
 std::optional<PPToken> Preprocessor::peek() {
     ensureBuffer();
     if (outBuffer.empty()) return std::nullopt;
-    return outBuffer.front();
+    // Return a normalized copy so callers always see decoded literals
+    PPToken copy = outBuffer.front();
+    normalizeLiteralToken(copy);
+    return copy;
 }
 
 std::optional<PPToken> Preprocessor::next() {
     ensureBuffer();
     if (outBuffer.empty()) return std::nullopt;
     auto t = outBuffer.front(); outBuffer.pop_front();
+
+    // If this is a string literal, perform Phase 6 adjacent literal concatenation
+    if (t.kind == PPTokenKind::StringLiteral) {
+        // Normalize left component
+        normalizeLiteralToken(t);
+        // Ensure we have buffered following tokens (read-ahead) before attempting to merge
+        ensureBuffer();
+        // Consume and merge following whitespace/newline + string-literal sequences
+        while (!outBuffer.empty()) {
+            // Skip whitespace/newline between adjacent literals
+            while (!outBuffer.empty() && (outBuffer.front().kind == PPTokenKind::Whitespace || outBuffer.front().kind == PPTokenKind::Newline)) {
+                outBuffer.pop_front();
+            }
+            if (outBuffer.empty()) break;
+            if (outBuffer.front().kind != PPTokenKind::StringLiteral) break;
+
+            PPToken right = outBuffer.front(); outBuffer.pop_front();
+            normalizeLiteralToken(right);
+
+            // Extract inners and prefixes
+            std::string lpre, rpre, lin, rin; char lq=0, rq=0;
+            lpre = extractLiteralPrefix(t.lexeme);
+            rpre = extractLiteralPrefix(right.lexeme);
+            if (!extractLiteralInnerAndQuote(t.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq)) {
+                // malformed: stop merging
+                break;
+            }
+            if (lq != rq) {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal quote types during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                break;
+            }
+
+            std::string combinedPrefix;
+            if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+            else if (lpre.empty()) combinedPrefix = rpre;
+            else if (rpre.empty()) combinedPrefix = lpre;
+            else if (lpre == rpre) combinedPrefix = lpre;
+            else {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                // Do not merge; put right back at front and stop
+                outBuffer.push_front(right);
+                break;
+            }
+
+            // Merge inners
+            std::string newInner = lin + rin;
+            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            t.lexeme = rebuilt;
+            t.span.end = right.span.end;
+            t.copyPaint(right);
+        }
+        return t;
+    }
+
+    normalizeLiteralToken(t);
     return t;
 }
 
@@ -132,7 +195,11 @@ std::optional<PPToken> Preprocessor::readRawToken() {
 }
 
 void Preprocessor::ensureBuffer() {
-    while (outBuffer.empty()) {
+    // Keep reading tokens until we have at least one token to return.
+    // Additionally, if the last token we produced is a string literal,
+    // continue reading to allow adjacent string-literal concatenation
+    // to occur before we return any token.
+    while (outBuffer.empty() || (!outBuffer.empty() && outBuffer.back().kind == PPTokenKind::StringLiteral)) {
         auto opt = readRawToken();
         if (!opt) return;
         auto tok = *opt;
@@ -201,7 +268,7 @@ bool Preprocessor::handleIdentifierExpansionToken(const PPToken& tok) {
         }
         auto expanded = expandMacros(substituted);
         for (auto it = expanded.rbegin(); it != expanded.rend(); ++it) {
-            outBuffer.push_front(*it);
+            pushTokenFrontWithConcat(*it);
         }
         return true;
     } else {
@@ -221,9 +288,9 @@ bool Preprocessor::tryHandleFunctionLikeMacroInvocation(const Macro* m, const PP
     size_t idx = 0;
     std::vector<PPToken> expandedResult;
     if (tryExpandFunctionLikeMacro(invocation, idx, m, tok, expandedResult)) {
-        for (const auto &et : expandedResult) outBuffer.push_back(et);
+        for (const auto &et : expandedResult) pushTokenBackWithConcat(et);
     } else {
-        for (const auto &itok : invocation) outBuffer.push_back(itok);
+        for (const auto &itok : invocation) pushTokenBackWithConcat(itok);
     }
     return true;
 }
@@ -241,16 +308,16 @@ bool Preprocessor::consumeOptionalWhitespaceBeforeOpenParen() {
 
 void Preprocessor::emitTokenOrLineExpansion(const PPToken& tok) {
     if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "__LINE__") {
-        std::string lineStr = std::to_string(tok.span.begin.line);
+    std::string lineStr = std::to_string(tok.span.begin.line);
         PPToken numTok{
             .kind = PPTokenKind::PPNumber,
             .span = tok.span,
             .lexeme = lineStr,
             .paintedMacros = {}
         };
-        outBuffer.push_back(numTok);
+        pushTokenBackWithConcat(numTok);
     } else {
-        outBuffer.push_back(tok);
+        pushTokenBackWithConcat(tok);
     }
     atLineStart = false;
 }
@@ -401,7 +468,7 @@ void Preprocessor::handleInclude() {
     std::vector<PPToken> temp;
     std::string currentDir = fileStack.back().dir;
     (void)handleIncludeDirective(tz, temp, currentDir);
-    for (const auto &tk : temp) outBuffer.push_back(tk);
+    for (const auto &tk : temp) pushTokenBackWithConcat(tk);
 }
 
 void Preprocessor::handleIfdef(bool wantDefined) {
@@ -963,6 +1030,9 @@ bool Preprocessor::tryProcessStringification(const Macro* m, size_t& rIdx,
         .paintedMacros = {}
     };
     strToken.paint(m->name);
+    // Mark stringification-generated tokens so Phase-5 normalization does not
+    // decode their escape sequences (stringification supplies its own escaping).
+    strToken.paint("__STRINGIFIED__");
     substituted.push_back(strToken);
     rIdx = nextIdx;
     return true;
@@ -1524,6 +1594,399 @@ void Preprocessor::trimTrailingWhitespace(std::string& content) {
         content.pop_back();
     }
 }
+
+// Normalize a literal token: decode escape sequences and UCNs inside string literal tokens.
+// Keeps prefix and surrounding quotes, but replaces inner content with decoded bytes
+// encoded as UTF-8 for execution character set. Emits diagnostics on malformed escapes.
+// Note: character constants are left unchanged here so the parser sees the original
+// source lexeme (tests and downstream code expect the raw char-constant form).
+void Preprocessor::normalizeLiteralToken(PPToken& tok) {
+    // Normalize both string literals and character constants. Skip tokens
+    // generated by the stringification operator (#), which already contain
+    // their escaped representation and must not be decoded.
+    if (!(tok.kind == PPTokenKind::StringLiteral || tok.kind == PPTokenKind::CharConst)) return;
+    if (tok.kind == PPTokenKind::StringLiteral && tok.isPainted("__STRINGIFIED__")) return;
+    const std::string &orig = tok.lexeme;
+    if (orig.empty()) return;
+
+    // Extract prefix (u8, u, U, L) if present
+    size_t i = 0;
+    std::string prefix;
+    if (orig.size() >= 2) {
+        // u8 prefix is two chars
+        if (orig.size() >= 3 && orig[0] == 'u' && orig[1] == '8') { prefix = "u8"; i = 2; }
+        else if (orig[0] == 'u' || orig[0] == 'U' || orig[0] == 'L') { prefix = std::string(1, orig[0]); i = 1; }
+    }
+
+    if (i >= orig.size()) return;
+    char quote = orig[i];
+    if (!(quote == '"' || quote == '\'')) return;
+    // find closing quote (last character expected to be same quote)
+    if (orig.size() < i + 2) return;
+    size_t end = orig.size() - 1;
+    if (orig[end] != quote) return;
+
+    std::string inner = orig.substr(i + 1, end - (i + 1));
+    std::string out;
+    out.reserve(inner.size());
+
+    auto push_codepoint_utf8 = [&](uint32_t cp) {
+        if (cp <= 0x7F) out.push_back(static_cast<char>(cp));
+        else if (cp <= 0x7FF) {
+            out.push_back(static_cast<char>(0xC0 | ((cp >> 6) & 0x1F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp <= 0xFFFF) {
+            out.push_back(static_cast<char>(0xE0 | ((cp >> 12) & 0x0F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            if (cp > 0x10FFFF) cp = 0xFFFD;
+            out.push_back(static_cast<char>(0xF0 | ((cp >> 18) & 0x07)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    };
+
+    for (size_t p = 0; p < inner.size();) {
+        char c = inner[p];
+        if (c != '\\') {
+            out.push_back(c);
+            ++p;
+            continue;
+        }
+        // backslash escape
+        ++p;
+        if (p >= inner.size()) {
+            diagnostics.push_back(Diagnostic{.message = "trailing backslash in literal", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            break;
+        }
+        char e = inner[p++];
+        if (e == 'n') { out.push_back('\n'); out.back() = '\n'; continue; }
+        if (e == 't') { out.push_back('\t'); out.back() = '\t'; continue; }
+        if (e == 'r') { out.push_back('\r'); out.back() = '\r'; continue; }
+        if (e == 'a') { out.push_back(static_cast<char>(0x07)); continue; }
+        if (e == 'b') { out.push_back(static_cast<char>(0x08)); continue; }
+        if (e == 'f') { out.push_back(static_cast<char>(0x0C)); continue; }
+        if (e == 'v') { out.push_back(static_cast<char>(0x0B)); continue; }
+        if (e == '\\') { out.push_back('\\'); out.back() = '\\'; continue; }
+        if (e == '"') { out.push_back('"'); continue; }
+        if (e == '\'') { out.push_back('\''); continue; }
+        if (e == '?') { out.push_back('?'); continue; }
+
+        if (e == 'x') {
+            // hex sequence: one or more hex digits
+            size_t start = p;
+            uint32_t val = 0;
+            while (p < inner.size() && isxdigit(static_cast<unsigned char>(inner[p]))) {
+                char ch = inner[p++];
+                val = (val << 4) + (uint32_t)( (ch>='0'&&ch<='9') ? ch - '0' : (ch>='a'&&ch<='f') ? 10 + ch - 'a' : 10 + ch - 'A');
+            }
+            if (p == start) {
+                diagnostics.push_back(Diagnostic{.message = "\'\\x\' escape with no hex digits", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            }
+            push_codepoint_utf8(val);
+            continue;
+        }
+
+        if (e == 'u' || e == 'U') {
+            int need = (e == 'u') ? 4 : 8;
+            uint32_t val = 0;
+            int consumed = 0;
+            while (consumed < need && p < inner.size() && isxdigit(static_cast<unsigned char>(inner[p]))) {
+                char ch = inner[p++]; ++consumed;
+                val = (val << 4) + (uint32_t)( (ch>='0'&&ch<='9') ? ch - '0' : (ch>='a'&&ch<='f') ? 10 + ch - 'a' : 10 + ch - 'A');
+            }
+            if (consumed != need) {
+                diagnostics.push_back(Diagnostic{.message = "truncated Unicode escape", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            }
+            // replace surrogates and out-of-range
+            if (val >= 0xD800 && val <= 0xDFFF) val = 0xFFFD;
+            if (val > 0x10FFFF) val = 0xFFFD;
+            push_codepoint_utf8(val);
+            continue;
+        }
+
+        // octal escape: up to 3 octal digits, including the digit we already saw if it was octal
+        if (e >= '0' && e <= '7') {
+            uint32_t val = (uint32_t)(e - '0');
+            int cnt = 1;
+            while (cnt < 3 && p < inner.size() && inner[p] >= '0' && inner[p] <= '7') {
+                val = (val << 3) + (uint32_t)(inner[p++] - '0');
+                ++cnt;
+            }
+            push_codepoint_utf8(val);
+            continue;
+        }
+
+        // default: unknown escape, emit the character itself
+        out.push_back(e);
+    }
+    // For string literals, rebuild lexeme and attach decoded metadata
+    if (tok.kind == PPTokenKind::StringLiteral) {
+        std::string rebuilt = prefix + std::string(1, quote) + out + std::string(1, quote);
+        tok.lexeme = rebuilt;
+        tok.decodedString = out;
+        return;
+    }
+
+    // For character constants, compute numeric value by packing decoded bytes.
+    if (tok.kind == PPTokenKind::CharConst) {
+        std::string rebuilt = prefix + std::string(1, quote) + out + std::string(1, quote);
+        tok.lexeme = rebuilt;
+        unsigned int acc = 0;
+        for (unsigned char uc : out) acc = (acc << 8) | static_cast<unsigned int>(uc);
+        tok.decodedCharValue = acc;
+        return;
+    }
+}
+
+// Helpers to push tokens into the output buffer while performing Phase 6
+// adjacent string literal concatenation when applicable.
+static std::string extractLiteralPrefix(const std::string &lex) {
+    size_t i = 0;
+    if (lex.size() >= 3 && lex[0] == 'u' && lex[1] == '8') return "u8";
+    if (lex.size() >= 2 && (lex[0] == 'u' || lex[0] == 'U' || lex[0] == 'L')) return std::string(1, lex[0]);
+    return std::string();
+}
+
+static bool extractLiteralInnerAndQuote(const std::string &lex, std::string &outInner, char &outQuote) {
+    outInner.clear(); outQuote = 0;
+    if (lex.empty()) return false;
+    size_t i = 0;
+    if (lex.size() >= 3 && lex[0] == 'u' && lex[1] == '8') i = 2;
+    else if (lex.size() >= 2 && (lex[0] == 'u' || lex[0] == 'U' || lex[0] == 'L')) i = 1;
+    if (i >= lex.size()) return false;
+    char q = lex[i];
+    if (!(q == '"' || q == '\'')) return false;
+    if (lex.size() < i + 2) return false;
+    if (lex.back() != q) return false;
+    outQuote = q;
+    outInner = lex.substr(i + 1, lex.size() - (i + 2));
+    return true;
+}
+
+// combine prefixes according to C rules (simplified):
+// - identical non-empty prefixes -> that prefix
+// - one empty and one non-empty -> the non-empty
+// - both empty -> empty
+// - different non-empty prefixes -> incompatible
+
+void Preprocessor::pushTokenBackWithConcat(const PPToken& tok) {
+    // Fast path: non-string literals just append
+    if (tok.kind != PPTokenKind::StringLiteral) {
+        outBuffer.push_back(tok);
+        return;
+    }
+
+    // Try to merge with a previous string literal if present.
+    int prevIdx = static_cast<int>(outBuffer.size()) - 1;
+    while (prevIdx >= 0 && (outBuffer[prevIdx].kind == PPTokenKind::Whitespace || outBuffer[prevIdx].kind == PPTokenKind::Newline)) {
+        --prevIdx;
+    }
+
+    if (prevIdx >= 0 && outBuffer[prevIdx].kind == PPTokenKind::StringLiteral) {
+        PPToken left = outBuffer[prevIdx];
+        PPToken right = tok;
+        normalizeLiteralToken(left);
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(left.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (extractLiteralInnerAndQuote(left.lexeme, lin, lq) && extractLiteralInnerAndQuote(right.lexeme, rin, rq) && lq == rq) {
+            std::string combinedPrefix;
+            if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+            else if (lpre.empty()) combinedPrefix = rpre;
+            else if (rpre.empty()) combinedPrefix = lpre;
+            else if (lpre == rpre) combinedPrefix = lpre;
+            else {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                outBuffer.push_back(tok);
+                return;
+            }
+
+            size_t keep = static_cast<size_t>(prevIdx) + 1;
+            while (outBuffer.size() > keep) outBuffer.pop_back();
+
+            std::string newInner = lin + rin;
+            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            outBuffer.back().lexeme = rebuilt;
+            outBuffer.back().span.end = tok.span.end;
+            outBuffer.back().copyPaint(tok);
+            return;
+        }
+        // fallthrough to lookahead
+    }
+
+    // No previous merge occurred; perform tokenizer lookahead to merge following adjacent literals.
+    PPToken merged = tok;
+    normalizeLiteralToken(merged);
+    std::vector<PPToken> saved; // whitespace/newline tokens between literals
+
+    while (true) {
+        auto ntOpt = readRawToken();
+        if (!ntOpt) break;
+        PPToken nt = *ntOpt;
+
+        if (nt.kind == PPTokenKind::Whitespace || nt.kind == PPTokenKind::Newline) {
+            saved.push_back(nt);
+            continue;
+        }
+
+        if (nt.kind != PPTokenKind::StringLiteral) {
+            outBuffer.push_back(merged);
+            for (const auto &s : saved) outBuffer.push_back(s);
+            outBuffer.push_back(nt);
+            return;
+        }
+
+        PPToken right = nt;
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(merged.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (!extractLiteralInnerAndQuote(merged.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq) || lq != rq) {
+            outBuffer.push_back(merged);
+            for (const auto &s : saved) outBuffer.push_back(s);
+            outBuffer.push_back(right);
+            return;
+        }
+
+        std::string combinedPrefix;
+        if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+        else if (lpre.empty()) combinedPrefix = rpre;
+        else if (rpre.empty()) combinedPrefix = lpre;
+        else if (lpre == rpre) combinedPrefix = lpre;
+        else {
+            diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+            outBuffer.push_back(merged);
+            for (const auto &s : saved) outBuffer.push_back(s);
+            outBuffer.push_back(right);
+            return;
+        }
+
+        std::string newInner = lin + rin;
+        std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+        merged.lexeme = rebuilt;
+        merged.span.end = right.span.end;
+        merged.copyPaint(right);
+        saved.clear();
+        // continue to merge more literals
+    }
+
+    // EOF reached: push merged token and any saved whitespace
+    outBuffer.push_back(merged);
+    for (const auto &s : saved) outBuffer.push_back(s);
+}
+
+void Preprocessor::pushTokenFrontWithConcat(const PPToken& tok) {
+    // Only attempt special Phase-6 behavior for string literals; otherwise push normally.
+    if (tok.kind != PPTokenKind::StringLiteral) { outBuffer.push_front(tok); return; }
+
+    // If there's an existing front literal (skipping whitespace), try to merge with it first.
+    size_t j = 0;
+    while (j < outBuffer.size() && (outBuffer[j].kind == PPTokenKind::Whitespace || outBuffer[j].kind == PPTokenKind::Newline)) ++j;
+    if (j < outBuffer.size() && outBuffer[j].kind == PPTokenKind::StringLiteral) {
+        PPToken left = tok;
+        PPToken right = outBuffer[j];
+        normalizeLiteralToken(left);
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(left.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (extractLiteralInnerAndQuote(left.lexeme, lin, lq) && extractLiteralInnerAndQuote(right.lexeme, rin, rq) && lq == rq) {
+            std::string combinedPrefix;
+            if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+            else if (lpre.empty()) combinedPrefix = rpre;
+            else if (rpre.empty()) combinedPrefix = lpre;
+            else if (lpre == rpre) combinedPrefix = lpre;
+            else {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                outBuffer.push_front(tok);
+                return;
+            }
+
+            // Remove leading whitespace/newline tokens before the target
+            for (size_t k = 0; k < j; ++k) outBuffer.pop_front();
+
+            // Build combined lexeme and update front element
+            std::string newInner = lin + rin;
+            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            outBuffer.front().lexeme = rebuilt;
+            outBuffer.front().span.begin = tok.span.begin;
+            outBuffer.front().copyPaint(tok);
+            return;
+        }
+    }
+
+    // Otherwise, perform lookahead on the raw token stream to merge following literals
+    PPToken merged = tok;
+    normalizeLiteralToken(merged);
+    std::vector<PPToken> saved; // whitespace/newline tokens between literals
+
+    while (true) {
+        auto ntOpt = readRawToken();
+        if (!ntOpt) break;
+        PPToken nt = *ntOpt;
+
+        if (nt.kind == PPTokenKind::Whitespace || nt.kind == PPTokenKind::Newline) {
+            saved.push_back(nt);
+            continue;
+        }
+
+        if (nt.kind != PPTokenKind::StringLiteral) {
+            // Insert nt, saved, and merged at front so order becomes: merged, saved..., nt, previous...
+            outBuffer.push_front(nt);
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+            outBuffer.push_front(merged);
+            return;
+        }
+
+        PPToken right = nt;
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(merged.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (!extractLiteralInnerAndQuote(merged.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq) || lq != rq) {
+            // cannot merge: push right then saved then merged
+            outBuffer.push_front(right);
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+            outBuffer.push_front(merged);
+            return;
+        }
+
+        std::string combinedPrefix;
+        if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+        else if (lpre.empty()) combinedPrefix = rpre;
+        else if (rpre.empty()) combinedPrefix = lpre;
+        else if (lpre == rpre) combinedPrefix = lpre;
+        else {
+            diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+            outBuffer.push_front(right);
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+            outBuffer.push_front(merged);
+            return;
+        }
+
+        std::string newInner = lin + rin;
+        std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+        merged.lexeme = rebuilt;
+        merged.span.end = right.span.end;
+        merged.copyPaint(right);
+        saved.clear();
+        // continue to attempt merging more literals
+    }
+
+    // EOF: push merged and saved (merged first)
+    for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+    outBuffer.push_front(merged);
+}
+
+    
 
 bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
     bool isPragmaOnce = isPragmaOnceDirective(tokens);

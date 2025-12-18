@@ -43,6 +43,12 @@ struct PPToken {
             paintedMacros.insert(m);
         }
     }
+    // Decoded metadata filled by the preprocessor Phase-5 normalization.
+    // For character constants this holds the numeric value after decoding
+    // escape sequences and UCNs. For string literals this holds the inner
+    // decoded bytes (not including surrounding quotes or prefix).
+    std::optional<uint32_t> decodedCharValue;
+    std::optional<std::string> decodedString;
 };
 
 class SourceBuffer {

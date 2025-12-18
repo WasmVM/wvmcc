@@ -144,6 +144,20 @@ if(EXISTS ${PP_INCLUDE_TEST})
     add_test(NAME pp-include COMMAND wvmcc-pp-include-test)
 endif()
 
+# Phase-5 normalization tests (escape decoding / UCNs)
+set(PP_NORMALIZE_TEST ${TEST_ROOT}/unit/pp/pp_normalize_test.cpp)
+if(EXISTS ${PP_NORMALIZE_TEST})
+    add_executable(wvmcc-pp-normalize-test ${PP_NORMALIZE_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp)
+    add_test(NAME pp-normalize COMMAND wvmcc-pp-normalize-test)
+endif()
+
+# Phase-6 adjacent string literal concatenation tests (merged)
+set(PP_CONCAT_TEST ${TEST_ROOT}/unit/pp/pp_concat_tests.cpp)
+if(EXISTS ${PP_CONCAT_TEST})
+    add_executable(wvmcc-pp-concat-test ${PP_CONCAT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp)
+    add_test(NAME pp-concat COMMAND wvmcc-pp-concat-test)
+endif()
+
 # Macro definition tests
 set(PP_MACRO_TEST ${TEST_ROOT}/unit/pp/pp_macro_test.cpp)
 if(EXISTS ${PP_MACRO_TEST})

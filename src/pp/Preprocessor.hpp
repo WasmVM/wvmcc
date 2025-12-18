@@ -189,7 +189,13 @@ private:
     bool handleIdentifierExpansionToken(const PPToken& tok);
     bool tryHandleFunctionLikeMacroInvocation(const Macro* m, const PPToken& tok);
     void emitTokenOrLineExpansion(const PPToken& tok);
+    // Normalize a literal token: decode escapes and UCNs in character and string literals
+    void normalizeLiteralToken(PPToken& tok);
     void skipToEndOfLineTokensFromTokenizer(Tokenizer& tz);
+    // Helpers to push tokens into the output buffer while performing Phase 6
+    // adjacent string literal concatenation when applicable.
+    void pushTokenBackWithConcat(const PPToken& tok);
+    void pushTokenFrontWithConcat(const PPToken& tok);
 
     // Runtime-facing directive handlers used by the streaming `ensureBuffer`
     void handleDirective();            // dispatches to the specific directive parsers
