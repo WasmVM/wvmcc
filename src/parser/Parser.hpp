@@ -30,6 +30,8 @@ private:
     DeclarationSpecifiers parseDeclarationSpecifiers();
     // parse a struct/union/enum specifier including member list when present
     DeclarationSpecifiers::TypeSpecifier parseStructOrUnionSpecifier();
+    // parse an enum specifier including enumerator list when present
+    DeclarationSpecifiers::TypeSpecifier parseEnumSpecifier();
     // parse the list of struct-declarations inside a struct/union body
     std::vector<StructMember> parseStructDeclarationList();
     // parse a single struct-declarator (optional declarator and optional bit-field width)
@@ -53,6 +55,8 @@ private:
     std::unordered_set<std::string> typedef_names{};
     // tag registry for struct/union names -> specifier (incomplete or complete)
     std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> tag_registry{};
+    // tag registry for enum names -> specifier (incomplete or complete)
+    std::unordered_map<std::string, std::shared_ptr<DeclarationSpecifiers::TypeSpecifier::EnumSpecifier>> enum_tag_registry{};
 };
 
 } // namespace wvmcc::parser

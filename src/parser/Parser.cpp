@@ -75,9 +75,15 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
                 // Handle compound type-specifiers. Special-case struct/union/enum
                 // to consume their optional name and optional braced definition.
                 if (s == "struct" || s == "union" || s == "enum") {
-                    auto ts = parseStructOrUnionSpecifier();
-                    specs.typeSpecifiers.push_back(ts);
-                    continue;
+                    if (s == "enum") {
+                        auto ts = parseEnumSpecifier();
+                        specs.typeSpecifiers.push_back(ts);
+                        continue;
+                    } else {
+                        auto ts = parseStructOrUnionSpecifier();
+                        specs.typeSpecifiers.push_back(ts);
+                        continue;
+                    }
                 }
 
             // Collect contiguous type-specifier keywords (e.g., "unsigned long int",
@@ -235,6 +241,88 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
             }
         }
     }
+    return ts;
+}
+
+DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
+    DeclarationSpecifiers::TypeSpecifier ts;
+    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Enum;
+    auto en = std::make_shared<DeclarationSpecifiers::TypeSpecifier::EnumSpecifier>();
+
+    // current token should be 'enum'
+    auto kw = lex.peek();
+    if (!kw) return ts;
+    // consume 'enum'
+    lex.next();
+
+    // optional identifier
+    std::optional<std::string> tagName;
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+        tagName = lex.peek()->lexeme();
+        en->name = *tagName;
+        lex.next();
+    }
+
+    // optional body
+    bool hasBodyNow = false;
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
+        // consume '{'
+        lex.next();
+        hasBodyNow = true;
+        en->hasBody = true;
+
+        // parse enumerator list
+        while (auto p = lex.peek()) {
+            if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
+
+            // expect identifier
+            if (p->kind() == TokenKind::Identifier) {
+                DeclarationSpecifiers::TypeSpecifier::EnumSpecifier::Enumerator ev;
+                ev.name = p->lexeme();
+                lex.next();
+                // optional '=' constant-expression
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "=") {
+                    lex.next();
+                    ev.value = parseExpr();
+                }
+                en->enumerators.push_back(std::move(ev));
+                // optional trailing comma
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                    lex.next();
+                    // allow trailing comma before '}'
+                    continue;
+                }
+                continue;
+            }
+            // if something else, attempt to recover by consuming token
+            lex.next();
+        }
+    }
+
+    ts.en = en;
+    // register or merge into enum tag registry if we have a tag name
+    if (tagName.has_value()) {
+        auto it = enum_tag_registry.find(*tagName);
+        if (it == enum_tag_registry.end()) {
+            enum_tag_registry[*tagName] = en;
+        } else {
+            auto existing = it->second;
+            if (existing && existing->hasBody && hasBodyNow) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "redefinition of enum tag '" + *tagName + "'";
+                d.span = kw->span;
+                diagnostics.push_back(std::move(d));
+            } else if (existing && !existing->hasBody && hasBodyNow) {
+                existing->hasBody = true;
+                existing->enumerators = en->enumerators;
+                ts.en = existing;
+            } else {
+                ts.en = existing;
+            }
+        }
+    }
+
     return ts;
 }
 

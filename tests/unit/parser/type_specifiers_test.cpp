@@ -19,6 +19,9 @@ int main() {
         ofs << "long double b;\n";
         ofs << "const volatile int c;\n";
         ofs << "inline int f() { return 0; }\n";
+        ofs << "enum E { A, B = 3, C } e1;\n";
+        ofs << "enum { X = 1, Y, };\n";
+        ofs << "enum F;\n";
     }
 
     Preprocessor pp;
@@ -39,6 +42,7 @@ int main() {
     ASTPrinter p(os);
     p.print(tu);
     std::string out = os.str();
+    std::cerr << "ASTPrinter output:\n" << out << std::endl;
 
     // Check for presence of expected specifier text
     if (out.find("unsigned") == std::string::npos) { std::remove(fname.c_str()); return 5; }
@@ -46,6 +50,10 @@ int main() {
     if (out.find("long") == std::string::npos || out.find("double") == std::string::npos) { std::remove(fname.c_str()); return 7; }
     if (out.find("const") == std::string::npos || out.find("volatile") == std::string::npos) { std::remove(fname.c_str()); return 8; }
     if (out.find("inline") == std::string::npos) { std::remove(fname.c_str()); return 9; }
+    if (out.find("name=\"E\"") == std::string::npos && out.find("<enum>") == std::string::npos) { std::remove(fname.c_str()); return 10; }
+    if (out.find("<Name>A</Name>") == std::string::npos || out.find("<Name>B</Name>") == std::string::npos || out.find("<Name>C</Name>") == std::string::npos) { std::remove(fname.c_str()); return 11; }
+    if (out.find("<Name>X</Name>") == std::string::npos || out.find("<Name>Y</Name>") == std::string::npos) { std::remove(fname.c_str()); return 12; }
+    if (out.find("enum F") == std::string::npos && out.find("name=\"F\"") == std::string::npos) { std::remove(fname.c_str()); return 13; }
 
     std::cout << "type-specifiers-test: OK" << std::endl;
     std::remove(fname.c_str());

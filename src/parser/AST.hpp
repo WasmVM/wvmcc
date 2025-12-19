@@ -87,9 +87,12 @@ struct DeclarationSpecifiers {
     // Aggregate representation for type-specifiers (simple keyword sequences,
     // struct/union specifiers, typedef-names, or other combined forms).
     struct TypeSpecifier {
-        enum class Kind { Simple, StructOrUnion, TypedefName, Other } kind{Kind::Other};
+        enum class Kind { Simple, StructOrUnion, Enum, TypedefName, Other } kind{Kind::Other};
         std::vector<SimpleTypeSpecifier> simple; // used when Kind==Simple
         std::shared_ptr<StructOrUnionSpecifier> su; // used when Kind==StructOrUnion
+        // enum specifier (used when Kind==Enum)
+        struct EnumSpecifier;
+        std::shared_ptr<EnumSpecifier> en;
         std::string text; // textual fallback (typedef-name or other combined form)
     };
 
@@ -131,6 +134,17 @@ struct StructOrUnionSpecifier {
     std::optional<std::string> name;
     bool hasBody{false};
     std::vector<StructMember> members;
+};
+
+// Minimal holder for enum specifiers (name + whether body present + enumerators).
+struct DeclarationSpecifiers::TypeSpecifier::EnumSpecifier {
+    std::optional<std::string> name;
+    bool hasBody{false};
+    struct Enumerator {
+        std::string name;
+        std::optional<ExprPtr> value; // optional constant-expression
+    };
+    std::vector<Enumerator> enumerators;
 };
 
 // ExternalDecl is either a function definition or a declaration

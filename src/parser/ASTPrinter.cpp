@@ -181,6 +181,28 @@ void ASTPrinter::emitSpecifiersEntries(const DeclarationSpecifiers &specs) {
                     }
                 } else if (!ts.text.empty()) simpleTag("Spec", ts.text);
                 break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Enum:
+                if (ts.en) {
+                    std::string name;
+                    if (ts.en->name.has_value()) name = *ts.en->name;
+                    if (!ts.en->hasBody) {
+                        std::string repr = "enum";
+                        if (!name.empty()) { repr += " "; repr += name; }
+                        simpleTag("Spec", repr);
+                    } else {
+                        openTag("enum", (!name.empty() ? std::string("name=\"") + esc(name) + std::string("\"") : std::string()));
+                        openTag("Enumerators");
+                        for (auto &ev : ts.en->enumerators) {
+                            openTag("Enumerator");
+                            simpleTag("Name", ev.name);
+                            if (ev.value) { openTag("Value"); visitExpr(*ev.value); closeTag("Value"); }
+                            closeTag("Enumerator");
+                        }
+                        closeTag("Enumerators");
+                        closeTag("enum");
+                    }
+                } else if (!ts.text.empty()) simpleTag("Spec", ts.text);
+                break;
             case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
             case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
                 if (!ts.text.empty()) simpleTag("Spec", ts.text);
