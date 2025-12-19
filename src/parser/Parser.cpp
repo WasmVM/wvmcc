@@ -51,6 +51,26 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
         }
         if (t->kind() != TokenKind::Keyword) break;
         const std::string s = t->lexeme();
+        // storage-class specifiers
+        if (storage.count(s)) {
+            if (s == "typedef") specs.addStorage(StorageClass::Typedef);
+            else if (s == "extern") specs.addStorage(StorageClass::Extern);
+            else if (s == "static") specs.addStorage(StorageClass::Static);
+            else if (s == "auto") specs.addStorage(StorageClass::Auto);
+            else if (s == "register") specs.addStorage(StorageClass::Register);
+            lex.next();
+            continue;
+        }
+        // type qualifiers
+        if (typequal.count(s)) {
+            if (s == "const") specs.addTypeQual(TypeQualifier::Const);
+            else if (s == "volatile") specs.addTypeQual(TypeQualifier::Volatile);
+            else if (s == "restrict") specs.addTypeQual(TypeQualifier::Restrict);
+            else if (s == "_Atomic") specs.addTypeQual(TypeQualifier::Atomic);
+            lex.next();
+            continue;
+        }
+
         if (types.count(s)) {
                 // Handle compound type-specifiers. Special-case struct/union/enum
                 // to consume their optional name and optional braced definition.
@@ -181,56 +201,10 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
         hasBodyNow = true;
         su->hasBody = true;
 
-        // parse member list until matching '}'
-        while (auto p = lex.peek()) {
-            if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
-
-            // parse a member-declaration: specifiers + optional declarator-list + ';'
-            auto memberSpecs = parseDeclarationSpecifiers();
-
-            // if next is ';' -> anonymous/member without declarators
-            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
-                // consume ';'
-                lex.next();
-                StructMember m;
-                m.specifiers = memberSpecs;
-                su->members.push_back(std::move(m));
-                continue;
-            }
-
-            // otherwise parse declarator-list
-            StructMember m;
-            m.specifiers = memberSpecs;
-            while (true) {
-                // simplistic declarator: identifier (fallback)
-                StructDeclarator sd;
-                if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
-                    auto id = make_ast<Declarator>();
-                    id->id.name = lex.peek()->lexeme();
-                    sd.declarator = id;
-                    lex.next();
-                }
-
-                // optional bit-field width ': const-expr'
-                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":") {
-                    lex.next();
-                    sd.bitfieldWidth = parseExpr();
-                }
-
-                m.declarators.push_back(std::move(sd));
-
-                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
-                    lex.next();
-                    continue;
-                }
-                break;
-            }
-
-            // require terminating ';'
-            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") lex.next();
-
-            su->members.push_back(std::move(m));
-        }
+        // parse members using helper which implements full struct-declaration-list
+        su->members = parseStructDeclarationList();
+        // consume the trailing '}' if not already consumed by helper (helper stops at '}' and consumes it)
+        // parseStructDeclarationList consumes the closing '}' itself, so nothing to do here
     }
 
     ts.su = su;
@@ -262,6 +236,69 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
         }
     }
     return ts;
+}
+
+StructDeclarator Parser::parseStructDeclarator() {
+    StructDeclarator sd;
+    // optional declarator
+    if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || lex.peek()->kind() == TokenKind::Punctuator)) {
+        // accept identifier as declarator-id
+        if (lex.peek()->kind() == TokenKind::Identifier) {
+            auto id = make_ast<Declarator>();
+            id->id.name = lex.peek()->lexeme();
+            sd.declarator = id;
+            lex.next();
+        } else {
+            // other declarator forms (not fully implemented): leave declarator null and continue
+        }
+    }
+
+    // optional bit-field width
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":") {
+        lex.next();
+        sd.bitfieldWidth = parseExpr();
+    }
+    return sd;
+}
+
+std::vector<StructMember> Parser::parseStructDeclarationList() {
+    std::vector<StructMember> members;
+    // expect that '{' has already been consumed by caller
+    while (auto p = lex.peek()) {
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
+
+        // parse specifiers
+        auto memberSpecs = parseDeclarationSpecifiers();
+
+        // if next is ';' -> anonymous member with no declarators
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
+            lex.next();
+            StructMember m;
+            m.specifiers = memberSpecs;
+            members.push_back(std::move(m));
+            continue;
+        }
+
+        // otherwise parse struct-declarator-list
+        StructMember m;
+        m.specifiers = memberSpecs;
+        while (true) {
+            StructDeclarator sd = parseStructDeclarator();
+            m.declarators.push_back(std::move(sd));
+
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                lex.next();
+                continue;
+            }
+            break;
+        }
+
+        // require terminating ';'
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") lex.next();
+
+        members.push_back(std::move(m));
+    }
+    return members;
 }
 
 bool Parser::acceptPunct(const std::string &p) {

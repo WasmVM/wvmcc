@@ -30,6 +30,10 @@ private:
     DeclarationSpecifiers parseDeclarationSpecifiers();
     // parse a struct/union/enum specifier including member list when present
     DeclarationSpecifiers::TypeSpecifier parseStructOrUnionSpecifier();
+    // parse the list of struct-declarations inside a struct/union body
+    std::vector<StructMember> parseStructDeclarationList();
+    // parse a single struct-declarator (optional declarator and optional bit-field width)
+    StructDeclarator parseStructDeclarator();
 
     
     ExternalDeclPtr parseExternalDecl();
