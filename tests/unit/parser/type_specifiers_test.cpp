@@ -42,7 +42,6 @@ int main() {
     ASTPrinter p(os);
     p.print(tu);
     std::string out = os.str();
-    std::cerr << "ASTPrinter output:\n" << out << std::endl;
 
     // Check for presence of expected specifier text
     if (out.find("unsigned") == std::string::npos) { std::remove(fname.c_str()); return 5; }
