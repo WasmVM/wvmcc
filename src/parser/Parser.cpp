@@ -1,6 +1,7 @@
 #include "Parser.hpp"
 #include <cassert>
 #include <algorithm>
+#include <iostream>
 
 namespace wvmcc::parser {
 
@@ -349,6 +350,156 @@ StructDeclarator Parser::parseStructDeclarator() {
     return sd;
 }
 
+DeclaratorPtr Parser::parseDeclarator() {
+    DeclaratorPtr d = nullptr;
+
+    // parse pointer sequence: '*' type-qualifier-listopt
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "*") {
+        // consume '*'
+        lex.next();
+        TypeQualifier q = TypeQualifier::None;
+        // optional type qualifiers
+        while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+            const std::string k = lex.peek()->lexeme();
+            if (k == "const") { q |= TypeQualifier::Const; lex.next(); continue; }
+            if (k == "volatile") { q |= TypeQualifier::Volatile; lex.next(); continue; }
+            if (k == "restrict") { q |= TypeQualifier::Restrict; lex.next(); continue; }
+            if (k == "_Atomic") { q |= TypeQualifier::Atomic; lex.next(); continue; }
+            break;
+        }
+        auto p = make_ast<Declarator>();
+        p->kind = Declarator::Kind::Pointer;
+        p->ptrQual = q;
+        p->inner = d;
+        d = p;
+    }
+
+    // direct-declarator: identifier or ( declarator )
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+        auto id = make_ast<Declarator>();
+        id->kind = Declarator::Kind::Identifier;
+        id->id.name = lex.peek()->lexeme();
+        id->inner = d;
+        lex.next();
+        d = id;
+    } else if (acceptPunct("(")) {
+        auto inner = parseDeclarator();
+        acceptPunct(")");
+        if (inner) {
+            inner->inner = d;
+            d = inner;
+        } else {
+            auto nd = make_ast<Declarator>();
+            nd->kind = Declarator::Kind::Nested;
+            nd->inner = d;
+            d = nd;
+        }
+    }
+
+    // handle trailing suffixes: arrays and function parameter lists
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        auto p = lex.peek();
+        if (p->lexeme() == "[") {
+            lex.next();
+            bool isStatic = false;
+            TypeQualifier qual = TypeQualifier::None;
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "static") { isStatic = true; lex.next(); }
+            // optional qualifiers
+            while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+                const std::string k = lex.peek()->lexeme();
+                if (k == "const") { qual |= TypeQualifier::Const; lex.next(); continue; }
+                if (k == "volatile") { qual |= TypeQualifier::Volatile; lex.next(); continue; }
+                if (k == "restrict") { qual |= TypeQualifier::Restrict; lex.next(); continue; }
+                if (k == "_Atomic") { qual |= TypeQualifier::Atomic; lex.next(); continue; }
+                break;
+            }
+
+            // [ * ] form
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "*") {
+                lex.next();
+                acceptPunct("]");
+                auto arr = make_ast<Declarator>();
+                arr->kind = Declarator::Kind::Array;
+                arr->array.isStar = true;
+                arr->array.isStatic = isStatic;
+                arr->array.qual = qual;
+                arr->inner = d;
+                d = arr;
+                continue;
+            }
+
+            std::optional<ExprPtr> size;
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "]")) {
+                size = parseExpr();
+            }
+            acceptPunct("]");
+            auto arr = make_ast<Declarator>();
+            arr->kind = Declarator::Kind::Array;
+            arr->array.size = size;
+            arr->array.isStatic = isStatic;
+            arr->array.qual = qual;
+            arr->inner = d;
+            d = arr;
+            continue;
+        } else if (p->lexeme() == "(") {
+            lex.next();
+            std::vector<Parameter> params;
+            std::vector<std::string> idlist;
+            bool hasParamTypeList = false;
+
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                // heuristics: if it starts with a type keyword or a typedef-name treat as parameter-type-list
+                if (lex.peek() && (lex.peek()->kind() == TokenKind::Keyword || (lex.peek()->kind() == TokenKind::Identifier && typedef_names.count(lex.peek()->lexeme())))) {
+                    hasParamTypeList = true;
+                    while (true) {
+                        auto pspecs = parseDeclarationSpecifiers();
+                        Parameter param;
+                        if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || (lex.peek()->kind() == TokenKind::Punctuator && (lex.peek()->lexeme() == "(" || lex.peek()->lexeme() == "*")) )) {
+                            param.declarator = parseDeclarator();
+                        } else {
+                            param.declarator = nullptr; // abstract-declarator not implemented
+                        }
+                        params.push_back(param);
+                        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                            lex.next();
+                            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") break;
+                            continue;
+                        }
+                        break;
+                    }
+                } else {
+                    // identifier-list (K&R style)
+                    while (true) {
+                        if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+                            idlist.push_back(lex.peek()->lexeme());
+                            lex.next();
+                        } else {
+                            break;
+                        }
+                        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                            lex.next();
+                            continue;
+                        }
+                        break;
+                    }
+                }
+            }
+
+            acceptPunct(")");
+            auto fn = make_ast<Declarator>();
+            fn->kind = Declarator::Kind::Function;
+            fn->function.params = params;
+            fn->function.hasParamTypeList = hasParamTypeList;
+            fn->function.identifierList = idlist;
+            fn->inner = d;
+            d = fn;
+            continue;
+        } else break;
+    }
+
+    return d;
+}
+
 std::vector<StructMember> Parser::parseStructDeclarationList() {
     std::vector<StructMember> members;
     // expect that '{' has already been consumed by caller
@@ -421,13 +572,13 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     // gather specifiers (keywords like 'int', 'static', etc.)
     auto specs = parseDeclarationSpecifiers();
 
-    auto nameTok = lex.peek();
-    if (!nameTok) return nullptr;
-
-    std::string name;
-    if (nameTok->kind() == TokenKind::Identifier) {
-        name = nameTok->lexeme();
-        lex.next();
+    // Try to parse an optional declarator (may be null for declarations like "struct S;")
+    DeclaratorPtr decl = nullptr;
+    // Only attempt to parse a declarator if next token could start one
+    if (lex.peek()) {
+        if (lex.peek()->kind() == TokenKind::Identifier || (lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") || (lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "*")) {
+            decl = parseDeclarator();
+        }
     }
 
     // Early constraint check: storage-class specifiers 'auto' and 'register' are invalid
@@ -437,39 +588,43 @@ ExternalDeclPtr Parser::parseExternalDecl() {
             wvmcc::Diagnostic d;
             d.severity = wvmcc::Diagnostic::Severity::Error;
             d.message = "storage-class specifier 'auto' is not allowed in external declarations";
-            if (nameTok) d.span = nameTok->span;
+            if (decl) d.span = decl->span; 
             diagnostics.push_back(std::move(d));
         }
         if (specs.hasStorage(StorageClass::Register)) {
             wvmcc::Diagnostic d;
             d.severity = wvmcc::Diagnostic::Severity::Error;
             d.message = "storage-class specifier 'register' is not allowed in external declarations";
-            if (nameTok) d.span = nameTok->span;
+            if (decl) d.span = decl->span;
             diagnostics.push_back(std::move(d));
         }
     }
 
-    // if followed by '(' => function (params ignored for now)
-    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
-        // consume until matching ')'
-        lex.next();
-        int depth = 1;
-        while (auto p = lex.peek()) {
-            if (p->kind() == TokenKind::Punctuator) {
-                if (p->lexeme() == "(") ++depth;
-                else if (p->lexeme() == ")") {
-                    --depth;
-                    lex.next();
-                    if (depth == 0) break;
-                    continue;
-                }
-            }
-            lex.next();
+    // If we parsed a declarator and it (or its nested form) is a function declarator,
+    // determine whether this is a function definition (followed by '{') or a prototype/declaration.
+    std::string name;
+    if (decl) {
+        // find the identifier in nested declarator chain
+        auto cur = decl;
+        while (cur) {
+            if (cur->kind == Declarator::Kind::Identifier && !cur->id.name.empty()) { name = cur->id.name; break; }
+            cur = cur->inner.has_value() ? *cur->inner : nullptr;
         }
+    }
 
-        // if next is '{' parse body -> function definition
+    // Helper: find if declarator chain contains a Function kind
+    auto containsFunction = [&](const DeclaratorPtr &dptr)->bool {
+        auto cur = dptr;
+        while (cur) {
+            if (cur->kind == Declarator::Kind::Function) return true;
+            cur = cur->inner.has_value() ? *cur->inner : nullptr;
+        }
+        return false;
+    };
+
+    if (decl && containsFunction(decl)) {
         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
-            auto f = parseFunctionDef(specs, name);
+            auto f = parseFunctionDef(specs, decl);
             if (!f) return nullptr;
             auto ext = make_ast_with_span<ExternalDecl>(f->span);
             ext->decl = f;
@@ -486,7 +641,6 @@ ExternalDeclPtr Parser::parseExternalDecl() {
                         d.span = f->span;
                         diagnostics.push_back(std::move(d));
                     } else {
-                        // upgrade tentative -> definitive
                         it->second = std::make_pair(f->span, true);
                     }
                 } else {
@@ -496,8 +650,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
 
             return ext;
         } else {
-            // prototype declaration
-            auto d = parseDeclaration(specs, name);
+            auto d = parseDeclaration(specs, decl);
             if (!d) return nullptr;
             auto ext = make_ast_with_span<ExternalDecl>(d->span);
             ext->decl = d;
@@ -505,8 +658,8 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         }
     }
 
-    // otherwise if the next token is a semicolon (e.g., "struct S;" or "typedef int;") treat as declaration with no declarator
-    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
+    // if there was no declarator and the next token is a semicolon, treat as declaration with no declarator
+    if (!decl && lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
         auto d = parseDeclaration(specs, "");
         if (!d) return nullptr;
         auto ext = make_ast_with_span<ExternalDecl>(d->span);
@@ -514,32 +667,30 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         return ext;
     }
 
-    // otherwise if the name exists, treat as declaration
-    if (!name.empty()) {
-        auto d = parseDeclaration(specs, name);
+    // otherwise, if we have a declarator (non-function) treat as declaration
+    if (decl) {
+        auto d = parseDeclaration(specs, decl);
         if (!d) return nullptr;
 
-        // For object declarations with internal linkage (static): consider tentative/definitive semantics
-        if (specs.hasStorage(StorageClass::Static)) {
+        // For object declarations with internal linkage (static): tentative/definitive semantics
+        if (!decl->id.name.empty() && specs.hasStorage(StorageClass::Static)) {
+            std::string nm = decl->id.name;
             bool is_definitive = d->initializer.has_value();
-            auto it = internal_definitions.find(name);
+            auto it = internal_definitions.find(nm);
             if (is_definitive) {
                 if (it != internal_definitions.end() && it->second.second) {
-                    // previous definitive exists -> error
                     wvmcc::Diagnostic diag;
                     diag.severity = wvmcc::Diagnostic::Severity::Error;
-                    diag.message = "duplicate internal definition of '" + name + "' in translation unit";
+                    diag.message = "duplicate internal definition of '" + nm + "' in translation unit";
                     diag.span = d->span;
                     diagnostics.push_back(std::move(diag));
                 } else if (it != internal_definitions.end()) {
-                    // upgrade tentative -> definitive
                     it->second = std::make_pair(d->span, true);
                 } else {
-                    internal_definitions[name] = std::make_pair(d->span, true);
+                    internal_definitions[nm] = std::make_pair(d->span, true);
                 }
             } else {
-                // tentative definition: record if no definitive recorded yet
-                if (it == internal_definitions.end()) internal_definitions[name] = std::make_pair(d->span, false);
+                if (it == internal_definitions.end()) internal_definitions[nm] = std::make_pair(d->span, false);
             }
         }
 
@@ -569,13 +720,11 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     return nullptr;
 }
 
-FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, const std::string &name) {
+FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, const DeclaratorPtr &decl) {
     if (!acceptPunct("{")) return nullptr;
     auto f = make_ast<FunctionDef>();
     f->specifiers = specs;
-    auto d = make_ast<Declarator>();
-    d->id.name = name;
-    f->declarator = d;
+    f->declarator = decl;
     f->body = parseCompoundBody();
     return f;
 }
@@ -607,6 +756,29 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
         }
     }
 
+    return decl;
+}
+
+DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, const DeclaratorPtr &declr) {
+    auto decl = make_ast<Declaration>();
+    decl->specifiers = specs;
+    if (declr) decl->declarator = declr;
+
+    while (auto p = lex.peek()) {
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == ";") { lex.next(); break; }
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == "=") {
+            lex.next();
+            decl->initializer = parseExpr();
+            while (auto q = lex.peek()) { if (q->kind()==TokenKind::Punctuator && q->lexeme()==";") { lex.next(); break; } lex.next(); }
+            break;
+        }
+        lex.next();
+    }
+    if (specs.hasStorage(StorageClass::Typedef)) {
+        if (decl->declarator && !decl->declarator->id.name.empty()) {
+            typedef_names.insert(decl->declarator->id.name);
+        }
+    }
     return decl;
 }
 

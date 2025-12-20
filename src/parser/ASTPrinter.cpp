@@ -2,6 +2,7 @@
 #include "ASTPrinter.hpp"
 #include <sstream>
 #include <type_traits>
+#include <iostream>
 
 namespace wvmcc::parser {
 
@@ -53,13 +54,14 @@ std::string ASTPrinter::esc(const std::string &s) {
 }
 
 void ASTPrinter::print(const TranslationUnitPtr &tu) {
-    openTag("TranslationUnit", "span=\"" + esc(toString(tu->span)) + "\"");
-    for (const auto &ext : tu->externals) visitExternalDecl(ext);
+    if (!tu) return;
+    openTag("TranslationUnit", "");
+    for (size_t i = 0; i < tu->externals.size(); ++i) visitExternalDecl(tu->externals[i]);
     closeTag("TranslationUnit");
 }
 
 void ASTPrinter::visitExternalDecl(const ExternalDeclPtr &d) {
-    openTag("ExternalDecl", "span=\"" + esc(toString(d->span)) + "\"");
+    openTag("ExternalDecl", "");
     std::visit([this](auto &&arg){ using T = std::decay_t<decltype(arg)>;
         if constexpr (std::is_same_v<T, FunctionDefPtr>) this->visitFunctionDef(arg);
         else if constexpr (std::is_same_v<T, DeclarationPtr>) this->visitDeclaration(arg);
@@ -68,7 +70,7 @@ void ASTPrinter::visitExternalDecl(const ExternalDeclPtr &d) {
 }
 
 void ASTPrinter::visitFunctionDef(const FunctionDefPtr &f) {
-    openTag("FunctionDef", "span=\"" + esc(toString(f->span)) + "\"");
+    openTag("FunctionDef", "");
     // specifiers
     if (!f->specifiers.empty()) {
         openTag("Specifiers");
@@ -94,18 +96,10 @@ void ASTPrinter::visitFunctionDef(const FunctionDefPtr &f) {
 }
 
 void ASTPrinter::visitDeclaration(const DeclarationPtr &d) {
-    openTag("Declaration", "span=\"" + esc(toString(d->span)) + "\"");
-    if (!d->specifiers.empty()) {
-        openTag("Specifiers");
-        emitSpecifiersEntries(d->specifiers);
-        closeTag("Specifiers");
-    }
+    openTag("Declaration", "");
+    if (!d->specifiers.empty()) { openTag("Specifiers"); emitSpecifiersEntries(d->specifiers); closeTag("Specifiers"); }
     if (d->declarator) visitDeclarator(d->declarator);
-    if (d->initializer) {
-        openTag("Initializer");
-        visitExpr(*d->initializer);
-        closeTag("Initializer");
-    }
+    if (d->initializer) { openTag("Initializer"); visitExpr(*d->initializer); closeTag("Initializer"); }
     closeTag("Declaration");
 }
 
@@ -164,7 +158,7 @@ void ASTPrinter::emitSpecifiersEntries(const DeclarationSpecifiers &specs) {
                                 openTag("Declarator");
                                 if (sd.declarator) {
                                     if (!sd.declarator->id.name.empty()) simpleTag("Id", sd.declarator->id.name);
-                                    if (sd.declarator->inner) visitDeclarator(*sd.declarator->inner);
+                                    if (sd.declarator->inner && *sd.declarator->inner) visitDeclarator(*sd.declarator->inner);
                                 }
                                 if (sd.bitfieldWidth) {
                                     openTag("Bitfield");
@@ -220,13 +214,9 @@ void ASTPrinter::emitSpecifiersEntries(const DeclarationSpecifiers &specs) {
 }
 
 void ASTPrinter::visitDeclarator(const DeclaratorPtr &d) {
-    openTag("Declarator", "span=\"" + esc(toString(d->span)) + "\"");
+    openTag("Declarator", "");
     simpleTag("Id", d->id.name);
-    if (d->inner) {
-        openTag("Inner");
-        visitDeclarator(*d->inner);
-        closeTag("Inner");
-    }
+    if (d->inner && *d->inner) { openTag("Inner"); visitDeclarator(*d->inner); closeTag("Inner"); }
     closeTag("Declarator");
 }
 
@@ -237,7 +227,7 @@ void ASTPrinter::visitTypeNode(const TypeNodePtr &t) {
 }
 
 void ASTPrinter::visitBlockItem(const BlockItemPtr &b) {
-    openTag("BlockItem", "span=\"" + esc(toString(b->span)) + "\"");
+    openTag("BlockItem", "");
     if (std::holds_alternative<DeclarationPtr>(b->item)) {
         visitDeclaration(std::get<DeclarationPtr>(b->item));
     } else {
@@ -248,7 +238,7 @@ void ASTPrinter::visitBlockItem(const BlockItemPtr &b) {
 
 void ASTPrinter::visitStmt(const StmtPtr &s) {
     if (!s) return;
-    openTag("Stmt", "kind=\"" + std::to_string(static_cast<int>(s->kind)) + "\" span=\"" + esc(toString(s->span)) + "\"");
+    openTag("Stmt", "kind=\"" + std::to_string(static_cast<int>(s->kind)) + "\"");
     switch (s->kind) {
         case Stmt::Kind::Expr: {
             auto es = std::static_pointer_cast<ExprStmt>(s);
@@ -301,7 +291,7 @@ void ASTPrinter::visitStmt(const StmtPtr &s) {
 
 void ASTPrinter::visitExpr(const ExprPtr &e) {
     if (!e) return;
-    openTag("Expr", "kind=\"" + std::to_string(static_cast<int>(e->kind)) + "\" span=\"" + esc(toString(e->span)) + "\"");
+    openTag("Expr", "kind=\"" + std::to_string(static_cast<int>(e->kind)) + "\"");
     switch (e->kind) {
         case Expr::Kind::Ident: {
             auto id = std::static_pointer_cast<IdentifierExpr>(e);

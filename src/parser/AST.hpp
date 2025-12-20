@@ -28,6 +28,7 @@ struct ExternalDecl;
 struct FunctionDef;
 struct Declaration;
 struct Declarator;
+struct Parameter;
 struct TypeNode;
 struct StructOrUnionSpecifier;
 struct Expr;
@@ -164,6 +165,26 @@ struct Declarator : Node {
     struct Id { std::string name; } id;
     // nested declarator form (for pointers/arrays/functions)
     std::optional<DeclaratorPtr> inner;
+
+    enum class Kind { Identifier, Pointer, Array, Function, Nested } kind{Kind::Identifier};
+
+    // Pointer-specific info
+    TypeQualifier ptrQual{TypeQualifier::None};
+
+    // Array-specific info
+    struct ArrayInfo {
+        std::optional<ExprPtr> size; // optional assignment-expression
+        bool isStatic{false};
+        bool isStar{false}; // means '[ * ]'
+        TypeQualifier qual{TypeQualifier::None};
+    } array;
+
+    // Function-specific info
+    struct FunctionInfo {
+        std::vector<Parameter> params; // parameter-type-list
+        bool hasParamTypeList{false};
+        std::vector<std::string> identifierList; // identifier-list (old K&R style)
+    } function;
 };
 
 struct Parameter {

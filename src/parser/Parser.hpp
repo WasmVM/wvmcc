@@ -37,10 +37,14 @@ private:
     // parse a single struct-declarator (optional declarator and optional bit-field width)
     StructDeclarator parseStructDeclarator();
 
+    // parse declarators (identifier, pointer, array, function)
+    DeclaratorPtr parseDeclarator();
+
     
     ExternalDeclPtr parseExternalDecl();
-    FunctionDefPtr parseFunctionDef(const DeclarationSpecifiers& specs, const std::string &name);
+    FunctionDefPtr parseFunctionDef(const DeclarationSpecifiers& specs, const DeclaratorPtr &decl);
     DeclarationPtr parseDeclaration(const DeclarationSpecifiers& specs, const std::string &name);
+    DeclarationPtr parseDeclaration(const DeclarationSpecifiers& specs, const DeclaratorPtr &decl);
 
     // statements/expressions (very small subset)
     std::vector<BlockItemPtr> parseCompoundBody();
