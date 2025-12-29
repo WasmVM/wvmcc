@@ -380,6 +380,34 @@ void ASTPrinter::visitExpr(const ExprPtr &e) {
             if (ie->index) visitExpr(ie->index);
             break;
         }
+        case Expr::Kind::PostfixUnary: {
+            auto pe = std::static_pointer_cast<PostfixUnaryExpr>(e);
+            if (pe->base) visitExpr(pe->base);
+            std::string op = (pe->op == PostfixUnaryExpr::Op::Inc) ? "++" : "--";
+            simpleTag("Op", op);
+            break;
+        }
+        case Expr::Kind::GenericSelection: {
+            auto ge = std::static_pointer_cast<GenericSelectionExpr>(e);
+            openTag("GenericSelection");
+            if (ge->controlling) { openTag("Controlling"); visitExpr(ge->controlling); closeTag("Controlling"); }
+            openTag("Associations");
+            for (auto &ga : ge->assocs) {
+                if (ga.isDefault) {
+                    openTag("Association", "kind=\"default\"");
+                    if (ga.expr) visitExpr(ga.expr);
+                    closeTag("Association");
+                } else {
+                    openTag("Association", "kind=\"type\"");
+                    if (ga.type) visitTypeNode(ga.type);
+                    if (ga.expr) visitExpr(ga.expr);
+                    closeTag("Association");
+                }
+            }
+            closeTag("Associations");
+            closeTag("GenericSelection");
+            break;
+        }
         default:
             break;
     }

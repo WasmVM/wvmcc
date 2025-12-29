@@ -945,7 +945,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             continue;
         }
 
-        auto expr = parseAssignmentExpression();
+        auto expr = parseExpression();
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
         auto es = make_ast<ExprStmt>();
         es->expr = expr;
@@ -990,6 +990,104 @@ ExprPtr Parser::parsePrimary() {
         sl->kind = Expr::Kind::String;
         return sl;
     }
+    // Generic selection: _Generic ( assignment-expression , generic-assoc-list )
+    if (t->kind() == TokenKind::Keyword && t->lexeme() == "_Generic") {
+        lex.next();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after _Generic"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+            return nullptr;
+        }
+        // consume '('
+        lex.next();
+        // parse controlling assignment-expression
+        ExprPtr ctrl = parseAssignmentExpression();
+        if (!ctrl) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected controlling expression in _Generic"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+        }
+        // expect comma
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ',' after controlling expression in _Generic"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+
+        std::vector<GenericAssociation> assocs;
+        bool defaultSeen = false;
+        // parse generic-assoc-list: one or more generic-association separated by ','
+        while (true) {
+            if (!(lex.peek())) break;
+            // check for default : assignment-expression
+            if (lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "default") {
+                lex.next();
+                if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+                    if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after default in _Generic"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+                } else lex.next();
+                ExprPtr ae = parseAssignmentExpression();
+                GenericAssociation ga; ga.isDefault = true; ga.type = nullptr; ga.expr = ae;
+                if (defaultSeen) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "duplicate default generic association in _Generic"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                }
+                defaultSeen = true;
+                assocs.push_back(std::move(ga));
+            } else {
+                // attempt to parse type-name using declaration specifiers heuristic
+                bool isTypeNameStart = false;
+                if (lex.peek()) {
+                    auto u = lex.peek();
+                    if (u->kind() == TokenKind::Keyword) {
+                        static const std::unordered_set<std::string> types = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum"};
+                        if (types.count(u->lexeme())) isTypeNameStart = true;
+                    } else if (u->kind() == TokenKind::Identifier) {
+                        if (typedef_names.count(u->lexeme())) isTypeNameStart = true;
+                    }
+                }
+                if (!isTypeNameStart) {
+                    // error: expected type-name or default
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected type name or 'default' in _Generic association"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                    // try to recover by consuming token
+                    lex.next();
+                } else {
+                    auto specs = parseDeclarationSpecifiers();
+                    // build minimal TypeNode from specs
+                    auto tn = make_ast<TypeNode>();
+                    tn->kind = TypeNode::Kind::Builtin;
+                    if (!specs.typeSpecifiers.empty()) {
+                        auto &ts = specs.typeSpecifiers.front();
+                        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) tn->repr = "simple-type";
+                        else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) tn->repr = ts.text;
+                        else tn->repr = "type";
+                    } else tn->repr = "type";
+                    // expect ':'
+                    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+                        if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after type name in _Generic association"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+                    } else lex.next();
+                    ExprPtr ae = parseAssignmentExpression();
+                    GenericAssociation ga; ga.isDefault = false; ga.type = tn; ga.expr = ae;
+                    assocs.push_back(std::move(ga));
+                }
+            }
+
+            // if next is ',' consume and continue; if ')' break; else try to continue
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                lex.next();
+                // allow trailing comma before ')'
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") break;
+                continue;
+            }
+            break;
+        }
+
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") {
+            lex.next();
+        } else {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' to close _Generic"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        }
+
+        auto ge = make_ast<GenericSelectionExpr>();
+        ge->controlling = ctrl;
+        ge->assocs = std::move(assocs);
+        ge->kind = Expr::Kind::GenericSelection;
+        ge->span = ctrl ? ctrl->span : SourceSpan{};
+        return ge;
+    }
     // fallback: consume token and produce identifier-like node
     auto tok = *lex.next();
     auto id = make_ast<IdentifierExpr>();
@@ -1028,24 +1126,219 @@ ExprPtr Parser::parseAssignmentExpression() {
     return lhs;
 }
 
+// expression: assignment-expression (',' assignment-expression)*
+ExprPtr Parser::parseExpression() {
+    ExprPtr lhs = parseAssignmentExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+        // consume comma
+        lex.next();
+        ExprPtr rhs = parseAssignmentExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = ",";
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
 // NOTE: `parseExpr()` was removed; use `parseAssignmentExpression()` or
 // `parseConditionalExpression()` explicitly where needed.
 
-// Parse unary expressions: + - ~ ! and primary fallthrough
+// Parse unary expressions per C grammar (partial):
+// Handles prefix ++/--, unary-operator cast-expression, sizeof, and _Alignof
 ExprPtr Parser::parseUnaryExpression() {
-    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
-        std::string op = lex.peek()->lexeme();
-        if (op == "+" || op == "-" || op == "~" || op == "!") {
+    auto t = lex.peek();
+    if (!t) return nullptr;
+
+    // prefix ++ / --
+    if (t->kind() == TokenKind::Punctuator) {
+        std::string op = t->lexeme();
+        if (op == "++" || op == "--") {
             lex.next();
             auto ue = make_ast<UnaryExpr>();
             ue->op = op;
             ue->rhs = parseUnaryExpression();
             ue->kind = Expr::Kind::Unary;
-            ue->span = ue->rhs ? ue->rhs->span : SourceSpan{};
+            ue->span = ue->rhs ? ue->rhs->span : t->span;
+            return ue;
+        }
+        // unary-operator cast-expression: & * + - ~ !
+        if (op == "&" || op == "*" || op == "+" || op == "-" || op == "~" || op == "!") {
+            lex.next();
+            auto ue = make_ast<UnaryExpr>();
+            ue->op = op;
+            ue->rhs = parseCastExpression();
+            ue->kind = Expr::Kind::Unary;
+            ue->span = ue->rhs ? ue->rhs->span : t->span;
             return ue;
         }
     }
-    return parsePrimary();
+
+    // keywords: sizeof, _Alignof
+    if (t->kind() == TokenKind::Keyword) {
+        std::string kw = t->lexeme();
+        if (kw == "sizeof") {
+            lex.next();
+            // sizeof unary-expression or sizeof(type-name)
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
+                // consume '('
+                lex.next();
+                // heuristic: next token starts a type-name?
+                bool isType = false;
+                if (lex.peek()) {
+                    auto u = lex.peek();
+                    if (u->kind() == TokenKind::Keyword) {
+                        static const std::unordered_set<std::string> types = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum"};
+                        if (types.count(u->lexeme())) isType = true;
+                    } else if (u->kind() == TokenKind::Identifier) {
+                        if (typedef_names.count(u->lexeme())) isType = true;
+                    }
+                }
+                if (isType) {
+                    auto specs = parseDeclarationSpecifiers();
+                    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                        if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in sizeof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+                    } else lex.next();
+                    auto se = make_ast<SizeofExpr>();
+                    se->type = make_ast<TypeNode>();
+                    se->type.value()->repr = "type"; // minimal
+                    se->expr = nullptr;
+                    se->kind = Expr::Kind::Sizeof;
+                    se->span = t->span;
+                    return se;
+                } else {
+                    // sizeof ( expression )
+                    ExprPtr inner = parseAssignmentExpression();
+                    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+                    auto se = make_ast<SizeofExpr>();
+                    se->type = std::nullopt;
+                    se->expr = inner;
+                    se->kind = Expr::Kind::Sizeof;
+                    se->span = t->span;
+                    return se;
+                }
+            }
+            // sizeof unary-expression
+            auto se = make_ast<SizeofExpr>();
+            se->type = std::nullopt;
+            se->expr = parseUnaryExpression();
+            se->kind = Expr::Kind::Sizeof;
+            se->span = t->span;
+            return se;
+        }
+
+        if (kw == "_Alignof") {
+            lex.next();
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after _Alignof"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                return nullptr;
+            }
+            lex.next();
+            auto specs = parseDeclarationSpecifiers();
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in _Alignof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+            } else lex.next();
+            auto ae = make_ast<AlignOfExpr>();
+            ae->type = make_ast<TypeNode>();
+            ae->type->repr = "type";
+            ae->kind = Expr::Kind::Sizeof; // reuse Kind::Sizeof for alignof variant
+            ae->span = t->span;
+            return ae;
+        }
+    }
+
+    // fallback: postfix-expression
+    return parsePostfixExpression();
+}
+
+// Parse postfix-expression including indexing, calls, member access, postfix ++/--
+ExprPtr Parser::parsePostfixExpression() {
+    // start with a cast-expression so compound-literals are handled
+    ExprPtr lhs = parseCastExpression();
+    if (!lhs) return nullptr;
+
+    while (true) {
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator)) break;
+        std::string p = lex.peek()->lexeme();
+
+        if (p == "[") {
+            // array subscript
+            lex.next();
+            ExprPtr idx = parseAssignmentExpression();
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "]") lex.next();
+            auto ie = make_ast<IndexExpr>();
+            ie->base = lhs;
+            ie->index = idx;
+            ie->kind = Expr::Kind::Index;
+            ie->span = lhs->span;
+            if (idx) ie->span.end = idx->span.end;
+            lhs = ie;
+            continue;
+        }
+
+        if (p == "(") {
+            // function call
+            lex.next();
+            std::vector<ExprPtr> args;
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                while (true) {
+                    ExprPtr a = parseAssignmentExpression();
+                    args.push_back(a);
+                    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") { lex.next(); continue; }
+                    break;
+                }
+            }
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+            auto ce = make_ast<CallExpr>();
+            ce->callee = lhs;
+            ce->args = std::move(args);
+            ce->kind = Expr::Kind::Call;
+            ce->span = lhs->span;
+            lhs = ce;
+            continue;
+        }
+
+        if (p == "." || p == "->") {
+            bool isArrow = (p == "->");
+            lex.next();
+            std::string member;
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+                member = lex.peek()->lexeme();
+                lex.next();
+            } else {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected identifier after member access"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+            }
+            auto me = make_ast<MemberExpr>();
+            me->base = lhs;
+            me->member = member;
+            me->isArrow = isArrow;
+            me->kind = Expr::Kind::Member;
+            me->span = lhs->span;
+            lhs = me;
+            continue;
+        }
+
+        if (p == "++" || p == "--") {
+            lex.next();
+            auto pe = make_ast<PostfixUnaryExpr>();
+            if (p == "++") pe->op = PostfixUnaryExpr::Op::Inc;
+            else pe->op = PostfixUnaryExpr::Op::Dec;
+            pe->base = lhs;
+            pe->kind = Expr::Kind::PostfixUnary;
+            pe->span = lhs->span;
+            lhs = pe;
+            continue;
+        }
+
+        break;
+    }
+
+    return lhs;
 }
 
 static int getBinPrec(const std::string &op) {
@@ -1100,21 +1393,28 @@ ExprPtr parseBinaryRHS(Parser &p, int exprPrec, ExprPtr lhs) {
 
 // Parse conditional-expression: logical-or or '?:' ternary form
 ExprPtr Parser::parseConditionalExpression() {
-    // parse lhs as unary then handle binary ops via precedence climbing
-    ExprPtr lhs = parseUnaryExpression();
+    // Parse a conditional-expression per C 6.5.15:
+    //   conditional-expression: logical-OR-expression
+    //                         | logical-OR-expression ? expression : conditional-expression
+    ExprPtr lhs = parseLogicalOrExpression();
     if (!lhs) return nullptr;
-    lhs = parseBinaryRHS(*this, 0, lhs);
 
-    // handle ternary ?: (right-associative)
     if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "?") {
+        // consume '?'
         lex.next();
-        ExprPtr thenExpr = parseConditionalExpression();
+        // parse second operand (expression)
+        ExprPtr thenExpr = parseAssignmentExpression();
+
+        // expect ':'
         if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
             wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' in conditional expression"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
         } else {
             lex.next();
         }
+
+        // parse third operand (conditional-expression) — right-associative
         ExprPtr elseExpr = parseConditionalExpression();
+
         auto te = make_ast<TernaryExpr>();
         te->cond = lhs;
         te->thenExpr = thenExpr;
@@ -1122,7 +1422,303 @@ ExprPtr Parser::parseConditionalExpression() {
         te->kind = Expr::Kind::Ternary;
         te->span = lhs->span;
         if (elseExpr) te->span.end = elseExpr->span.end;
+        else if (thenExpr) te->span.end = thenExpr->span.end;
+
+        // NOTE: Semantic type checks required by C 6.5.15 (scalar condition, operand compatibility)
+        // cannot be fully performed in the parser without a type system. Defer to semantic phase.
+        if (!thenExpr || !elseExpr) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "incomplete conditional expression"; if (te->span.end.line==0) { if (lex.peek()) d.span = lex.peek()->span; } else d.span = te->span; diagnostics.push_back(std::move(d));
+        }
+
         return te;
+    }
+    return lhs;
+}
+
+// logical-AND-expression: parse left-associative series of '&&' operations.
+// For now operands are parsed with `parseAssignmentExpression()`; when the
+// full expression grammar is available this should be adjusted to use the
+// appropriate lower-precedence parsers (inclusive-or, etc.).
+ExprPtr Parser::parseLogicalAndExpression() {
+    ExprPtr lhs = parseInclusiveOrExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "&&") {
+        // consume '&&'
+        auto opTok = *lex.next();
+        ExprPtr rhs = parseInclusiveOrExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = "&&";
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// logical-OR-expression: parse left-associative series of '||' operations.
+ExprPtr Parser::parseLogicalOrExpression() {
+    ExprPtr lhs = parseLogicalAndExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "||") {
+        // consume '||'
+        auto opTok = *lex.next();
+        ExprPtr rhs = parseLogicalAndExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = "||";
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// exclusive-OR-expression: left-associative '^' using lower-level operands
+ExprPtr Parser::parseExclusiveOrExpression() {
+    ExprPtr lhs = parseAndExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "^") {
+        lex.next();
+        ExprPtr rhs = parseAndExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = "^";
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// inclusive-OR-expression: left-associative '|' using exclusive-or as operand
+ExprPtr Parser::parseInclusiveOrExpression() {
+    ExprPtr lhs = parseExclusiveOrExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "|") {
+        lex.next();
+        ExprPtr rhs = parseExclusiveOrExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = "|";
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// shift-expression: parse left-associative '<<' and '>>' using assignment-expression as base
+ExprPtr Parser::parseShiftExpression() {
+    ExprPtr lhs = parseMultiplicativeExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        if (op != "<<" && op != ">>") break;
+        lex.next();
+        ExprPtr rhs = parseMultiplicativeExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = op;
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// multiplicative-expression: '*', '/', '%' (left-associative)
+ExprPtr Parser::parseMultiplicativeExpression() {
+    ExprPtr lhs = parseCastExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        if (op != "*" && op != "/" && op != "%") break;
+        lex.next();
+        ExprPtr rhs = parseUnaryExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = op;
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// cast-expression: unary-expression | ( type-name ) cast-expression
+ExprPtr Parser::parseCastExpression() {
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
+        // consume '('
+        lex.next();
+        // heuristic: if next token starts a type-name, parse declaration specifiers
+        bool isTypeNameStart = false;
+        if (lex.peek()) {
+            auto t = lex.peek();
+            if (t->kind() == TokenKind::Keyword) {
+                static const std::unordered_set<std::string> types = {
+                    "void","char","short","int","long","float","double","signed","unsigned",
+                    "_Bool","_Complex","_Imaginary","struct","union","enum"
+                };
+                if (types.count(t->lexeme())) isTypeNameStart = true;
+            } else if (t->kind() == TokenKind::Identifier) {
+                if (typedef_names.count(t->lexeme())) isTypeNameStart = true;
+            }
+        }
+
+        if (isTypeNameStart) {
+            // parse type-name (using declaration specifiers as heuristic)
+            auto specs = parseDeclarationSpecifiers();
+            // abstract-declarator not implemented; skip
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                if (lex.peek()) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in cast"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                }
+            } else {
+                lex.next();
+            }
+            // If a '{' follows the type-name, this is a compound-literal: (type-name) { initializer-list }
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
+                auto clit = make_ast<CompoundLiteral>();
+                // build a minimal TypeNode from specs
+                auto tn = make_ast<TypeNode>();
+                tn->kind = TypeNode::Kind::Builtin;
+                if (!specs.typeSpecifiers.empty()) {
+                    auto &ts = specs.typeSpecifiers.front();
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) tn->repr = "simple-type";
+                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) tn->repr = ts.text;
+                    else tn->repr = "type";
+                } else tn->repr = "type";
+                clit->type = tn;
+                // parse initializer-list using existing helper
+                clit->init = parseInitializer();
+                clit->kind = Expr::Kind::CompoundLiteral;
+                clit->span = clit->init ? clit->init->span : SourceSpan{};
+                return clit;
+            }
+
+            ExprPtr rhs = parseCastExpression();
+            auto ce = make_ast<CastExpr>();
+            ce->expr = rhs;
+            ce->kind = Expr::Kind::Cast;
+            // build a minimal TypeNode from specs
+            auto tn = make_ast<TypeNode>();
+            tn->kind = TypeNode::Kind::Builtin;
+            if (!specs.typeSpecifiers.empty()) {
+                // try to stringify first specifier
+                auto &ts = specs.typeSpecifiers.front();
+                if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                    tn->repr = "simple-type";
+                } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) {
+                    tn->repr = ts.text;
+                } else {
+                    tn->repr = "type";
+                }
+            } else tn->repr = "type";
+            ce->type = tn;
+            ce->span = ce->expr ? ce->expr->span : SourceSpan{};
+            return ce;
+        }
+
+        // not a type-name: treat as parenthesized expression
+        ExprPtr inner = parseAssignmentExpression();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+        return inner;
+    }
+    // otherwise unary-expression
+    return parseUnaryExpression();
+}
+
+// additive-expression: '+' and '-' (left-associative) using multiplicative-expression as operand
+ExprPtr Parser::parseAdditiveExpression() {
+    ExprPtr lhs = parseMultiplicativeExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        if (op != "+" && op != "-") break;
+        lex.next();
+        ExprPtr rhs = parseMultiplicativeExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = op;
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// relational-expression: < > <= >= using shift-expression as operand
+ExprPtr Parser::parseRelationalExpression() {
+    ExprPtr lhs = parseShiftExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        if (op != "<" && op != ">" && op != "<=" && op != ">=") break;
+        lex.next();
+        ExprPtr rhs = parseShiftExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = op;
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// equality-expression: == != using relational-expression as operand
+ExprPtr Parser::parseEqualityExpression() {
+    ExprPtr lhs = parseRelationalExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        if (op != "==" && op != "!=") break;
+        lex.next();
+        ExprPtr rhs = parseRelationalExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = op;
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// AND-expression: bitwise '&' using equality-expression as operand
+ExprPtr Parser::parseAndExpression() {
+    ExprPtr lhs = parseEqualityExpression();
+    if (!lhs) return nullptr;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "&") {
+        lex.next();
+        ExprPtr rhs = parseEqualityExpression();
+        auto be = make_ast<BinaryExpr>();
+        be->op = "&";
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
     }
     return lhs;
 }

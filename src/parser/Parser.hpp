@@ -53,9 +53,23 @@ private:
     std::vector<BlockItemPtr> parseCompoundBody();
     StmtPtr parseStmt();
     ExprPtr parseAssignmentExpression();
+    // C 'expression' includes the comma operator (lowest precedence)
+    ExprPtr parseExpression();
     ExprPtr parsePrimary();
     ExprPtr parseUnaryExpression();
     ExprPtr parseConditionalExpression();
+    ExprPtr parseLogicalOrExpression();
+    ExprPtr parseLogicalAndExpression();
+    ExprPtr parseInclusiveOrExpression();
+    ExprPtr parseExclusiveOrExpression();
+    ExprPtr parseAndExpression();
+    ExprPtr parseEqualityExpression();
+    ExprPtr parseRelationalExpression();
+    ExprPtr parseShiftExpression();
+    ExprPtr parseMultiplicativeExpression();
+    ExprPtr parseAdditiveExpression();
+    ExprPtr parseCastExpression();
+    ExprPtr parsePostfixExpression();
     
 private:
     std::vector<wvmcc::Diagnostic> diagnostics{};

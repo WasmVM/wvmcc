@@ -214,7 +214,7 @@ struct FunctionDef : Node {
 
 // Expressions
 struct Expr : Node {
-    enum class Kind { Ident, Integer, Float, Char, String, Unary, Binary, Ternary, Call, Member, Index, Cast, Sizeof } kind;
+    enum class Kind { Ident, Integer, Float, Char, String, Unary, PostfixUnary, Binary, Ternary, Call, Member, Index, Cast, Sizeof, AlignOf, CompoundLiteral, GenericSelection } kind;
 };
 
 struct IdentifierExpr : Expr { std::string name; };
@@ -224,6 +224,41 @@ struct StringLiteral : Expr { std::string value; };
 struct UnaryExpr : Expr {
     std::string op;
     ExprPtr rhs;
+};
+
+struct PostfixUnaryExpr : Expr {
+    enum class Op { Inc, Dec } op; // increment or decrement
+    ExprPtr base;
+};
+
+struct CastExpr : Expr {
+    TypeNodePtr type;
+    ExprPtr expr;
+};
+
+struct SizeofExpr : Expr {
+    std::optional<TypeNodePtr> type; // if present, sizeof(type)
+    ExprPtr expr; // if type not present, sizeof expr
+};
+
+struct AlignOfExpr : Expr {
+    TypeNodePtr type;
+};
+
+struct CompoundLiteral : Expr {
+    TypeNodePtr type;
+    InitializerPtr init;
+};
+
+struct GenericAssociation {
+    bool isDefault{false};
+    TypeNodePtr type; // null for default
+    ExprPtr expr;
+};
+
+struct GenericSelectionExpr : Expr {
+    ExprPtr controlling;
+    std::vector<GenericAssociation> assocs;
 };
 
 struct BinaryExpr : Expr {
