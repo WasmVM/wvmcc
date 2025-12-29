@@ -27,6 +27,7 @@ private:
     void visitExternalDecl(const ExternalDeclPtr &d);
     void visitFunctionDef(const FunctionDefPtr &f);
     void visitDeclaration(const DeclarationPtr &d);
+     void visitInitializer(const InitializerPtr &i);
     void visitDeclarator(const DeclaratorPtr &d);
     void visitTypeNode(const TypeNodePtr &t);
     void visitBlockItem(const BlockItemPtr &b);

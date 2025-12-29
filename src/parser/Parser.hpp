@@ -39,6 +39,9 @@ private:
 
     // parse declarators (identifier, pointer, array, function)
     DeclaratorPtr parseDeclarator();
+    // initializer parsing (assignment-expression or braced initializer-list)
+    InitializerPtr parseInitializer();
+    Designator parseDesignator();
 
     
     ExternalDeclPtr parseExternalDecl();

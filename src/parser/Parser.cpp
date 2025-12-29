@@ -7,6 +7,46 @@ namespace wvmcc::parser {
 
 Parser::Parser(Lexer &lexer) : lex(lexer) {}
 
+// Helper: determine if an expression is a (very small) integer constant expression
+static bool isIntegerConstantExpr(const ExprPtr &e) {
+    if (!e) return false;
+    if (e->kind == Expr::Kind::Integer) return true;
+    if (e->kind == Expr::Kind::Unary) {
+        auto ue = std::static_pointer_cast<UnaryExpr>(e);
+        if ((ue->op == "+" || ue->op == "-") && ue->rhs) return isIntegerConstantExpr(ue->rhs);
+    }
+    if (e->kind == Expr::Kind::Binary) {
+        auto be = std::static_pointer_cast<BinaryExpr>(e);
+        // simple constant fold for literal-integer binary ops
+        if (be->lhs && be->rhs) return isIntegerConstantExpr(be->lhs) && isIntegerConstantExpr(be->rhs);
+    }
+    return false;
+}
+
+static bool initializerIsConstant(const InitializerPtr &init) {
+    if (!init) return false;
+    if (init->kind == Initializer::Kind::Expr) {
+        if (!init->expr) return false;
+        if (init->expr->kind == Expr::Kind::String) return true;
+        return isIntegerConstantExpr(init->expr);
+    }
+    // list: all clauses' inits must be constant
+    for (const auto &cl : init->clauses) {
+        if (cl.init) {
+            if (!initializerIsConstant(cl.init)) return false;
+        } else {
+            return false;
+        }
+        // if designator index present, ensure it's integer-constant
+        for (const auto &d : cl.designators) {
+            if (d.kind == Designator::Kind::Index) {
+                if (!d.index || !isIntegerConstantExpr(*d.index)) return false;
+            }
+        }
+    }
+    return true;
+}
+
 DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
     DeclarationSpecifiers specs;
 
@@ -650,11 +690,21 @@ ExternalDeclPtr Parser::parseExternalDecl() {
 
             return ext;
         } else {
-            auto d = parseDeclaration(specs, decl);
-            if (!d) return nullptr;
-            auto ext = make_ast_with_span<ExternalDecl>(d->span);
-            ext->decl = d;
-            return ext;
+                auto d = parseDeclaration(specs, decl);
+                if (!d) return nullptr;
+                // static/thread storage duration initializers must be constant (C 6.7.9 constraint 4)
+                if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) /*|| specs.hasStorage(StorageClass::ThreadLocal)*/)) {
+                    if (!initializerIsConstant(*d->initializer)) {
+                        wvmcc::Diagnostic diag;
+                        diag.severity = wvmcc::Diagnostic::Severity::Error;
+                        diag.message = "initializer for object with static storage duration must be constant expression or string literal";
+                        diag.span = d->span;
+                        diagnostics.push_back(std::move(diag));
+                    }
+                }
+                auto ext = make_ast_with_span<ExternalDecl>(d->span);
+                ext->decl = d;
+                return ext;
         }
     }
 
@@ -671,7 +721,17 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     if (decl) {
         auto d = parseDeclaration(specs, decl);
         if (!d) return nullptr;
-
+        // If this declaration has static/thread storage duration, its initializer
+        // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
+        if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) /*|| specs.hasStorage(StorageClass::ThreadLocal)*/)) {
+            if (!initializerIsConstant(*d->initializer)) {
+                wvmcc::Diagnostic diag;
+                diag.severity = wvmcc::Diagnostic::Severity::Error;
+                diag.message = "initializer for object with static storage duration must be constant expression or string literal";
+                diag.span = d->span;
+                diagnostics.push_back(std::move(diag));
+            }
+        }
         // For object declarations with internal linkage (static): tentative/definitive semantics
         if (!decl->id.name.empty() && specs.hasStorage(StorageClass::Static)) {
             std::string nm = decl->id.name;
@@ -741,8 +801,9 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     while (auto p = lex.peek()) {
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == ";") { lex.next(); break; }
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == "=") {
+            // initializer: could be an assignment-expression or a braced initializer-list
             lex.next();
-            decl->initializer = parseExpr();
+            decl->initializer = parseInitializer();
             while (auto q = lex.peek()) { if (q->kind()==TokenKind::Punctuator && q->lexeme()==";") { lex.next(); break; } lex.next(); }
             break;
         }
@@ -767,8 +828,10 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     while (auto p = lex.peek()) {
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == ";") { lex.next(); break; }
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == "=") {
+            // initializer: could be an assignment-expression or a braced initializer-list
             lex.next();
-            decl->initializer = parseExpr();
+            decl->initializer = parseInitializer();
+            // consume until semicolon for simple recovery (initializer parser consumes balanced braces)
             while (auto q = lex.peek()) { if (q->kind()==TokenKind::Punctuator && q->lexeme()==";") { lex.next(); break; } lex.next(); }
             break;
         }
@@ -808,6 +871,15 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             auto decl = parseDeclaration(specs, name);
             auto bi = make_ast<BlockItem>();
             bi->item = decl;
+            // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
+            // external or internal linkage, the declaration shall have no initializer.
+            if (decl && decl->initializer.has_value() && (specs.hasStorage(StorageClass::Extern) || specs.hasStorage(StorageClass::Static))) {
+                wvmcc::Diagnostic diag;
+                diag.severity = wvmcc::Diagnostic::Severity::Error;
+                diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
+                diag.span = decl->span;
+                diagnostics.push_back(std::move(diag));
+            }
             body.push_back(bi);
             continue;
         }
@@ -862,6 +934,111 @@ ExprPtr Parser::parseExpr() {
     id->name = tok.lexeme();
     id->kind = Expr::Kind::Ident;
     return id;
+}
+
+InitializerPtr Parser::parseInitializer() {
+    // If next token is a '{', parse an initializer-list
+    auto init = make_ast<Initializer>();
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
+        init->kind = Initializer::Kind::List;
+        // consume '{'
+        lex.next();
+        while (true) {
+            // handle optional trailing comma before '}'
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "}") {
+                lex.next();
+                init->trailingComma = false;
+                break;
+            }
+
+            // parse a clause: optional designators followed by '=' (designationopt)
+            InitClause clause;
+            // collect designators
+            while (lex.peek() && ((lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="[") || (lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="."))) {
+                clause.designators.push_back(parseDesignator());
+            }
+            // if designators present, expect '='
+            if (!clause.designators.empty()) {
+                if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="=")) {
+                    wvmcc::Diagnostic d;
+                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                    d.message = "expected '=' after designator in initializer";
+                    if (lex.peek()) d.span = lex.peek()->span;
+                    diagnostics.push_back(std::move(d));
+                } else {
+                    lex.next();
+                }
+            }
+
+            // parse the initializer (could be nested list or expression)
+            clause.init = parseInitializer();
+            init->clauses.push_back(clause);
+
+            // if next is ',', consume and continue; if next is '}', break
+            if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",") {
+                lex.next();
+                // if next is '}', it's a trailing comma
+                if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="}") {
+                    init->trailingComma = true;
+                    lex.next();
+                    break;
+                }
+                continue;
+            }
+            // no comma: expect closing '}'
+            if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="}") {
+                lex.next();
+                break;
+            }
+            // unexpected token: try to recover
+            if (!lex.peek()) break;
+            lex.next();
+        }
+        return init;
+    }
+
+    // Otherwise parse as an assignment-expression
+    init->kind = Initializer::Kind::Expr;
+    init->expr = parseExpr();
+    return init;
+}
+
+Designator Parser::parseDesignator() {
+    Designator d;
+    if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="[") {
+        // array-index designator
+        lex.next();
+        auto e = parseExpr();
+        d.kind = Designator::Kind::Index;
+        d.index = e;
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="]") lex.next();
+            // designator index must be an integer constant expression (C 6.7.9 constraint 6)
+            if (e && !isIntegerConstantExpr(e)) {
+                wvmcc::Diagnostic diag;
+                diag.severity = wvmcc::Diagnostic::Severity::Error;
+                diag.message = "designator index must be an integer constant expression";
+                diag.span = e->span;
+                diagnostics.push_back(std::move(diag));
+            }
+            return d;
+    }
+    if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==".") {
+        // member designator
+        lex.next();
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Identifier) {
+            d.kind = Designator::Kind::Member;
+            d.member = lex.peek()->lexeme();
+            lex.next();
+        } else {
+            wvmcc::Diagnostic diag;
+            diag.severity = wvmcc::Diagnostic::Severity::Error;
+            diag.message = "expected identifier after '.' in designator";
+            if (lex.peek()) diag.span = lex.peek()->span;
+            diagnostics.push_back(std::move(diag));
+        }
+        return d;
+    }
+    return d;
 }
 
 } // namespace wvmcc::parser

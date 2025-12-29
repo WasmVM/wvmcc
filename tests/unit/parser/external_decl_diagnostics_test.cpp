@@ -36,7 +36,10 @@ int main() {
     struct Case { std::string src; std::string expect; } cases[] = {
         { "auto x = 1;\n", "storage-class specifier" },
         { "static int f() { return 1; }\nstatic int f() { return 2; }\n", "duplicate internal definition" },
-        { "static int x = 1;\nstatic int x = 2;\n", "duplicate internal definition" }
+        { "static int x = 1;\nstatic int x = 2;\n", "duplicate internal definition" },
+        { "static int x = foo;\n", "must be constant expression" },
+        { "void f() { extern int x = 1; }\n", "block scope" },
+        { "int x = 0;\nint arr[] = { [x] = 1 };\n", "designator index must be an integer constant expression" }
     };
 
     for (auto &c : cases) {

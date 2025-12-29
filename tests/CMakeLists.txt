@@ -109,6 +109,13 @@ if(EXISTS ${PARSER_DECLARATOR_TEST})
     add_test(NAME parser-declarator COMMAND wvmcc-parser-declarator-test)
 endif()
 
+# Parser initializer tests
+set(PARSER_INITIALIZER_TEST ${TEST_ROOT}/unit/parser/initializer_test.cpp)
+if(EXISTS ${PARSER_INITIALIZER_TEST})
+    add_executable(wvmcc-parser-initializer-test ${PARSER_INITIALIZER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp)
+    add_test(NAME parser-initializer COMMAND wvmcc-parser-initializer-test)
+endif()
+
 # Lexer punctuator classification test
 set(LEXER_PUNCTUATOR_TEST ${TEST_ROOT}/unit/pp/lexer_punctuator_test.cpp)
 if(EXISTS ${LEXER_PUNCTUATOR_TEST})

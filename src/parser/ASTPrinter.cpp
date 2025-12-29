@@ -99,8 +99,40 @@ void ASTPrinter::visitDeclaration(const DeclarationPtr &d) {
     openTag("Declaration", "");
     if (!d->specifiers.empty()) { openTag("Specifiers"); emitSpecifiersEntries(d->specifiers); closeTag("Specifiers"); }
     if (d->declarator) visitDeclarator(d->declarator);
-    if (d->initializer) { openTag("Initializer"); visitExpr(*d->initializer); closeTag("Initializer"); }
+    if (d->initializer) { openTag("Initializer"); visitInitializer(*d->initializer); closeTag("Initializer"); }
     closeTag("Declaration");
+}
+
+void ASTPrinter::visitInitializer(const InitializerPtr &i) {
+    if (!i) return;
+    openTag("Initializer", "kind=\"" + std::string(i->kind == Initializer::Kind::Expr ? "Expr" : "List") + "\"");
+    if (i->kind == Initializer::Kind::Expr) {
+        if (i->expr) visitExpr(i->expr);
+    } else {
+        openTag("InitList");
+        for (const auto &cl : i->clauses) {
+            openTag("Clause");
+            if (!cl.designators.empty()) {
+                openTag("Designators");
+                for (const auto &d : cl.designators) {
+                    if (d.kind == Designator::Kind::Index) {
+                        openTag("Designator", "kind=\"index\"");
+                        if (d.index) visitExpr(*d.index);
+                        closeTag("Designator");
+                    } else {
+                        openTag("Designator", "kind=\"member\"");
+                        simpleTag("Member", d.member);
+                        closeTag("Designator");
+                    }
+                }
+                closeTag("Designators");
+            }
+            if (cl.init) visitInitializer(cl.init);
+            closeTag("Clause");
+        }
+        closeTag("InitList");
+    }
+    closeTag("Initializer");
 }
 
 void ASTPrinter::emitSpecifiersEntries(const DeclarationSpecifiers &specs) {

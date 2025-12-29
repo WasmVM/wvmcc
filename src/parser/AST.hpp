@@ -45,6 +45,10 @@ using ExprPtr             = std::shared_ptr<Expr>;
 using StmtPtr             = std::shared_ptr<Stmt>;
 using BlockItemPtr        = std::shared_ptr<BlockItem>;
 
+// forward declare initializer-related nodes so Declaration can reference them
+struct Initializer;
+using InitializerPtr = std::shared_ptr<Initializer>;
+
 // Translation unit: list of external declarations
 struct TranslationUnit : Node {
     std::vector<ExternalDeclPtr> externals;
@@ -197,7 +201,7 @@ struct Parameter {
 struct Declaration : Node {
     DeclarationSpecifiers specifiers; // storage-class, type-specifiers, qualifiers
     DeclaratorPtr declarator;
-    std::optional<ExprPtr> initializer;
+    std::optional<InitializerPtr> initializer;
 };
 
 // Function definition: specifiers + declarator + params + body
@@ -260,6 +264,30 @@ struct ReturnStmt : Stmt { std::optional<ExprPtr> value; };
 struct BlockItem : Node {
     // either a declaration or a statement
     std::variant<DeclarationPtr, StmtPtr> item;
+};
+
+// Designators used in designated initializers (e.g., [3], .member)
+struct Designator {
+    enum class Kind { Index, Member } kind{Kind::Index};
+    std::optional<ExprPtr> index; // used when Kind==Index
+    std::string member;           // used when Kind==Member
+};
+
+// An initializer clause: optional list of designators followed by an initializer
+struct Initializer; // forward
+using InitializerPtr = std::shared_ptr<Initializer>;
+
+struct InitClause {
+    std::vector<Designator> designators;
+    InitializerPtr init; // nested initializer or expression
+};
+
+// Initializer: either an assignment-expression (Expr) or a braced initializer-list
+struct Initializer : Node {
+    enum class Kind { Expr, List } kind{Kind::Expr};
+    ExprPtr expr; // valid when kind==Expr
+    std::vector<InitClause> clauses; // valid when kind==List
+    bool trailingComma{false};
 };
 
 // Simple symbol placeholder to be filled by semantic phase
