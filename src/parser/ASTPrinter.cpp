@@ -273,45 +273,51 @@ void ASTPrinter::visitStmt(const StmtPtr &s) {
     openTag("Stmt", "kind=\"" + std::to_string(static_cast<int>(s->kind)) + "\"");
     switch (s->kind) {
         case Stmt::Kind::Expr: {
-            auto es = std::static_pointer_cast<ExprStmt>(s);
-            if (es->expr) visitExpr(es->expr);
+            auto es = std::dynamic_pointer_cast<ExprStmt>(s);
+            if (es && es->expr) visitExpr(es->expr);
             break;
         }
         case Stmt::Kind::Compound: {
-            auto cs = std::static_pointer_cast<CompoundStmt>(s);
-            for (auto &it : cs->items) visitBlockItem(it);
+            auto cs = std::dynamic_pointer_cast<CompoundStmt>(s);
+            if (cs) for (auto &it : cs->items) visitBlockItem(it);
             break;
         }
         case Stmt::Kind::If: {
-            auto is = std::static_pointer_cast<IfStmt>(s);
-            openTag("If");
-            if (is->cond) visitExpr(is->cond);
-            if (is->thenStmt) visitStmt(is->thenStmt);
-            if (is->elseStmt) visitStmt(*is->elseStmt);
-            closeTag("If");
+            auto is = std::dynamic_pointer_cast<IfStmt>(s);
+            if (is) {
+                openTag("If");
+                if (is->cond) visitExpr(is->cond);
+                if (is->thenStmt) visitStmt(is->thenStmt);
+                if (is->elseStmt) visitStmt(*is->elseStmt);
+                closeTag("If");
+            }
             break;
         }
         case Stmt::Kind::While: {
-            auto ws = std::static_pointer_cast<WhileStmt>(s);
-            openTag("While");
-            if (ws->cond) visitExpr(ws->cond);
-            if (ws->body) visitStmt(ws->body);
-            closeTag("While");
+            auto ws = std::dynamic_pointer_cast<WhileStmt>(s);
+            if (ws) {
+                openTag("While");
+                if (ws->cond) visitExpr(ws->cond);
+                if (ws->body) visitStmt(ws->body);
+                closeTag("While");
+            }
             break;
         }
         case Stmt::Kind::For: {
-            auto fs = std::static_pointer_cast<ForStmt>(s);
-            openTag("For");
-            if (fs->init) visitBlockItem(*fs->init);
-            if (fs->cond) visitExpr(*fs->cond);
-            if (fs->step) visitExpr(*fs->step);
-            if (fs->body) visitStmt(fs->body);
-            closeTag("For");
+            auto fs = std::dynamic_pointer_cast<ForStmt>(s);
+            if (fs) {
+                openTag("For");
+                if (fs->init) visitBlockItem(*fs->init);
+                if (fs->cond) visitExpr(*fs->cond);
+                if (fs->step) visitExpr(*fs->step);
+                if (fs->body) visitStmt(fs->body);
+                closeTag("For");
+            }
             break;
         }
         case Stmt::Kind::Return: {
-            auto rs = std::static_pointer_cast<ReturnStmt>(s);
-            if (rs->value) visitExpr(*rs->value);
+            auto rs = std::dynamic_pointer_cast<ReturnStmt>(s);
+            if (rs && rs->value) visitExpr(*rs->value);
             break;
         }
         default:
@@ -326,86 +332,102 @@ void ASTPrinter::visitExpr(const ExprPtr &e) {
     openTag("Expr", "kind=\"" + std::to_string(static_cast<int>(e->kind)) + "\"");
     switch (e->kind) {
         case Expr::Kind::Ident: {
-            auto id = std::static_pointer_cast<IdentifierExpr>(e);
-            simpleTag("Identifier", id->name);
+            auto id = std::dynamic_pointer_cast<IdentifierExpr>(e);
+            if (id) simpleTag("Identifier", id->name);
             break;
         }
         case Expr::Kind::Integer: {
-            auto il = std::static_pointer_cast<IntegerLiteral>(e);
-            simpleTag("Integer", il->raw.empty() ? std::to_string(il->value) : il->raw);
+            auto il = std::dynamic_pointer_cast<IntegerLiteral>(e);
+            if (il) simpleTag("Integer", il->raw.empty() ? std::to_string(il->value) : il->raw);
             break;
         }
         case Expr::Kind::String: {
-            auto sl = std::static_pointer_cast<StringLiteral>(e);
-            simpleTag("String", sl->value);
+            auto sl = std::dynamic_pointer_cast<StringLiteral>(e);
+            if (sl) simpleTag("String", sl->value);
             break;
         }
         case Expr::Kind::Unary: {
-            auto ue = std::static_pointer_cast<UnaryExpr>(e);
-            simpleTag("Op", ue->op);
-            if (ue->rhs) visitExpr(ue->rhs);
+            auto ue = std::dynamic_pointer_cast<UnaryExpr>(e);
+            if (ue) {
+                simpleTag("Op", ue->op);
+                if (ue->rhs) visitExpr(ue->rhs);
+            }
             break;
         }
         case Expr::Kind::Binary: {
-            auto be = std::static_pointer_cast<BinaryExpr>(e);
-            simpleTag("Op", be->op);
-            if (be->lhs) visitExpr(be->lhs);
-            if (be->rhs) visitExpr(be->rhs);
+            auto be = std::dynamic_pointer_cast<BinaryExpr>(e);
+            if (be) {
+                simpleTag("Op", be->op);
+                if (be->lhs) visitExpr(be->lhs);
+                if (be->rhs) visitExpr(be->rhs);
+            }
             break;
         }
         case Expr::Kind::Ternary: {
-            auto te = std::static_pointer_cast<TernaryExpr>(e);
-            if (te->cond) visitExpr(te->cond);
-            if (te->thenExpr) visitExpr(te->thenExpr);
-            if (te->elseExpr) visitExpr(te->elseExpr);
+            auto te = std::dynamic_pointer_cast<TernaryExpr>(e);
+            if (te) {
+                if (te->cond) visitExpr(te->cond);
+                if (te->thenExpr) visitExpr(te->thenExpr);
+                if (te->elseExpr) visitExpr(te->elseExpr);
+            }
             break;
         }
         case Expr::Kind::Call: {
-            auto ce = std::static_pointer_cast<CallExpr>(e);
-            if (ce->callee) visitExpr(ce->callee);
-            openTag("Args");
-            for (auto &a : ce->args) visitExpr(a);
-            closeTag("Args");
+            auto ce = std::dynamic_pointer_cast<CallExpr>(e);
+            if (ce) {
+                if (ce->callee) visitExpr(ce->callee);
+                openTag("Args");
+                for (auto &a : ce->args) visitExpr(a);
+                closeTag("Args");
+            }
             break;
         }
         case Expr::Kind::Member: {
-            auto me = std::static_pointer_cast<MemberExpr>(e);
-            if (me->base) visitExpr(me->base);
-            simpleTag("Member", me->member + (me->isArrow ? "(->)" : "."));
+            auto me = std::dynamic_pointer_cast<MemberExpr>(e);
+            if (me) {
+                if (me->base) visitExpr(me->base);
+                simpleTag("Member", me->member + (me->isArrow ? "(->)" : "."));
+            }
             break;
         }
         case Expr::Kind::Index: {
-            auto ie = std::static_pointer_cast<IndexExpr>(e);
-            if (ie->base) visitExpr(ie->base);
-            if (ie->index) visitExpr(ie->index);
+            auto ie = std::dynamic_pointer_cast<IndexExpr>(e);
+            if (ie) {
+                if (ie->base) visitExpr(ie->base);
+                if (ie->index) visitExpr(ie->index);
+            }
             break;
         }
         case Expr::Kind::PostfixUnary: {
-            auto pe = std::static_pointer_cast<PostfixUnaryExpr>(e);
-            if (pe->base) visitExpr(pe->base);
-            std::string op = (pe->op == PostfixUnaryExpr::Op::Inc) ? "++" : "--";
-            simpleTag("Op", op);
+            auto pe = std::dynamic_pointer_cast<PostfixUnaryExpr>(e);
+            if (pe) {
+                if (pe->base) visitExpr(pe->base);
+                std::string op = (pe->op == PostfixUnaryExpr::Op::Inc) ? "++" : "--";
+                simpleTag("Op", op);
+            }
             break;
         }
         case Expr::Kind::GenericSelection: {
-            auto ge = std::static_pointer_cast<GenericSelectionExpr>(e);
-            openTag("GenericSelection");
-            if (ge->controlling) { openTag("Controlling"); visitExpr(ge->controlling); closeTag("Controlling"); }
-            openTag("Associations");
-            for (auto &ga : ge->assocs) {
-                if (ga.isDefault) {
-                    openTag("Association", "kind=\"default\"");
-                    if (ga.expr) visitExpr(ga.expr);
-                    closeTag("Association");
-                } else {
-                    openTag("Association", "kind=\"type\"");
-                    if (ga.type) visitTypeNode(ga.type);
-                    if (ga.expr) visitExpr(ga.expr);
-                    closeTag("Association");
+            auto ge = std::dynamic_pointer_cast<GenericSelectionExpr>(e);
+            if (ge) {
+                openTag("GenericSelection");
+                if (ge->controlling) { openTag("Controlling"); visitExpr(ge->controlling); closeTag("Controlling"); }
+                openTag("Associations");
+                for (auto &ga : ge->assocs) {
+                    if (ga.isDefault) {
+                        openTag("Association", "kind=\"default\"");
+                        if (ga.expr) visitExpr(ga.expr);
+                        closeTag("Association");
+                    } else {
+                        openTag("Association", "kind=\"type\"");
+                        if (ga.type) visitTypeNode(ga.type);
+                        if (ga.expr) visitExpr(ga.expr);
+                        closeTag("Association");
+                    }
                 }
+                closeTag("Associations");
+                closeTag("GenericSelection");
             }
-            closeTag("Associations");
-            closeTag("GenericSelection");
             break;
         }
         default:

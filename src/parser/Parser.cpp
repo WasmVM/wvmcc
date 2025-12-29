@@ -1088,6 +1088,58 @@ ExprPtr Parser::parsePrimary() {
         ge->span = ctrl ? ctrl->span : SourceSpan{};
         return ge;
     }
+    // parenthesized expressions and compound-literals
+    if (t->kind() == TokenKind::Punctuator && t->lexeme() == "(") {
+        // consume '('
+        lex.next();
+        // heuristics: if it looks like a type-name, parse a possible compound-literal
+        bool isTypeNameStart = false;
+        if (lex.peek()) {
+            auto u = lex.peek();
+            if (u->kind() == TokenKind::Keyword) {
+                static const std::unordered_set<std::string> types = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum"};
+                if (types.count(u->lexeme())) isTypeNameStart = true;
+            } else if (u->kind() == TokenKind::Identifier) {
+                if (typedef_names.count(u->lexeme())) isTypeNameStart = true;
+            }
+        }
+        if (isTypeNameStart) {
+            // parse type-name heuristically
+            auto specs = parseDeclarationSpecifiers();
+            // expect ')'
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+            } else lex.next();
+
+            // if a '{' follows, this is a compound-literal
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
+                auto clit = make_ast<CompoundLiteral>();
+                auto tn = make_ast<TypeNode>();
+                tn->kind = TypeNode::Kind::Builtin;
+                if (!specs.typeSpecifiers.empty()) {
+                    auto &ts = specs.typeSpecifiers.front();
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) tn->repr = "simple-type";
+                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) tn->repr = ts.text;
+                    else tn->repr = "type";
+                } else tn->repr = "type";
+                clit->type = tn;
+                clit->init = parseInitializer();
+                clit->kind = Expr::Kind::CompoundLiteral;
+                clit->span = clit->init ? clit->init->span : SourceSpan{};
+                return clit;
+            }
+            // otherwise treat as parenthesized expression: parse assignment-expression
+            ExprPtr inner = parseAssignmentExpression();
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+            return inner;
+        }
+
+        // not a type-name: parse a parenthesized expression
+        ExprPtr inner = parseAssignmentExpression();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+        return inner;
+    }
+
     // fallback: consume token and produce identifier-like node
     auto tok = *lex.next();
     auto id = make_ast<IdentifierExpr>();
@@ -1258,8 +1310,8 @@ ExprPtr Parser::parseUnaryExpression() {
 
 // Parse postfix-expression including indexing, calls, member access, postfix ++/--
 ExprPtr Parser::parsePostfixExpression() {
-    // start with a cast-expression so compound-literals are handled
-    ExprPtr lhs = parseCastExpression();
+    // start with a primary expression
+    ExprPtr lhs = parsePrimary();
     if (!lhs) return nullptr;
 
     while (true) {
@@ -1338,56 +1390,6 @@ ExprPtr Parser::parsePostfixExpression() {
         break;
     }
 
-    return lhs;
-}
-
-static int getBinPrec(const std::string &op) {
-    if (op == "*" || op == "/" || op == "%") return 60;
-    if (op == "+" || op == "-") return 50;
-    if (op == "<<" || op == ">>") return 45;
-    if (op == "<" || op == ">" || op == "<=" || op == ">=") return 40;
-    if (op == "==" || op == "!=") return 35;
-    if (op == "&") return 30;
-    if (op == "^") return 25;
-    if (op == "|") return 20;
-    if (op == "&&") return 15;
-    if (op == "||") return 10;
-    return 0;
-}
-
-// Precedence climbing parser for binary operators
-ExprPtr parseBinaryRHS(Parser &p, int exprPrec, ExprPtr lhs) {
-    while (true) {
-        if (!(p.lex.peek() && p.lex.peek()->kind() == TokenKind::Punctuator)) break;
-        std::string op = p.lex.peek()->lexeme();
-        int tokPrec = getBinPrec(op);
-        if (tokPrec < exprPrec) break;
-
-        // consume operator
-        p.lex.next();
-
-        // parse next unary expression as rhs
-        ExprPtr rhs = p.parseUnaryExpression();
-        if (!rhs) return lhs;
-
-        // look ahead for next operator
-        while (p.lex.peek() && p.lex.peek()->kind() == TokenKind::Punctuator) {
-            std::string nextOp = p.lex.peek()->lexeme();
-            int nextPrec = getBinPrec(nextOp);
-            if (nextPrec > tokPrec) {
-                rhs = parseBinaryRHS(p, tokPrec + 1, rhs);
-            } else break;
-        }
-
-        auto be = make_ast<BinaryExpr>();
-        be->op = op;
-        be->lhs = lhs;
-        be->rhs = rhs;
-        be->kind = Expr::Kind::Binary;
-        be->span = lhs->span;
-        if (rhs) be->span.end = rhs->span.end;
-        lhs = be;
-    }
     return lhs;
 }
 
