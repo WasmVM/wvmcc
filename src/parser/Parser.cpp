@@ -2,33 +2,18 @@
 #include <cassert>
 #include <algorithm>
 #include <iostream>
+#include "ConstExprEval.hpp"
 
 namespace wvmcc::parser {
 
 Parser::Parser(Lexer &lexer) : lex(lexer) {}
-
-// Helper: determine if an expression is a (very small) integer constant expression
-static bool isIntegerConstantExpr(const ExprPtr &e) {
-    if (!e) return false;
-    if (e->kind == Expr::Kind::Integer) return true;
-    if (e->kind == Expr::Kind::Unary) {
-        auto ue = std::static_pointer_cast<UnaryExpr>(e);
-        if ((ue->op == "+" || ue->op == "-") && ue->rhs) return isIntegerConstantExpr(ue->rhs);
-    }
-    if (e->kind == Expr::Kind::Binary) {
-        auto be = std::static_pointer_cast<BinaryExpr>(e);
-        // simple constant fold for literal-integer binary ops
-        if (be->lhs && be->rhs) return isIntegerConstantExpr(be->lhs) && isIntegerConstantExpr(be->rhs);
-    }
-    return false;
-}
 
 static bool initializerIsConstant(const InitializerPtr &init) {
     if (!init) return false;
     if (init->kind == Initializer::Kind::Expr) {
         if (!init->expr) return false;
         if (init->expr->kind == Expr::Kind::String) return true;
-        return isIntegerConstantExpr(init->expr);
+        return ConstExprEvaluator::isIntegerConstantExpr(init->expr);
     }
     // list: all clauses' inits must be constant
     for (const auto &cl : init->clauses) {
@@ -40,12 +25,16 @@ static bool initializerIsConstant(const InitializerPtr &init) {
         // if designator index present, ensure it's integer-constant
         for (const auto &d : cl.designators) {
             if (d.kind == Designator::Kind::Index) {
-                if (!d.index || !isIntegerConstantExpr(*d.index)) return false;
+                if (!d.index || !ConstExprEvaluator::isIntegerConstantExpr(*d.index)) return false;
             }
         }
     }
     return true;
 }
+
+// Evaluate an integer constant expression (very small evaluator).
+// Returns std::nullopt if not a constant integer.
+// integer constant evaluation is provided by ConstExprEvaluator
 
 DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
     DeclarationSpecifiers specs;
@@ -612,6 +601,78 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     // gather specifiers (keywords like 'int', 'static', etc.)
     auto specs = parseDeclarationSpecifiers();
 
+    // Handle _Static_assert (C 6.7.10): _Static_assert ( constant-expression , string-literal ) ;
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "_Static_assert") {
+        // consume keyword
+        lex.next();
+        // expect '('
+        if (!acceptPunct("(")) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected '(' after _Static_assert";
+            if (lex.peek()) d.span = lex.peek()->span;
+            diagnostics.push_back(std::move(d));
+            // recover: skip to next ';'
+            while (lex.peek() && !(lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";")) lex.next();
+            if (lex.peek()) lex.next();
+            return nullptr;
+        }
+
+        // parse constant-expression
+        auto expr = parseExpr();
+        // expect comma
+        if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected ',' in _Static_assert";
+            if (lex.peek()) d.span = lex.peek()->span;
+            diagnostics.push_back(std::move(d));
+        } else {
+            lex.next();
+        }
+
+        // expect string-literal
+        std::string msg;
+        if (lex.peek() && lex.peek()->kind() == TokenKind::StringLiteral) {
+            msg = lex.peek()->lexeme();
+            lex.next();
+        } else {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected string literal in _Static_assert";
+            if (lex.peek()) d.span = lex.peek()->span;
+            diagnostics.push_back(std::move(d));
+        }
+
+        // expect ')'
+        if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==")")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Static_assert"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else {
+            lex.next();
+        }
+
+        // expect ';'
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+
+        // Evaluate constant-expression
+        auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
+        if (!val.has_value()) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "_Static_assert requires an integer constant expression";
+            if (expr) d.span = expr->span;
+            diagnostics.push_back(std::move(d));
+        } else if (*val == 0) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = std::string("static assertion failed: ") + msg;
+            if (expr) d.span = expr->span;
+            diagnostics.push_back(std::move(d));
+        }
+
+        return nullptr; // static assert is its own external declaration but we don't create AST node for it
+    }
+
     // Try to parse an optional declarator (may be null for declarations like "struct S;")
     DeclaratorPtr decl = nullptr;
     // Only attempt to parse a declarator if next token could start one
@@ -1013,7 +1074,7 @@ Designator Parser::parseDesignator() {
         d.index = e;
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="]") lex.next();
             // designator index must be an integer constant expression (C 6.7.9 constraint 6)
-            if (e && !isIntegerConstantExpr(e)) {
+            if (e && !ConstExprEvaluator::isIntegerConstantExpr(e)) {
                 wvmcc::Diagnostic diag;
                 diag.severity = wvmcc::Diagnostic::Severity::Error;
                 diag.message = "designator index must be an integer constant expression";

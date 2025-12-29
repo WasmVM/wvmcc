@@ -78,42 +78,49 @@ endif()
 # Parser translation unit test
 set(PARSER_TU_TEST ${TEST_ROOT}/unit/parser/translation_unit_test.cpp)
 if(EXISTS ${PARSER_TU_TEST})
-    add_executable(wvmcc-parser-translation-unit-test ${PARSER_TU_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp)
+    add_executable(wvmcc-parser-translation-unit-test ${PARSER_TU_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
     
     add_test(NAME parser-translation-unit COMMAND wvmcc-parser-translation-unit-test)
 endif()
 set(PARSER_EXTERNAL_DECL_DIAG_TEST ${TEST_ROOT}/unit/parser/external_decl_diagnostics_test.cpp)
 if(EXISTS ${PARSER_EXTERNAL_DECL_DIAG_TEST})
-    add_executable(wvmcc-parser-external-decl-diag-test ${PARSER_EXTERNAL_DECL_DIAG_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp)
+    add_executable(wvmcc-parser-external-decl-diag-test ${PARSER_EXTERNAL_DECL_DIAG_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
     add_test(NAME parser-external-decl-diag COMMAND wvmcc-parser-external-decl-diag-test)
 endif()
 
 # Parser struct/union tests
 set(PARSER_STRUCT_UNION_TEST ${TEST_ROOT}/unit/parser/struct_union_test.cpp)
 if(EXISTS ${PARSER_STRUCT_UNION_TEST})
-    add_executable(wvmcc-parser-struct-union-test ${PARSER_STRUCT_UNION_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
+    add_executable(wvmcc-parser-struct-union-test ${PARSER_STRUCT_UNION_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
     add_test(NAME parser-struct-union COMMAND wvmcc-parser-struct-union-test)
 endif()
 
 # Parser type-specifiers test
 set(PARSER_TYPE_SPEC_TEST ${TEST_ROOT}/unit/parser/type_specifiers_test.cpp)
 if(EXISTS ${PARSER_TYPE_SPEC_TEST})
-    add_executable(wvmcc-parser-type-spec-test ${PARSER_TYPE_SPEC_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
+    add_executable(wvmcc-parser-type-spec-test ${PARSER_TYPE_SPEC_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
     add_test(NAME parser-type-spec COMMAND wvmcc-parser-type-spec-test)
 endif()
 
 # Parser declarator tests
 set(PARSER_DECLARATOR_TEST ${TEST_ROOT}/unit/parser/declarator_test.cpp)
 if(EXISTS ${PARSER_DECLARATOR_TEST})
-    add_executable(wvmcc-parser-declarator-test ${PARSER_DECLARATOR_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
+    add_executable(wvmcc-parser-declarator-test ${PARSER_DECLARATOR_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
     add_test(NAME parser-declarator COMMAND wvmcc-parser-declarator-test)
 endif()
 
 # Parser initializer tests
 set(PARSER_INITIALIZER_TEST ${TEST_ROOT}/unit/parser/initializer_test.cpp)
 if(EXISTS ${PARSER_INITIALIZER_TEST})
-    add_executable(wvmcc-parser-initializer-test ${PARSER_INITIALIZER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp)
+    add_executable(wvmcc-parser-initializer-test ${PARSER_INITIALIZER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
     add_test(NAME parser-initializer COMMAND wvmcc-parser-initializer-test)
+endif()
+
+# Parser _Static_assert tests
+set(PARSER_STATIC_ASSERT_TEST ${TEST_ROOT}/unit/parser/static_assert_test.cpp)
+if(EXISTS ${PARSER_STATIC_ASSERT_TEST})
+    add_executable(wvmcc-parser-static-assert-test ${PARSER_STATIC_ASSERT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
+    add_test(NAME parser-static-assert COMMAND wvmcc-parser-static-assert-test)
 endif()
 
 # Lexer punctuator classification test
