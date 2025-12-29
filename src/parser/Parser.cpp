@@ -313,7 +313,7 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
                 // optional '=' constant-expression
                 if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "=") {
                     lex.next();
-                    ev.value = parseExpr();
+                    ev.value = parseConditionalExpression();
                 }
                 en->enumerators.push_back(std::move(ev));
                 // optional trailing comma
@@ -374,7 +374,7 @@ StructDeclarator Parser::parseStructDeclarator() {
     // optional bit-field width
     if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":") {
         lex.next();
-        sd.bitfieldWidth = parseExpr();
+        sd.bitfieldWidth = parseConditionalExpression();
     }
     return sd;
 }
@@ -459,7 +459,7 @@ DeclaratorPtr Parser::parseDeclarator() {
 
             std::optional<ExprPtr> size;
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "]")) {
-                size = parseExpr();
+                size = parseConditionalExpression();
             }
             acceptPunct("]");
             auto arr = make_ast<Declarator>();
@@ -619,7 +619,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         }
 
         // parse constant-expression
-        auto expr = parseExpr();
+        auto expr = parseConditionalExpression();
         // expect comma
         if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
             wvmcc::Diagnostic d;
@@ -917,7 +917,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             lex.next();
             auto rs = make_ast<ReturnStmt>();
             rs->span = p->span;
-            rs->value = parseExpr();
+            rs->value = parseAssignmentExpression();
             if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
             auto bi = make_ast<BlockItem>();
             bi->item = std::static_pointer_cast<Stmt>(rs);
@@ -945,7 +945,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             continue;
         }
 
-        auto expr = parseExpr();
+        auto expr = parseAssignmentExpression();
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
         auto es = make_ast<ExprStmt>();
         es->expr = expr;
@@ -961,7 +961,8 @@ StmtPtr Parser::parseStmt() {
     return nullptr;
 }
 
-ExprPtr Parser::parseExpr() {
+// Simple primary expression parser: integer, identifier, string
+ExprPtr Parser::parsePrimary() {
     auto t = lex.peek();
     if (!t) return nullptr;
     if (t->kind() == TokenKind::IntegerConstant) {
@@ -989,12 +990,141 @@ ExprPtr Parser::parseExpr() {
         sl->kind = Expr::Kind::String;
         return sl;
     }
+    // fallback: consume token and produce identifier-like node
     auto tok = *lex.next();
     auto id = make_ast<IdentifierExpr>();
     id->span = tok.span;
     id->name = tok.lexeme();
     id->kind = Expr::Kind::Ident;
     return id;
+}
+
+// Parse assignment-expression (right-associative for assignment operators)
+ExprPtr Parser::parseAssignmentExpression() {
+    // parse left-hand primary (incomplete support: primary/unary only)
+    ExprPtr lhs = parsePrimary();
+    if (!lhs) return nullptr;
+
+    // check for assignment operators
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        // multi-char operators: check two-char forms first
+        if (op == "=" || op == "*=" || op == "/=" || op == "%=" || op == "+=" || op == "-=" || op == "<<=" || op == ">>=" || op == "&=" || op == "^=" || op == "|=") {
+            // consume operator
+            lex.next();
+            // parse right-hand side as assignment-expression (right-associative)
+            ExprPtr rhs = parseAssignmentExpression();
+            auto be = make_ast<BinaryExpr>();
+            be->op = op;
+            be->lhs = lhs;
+            be->rhs = rhs;
+            be->kind = Expr::Kind::Binary;
+            // set span from lhs to rhs if available
+            be->span = lhs->span;
+            if (rhs) be->span.end = rhs->span.end;
+            return be;
+        }
+    }
+    return lhs;
+}
+
+// NOTE: `parseExpr()` was removed; use `parseAssignmentExpression()` or
+// `parseConditionalExpression()` explicitly where needed.
+
+// Parse unary expressions: + - ~ ! and primary fallthrough
+ExprPtr Parser::parseUnaryExpression() {
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+        std::string op = lex.peek()->lexeme();
+        if (op == "+" || op == "-" || op == "~" || op == "!") {
+            lex.next();
+            auto ue = make_ast<UnaryExpr>();
+            ue->op = op;
+            ue->rhs = parseUnaryExpression();
+            ue->kind = Expr::Kind::Unary;
+            ue->span = ue->rhs ? ue->rhs->span : SourceSpan{};
+            return ue;
+        }
+    }
+    return parsePrimary();
+}
+
+static int getBinPrec(const std::string &op) {
+    if (op == "*" || op == "/" || op == "%") return 60;
+    if (op == "+" || op == "-") return 50;
+    if (op == "<<" || op == ">>") return 45;
+    if (op == "<" || op == ">" || op == "<=" || op == ">=") return 40;
+    if (op == "==" || op == "!=") return 35;
+    if (op == "&") return 30;
+    if (op == "^") return 25;
+    if (op == "|") return 20;
+    if (op == "&&") return 15;
+    if (op == "||") return 10;
+    return 0;
+}
+
+// Precedence climbing parser for binary operators
+ExprPtr parseBinaryRHS(Parser &p, int exprPrec, ExprPtr lhs) {
+    while (true) {
+        if (!(p.lex.peek() && p.lex.peek()->kind() == TokenKind::Punctuator)) break;
+        std::string op = p.lex.peek()->lexeme();
+        int tokPrec = getBinPrec(op);
+        if (tokPrec < exprPrec) break;
+
+        // consume operator
+        p.lex.next();
+
+        // parse next unary expression as rhs
+        ExprPtr rhs = p.parseUnaryExpression();
+        if (!rhs) return lhs;
+
+        // look ahead for next operator
+        while (p.lex.peek() && p.lex.peek()->kind() == TokenKind::Punctuator) {
+            std::string nextOp = p.lex.peek()->lexeme();
+            int nextPrec = getBinPrec(nextOp);
+            if (nextPrec > tokPrec) {
+                rhs = parseBinaryRHS(p, tokPrec + 1, rhs);
+            } else break;
+        }
+
+        auto be = make_ast<BinaryExpr>();
+        be->op = op;
+        be->lhs = lhs;
+        be->rhs = rhs;
+        be->kind = Expr::Kind::Binary;
+        be->span = lhs->span;
+        if (rhs) be->span.end = rhs->span.end;
+        lhs = be;
+    }
+    return lhs;
+}
+
+// Parse conditional-expression: logical-or or '?:' ternary form
+ExprPtr Parser::parseConditionalExpression() {
+    // parse lhs as unary then handle binary ops via precedence climbing
+    ExprPtr lhs = parseUnaryExpression();
+    if (!lhs) return nullptr;
+    lhs = parseBinaryRHS(*this, 0, lhs);
+
+    // handle ternary ?: (right-associative)
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "?") {
+        lex.next();
+        ExprPtr thenExpr = parseConditionalExpression();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' in conditional expression"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+        } else {
+            lex.next();
+        }
+        ExprPtr elseExpr = parseConditionalExpression();
+        auto te = make_ast<TernaryExpr>();
+        te->cond = lhs;
+        te->thenExpr = thenExpr;
+        te->elseExpr = elseExpr;
+        te->kind = Expr::Kind::Ternary;
+        te->span = lhs->span;
+        if (elseExpr) te->span.end = elseExpr->span.end;
+        return te;
+    }
+    return lhs;
 }
 
 InitializerPtr Parser::parseInitializer() {
@@ -1060,7 +1190,7 @@ InitializerPtr Parser::parseInitializer() {
 
     // Otherwise parse as an assignment-expression
     init->kind = Initializer::Kind::Expr;
-    init->expr = parseExpr();
+    init->expr = parseAssignmentExpression();
     return init;
 }
 
@@ -1069,7 +1199,7 @@ Designator Parser::parseDesignator() {
     if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="[") {
         // array-index designator
         lex.next();
-        auto e = parseExpr();
+        auto e = parseConditionalExpression();
         d.kind = Designator::Kind::Index;
         d.index = e;
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="]") lex.next();

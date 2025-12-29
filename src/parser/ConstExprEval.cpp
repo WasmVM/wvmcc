@@ -22,6 +22,9 @@ std::optional<long long> ConstExprEvaluator::evalIntegerConstantExpr(const ExprP
     if (e->kind == Expr::Kind::Binary) {
         auto be = std::static_pointer_cast<BinaryExpr>(e);
         if (!be->lhs || !be->rhs) return std::nullopt;
+        // assignment operators are not constant expressions
+        static const std::vector<std::string> assignOps = {"=","*=","/=","%=","+=","-=","<<=",">>=","&=","^=","|="};
+        for (const auto &aop : assignOps) if (be->op == aop) return std::nullopt;
         auto L = evalIntegerConstantExpr(be->lhs);
         auto R = evalIntegerConstantExpr(be->rhs);
         if (!L.has_value() || !R.has_value()) return std::nullopt;

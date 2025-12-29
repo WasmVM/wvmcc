@@ -52,7 +52,10 @@ private:
     // statements/expressions (very small subset)
     std::vector<BlockItemPtr> parseCompoundBody();
     StmtPtr parseStmt();
-    ExprPtr parseExpr();
+    ExprPtr parseAssignmentExpression();
+    ExprPtr parsePrimary();
+    ExprPtr parseUnaryExpression();
+    ExprPtr parseConditionalExpression();
     
 private:
     std::vector<wvmcc::Diagnostic> diagnostics{};
