@@ -1,6 +1,5 @@
 #include "Semantic.hpp"
 
-#include <iostream>
 #include <unordered_map>
 #include <unordered_set>
 #include <functional>
@@ -115,6 +114,18 @@ static std::string declaratorName(const DeclaratorPtr &d) {
     }
     return std::string();
 }
+
+// Determine whether a declarator denotes a function (possibly nested)
+static bool isFunctionDeclarator(const DeclaratorPtr &d) {
+    if (!d) return false;
+    DeclaratorPtr cur = d;
+    while (cur) {
+        if (cur->kind == Declarator::Kind::Function) return true;
+        if (cur->inner.has_value()) cur = cur->inner.value();
+        else break;
+    }
+    return false;
+}
 void Semantic::recordDef(const std::string &name, const wvmcc::SourceSpan &span) {
     if (name.empty()) return;
     defCount[name]++;
@@ -153,6 +164,7 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
 
 void Semantic::onDeclaration(const DeclarationPtr &d) {
     if (!d) return;
+    (void)d;
     // perform a simple declaration compatibility check based on compact signature
     if (d->declarator) {
         std::string name = declaratorName(d->declarator);
@@ -178,6 +190,7 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             declaredSignatures[name] = sig;
         }
     }
+    
     if (d->declarator) {
         std::string rname = declaratorName(d->declarator);
         if (!rname.empty()) {
@@ -199,6 +212,17 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
             diag.span = d->span;
             curDiagnostics->push_back(std::move(diag));
+        }
+        // C 6.7.1: a declaration of an identifier for a function that has block
+        // scope shall have no explicit storage-class specifier other than extern.
+        if (d->declarator && isFunctionDeclarator(d->declarator) && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) {
+            if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static) || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Auto) || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "function with block scope shall have no explicit storage-class";
+                diag.span = d->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
         }
     }
 }
@@ -353,7 +377,8 @@ void Semantic::checkFunction(const FunctionDefPtr &f, std::vector<wvmcc::Diagnos
         diagnostics.push_back(std::move(diag));
         return;
     }
-    if (f->declarator->id.name.empty()) {
+    std::string name = declaratorName(f->declarator);
+    if (name.empty()) {
         Diagnostic diag;
         diag.severity = Diagnostic::Severity::Error;
         diag.message = "function with empty name";

@@ -32,7 +32,9 @@ void ASTVisitor::traverseFunction(const FunctionDefPtr &f) {
     // body
     for (const auto &bi : f->body) {
         if (std::holds_alternative<DeclarationPtr>(bi->item)) {
-            traverseDeclaration(std::get<DeclarationPtr>(bi->item));
+            auto d = std::get<DeclarationPtr>(bi->item);
+            onDeclaration(d);
+            traverseDeclaration(d);
         } else {
             traverseStmt(std::get<StmtPtr>(bi->item));
         }
@@ -70,8 +72,11 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
             auto cs = std::dynamic_pointer_cast<CompoundStmt>(s);
             if (cs) {
                 for (const auto &bi : cs->items) {
-                    if (std::holds_alternative<DeclarationPtr>(bi->item)) traverseDeclaration(std::get<DeclarationPtr>(bi->item));
-                    else traverseStmt(std::get<StmtPtr>(bi->item));
+                    if (std::holds_alternative<DeclarationPtr>(bi->item)) {
+                        auto d = std::get<DeclarationPtr>(bi->item);
+                        onDeclaration(d);
+                        traverseDeclaration(d);
+                    } else traverseStmt(std::get<StmtPtr>(bi->item));
                 }
             }
             break;
@@ -98,8 +103,11 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
             if (fs) {
                 if (fs->init) {
                     auto bi = fs->init.value();
-                    if (std::holds_alternative<DeclarationPtr>(bi->item)) traverseDeclaration(std::get<DeclarationPtr>(bi->item));
-                    else traverseStmt(std::get<StmtPtr>(bi->item));
+                    if (std::holds_alternative<DeclarationPtr>(bi->item)) {
+                        auto d = std::get<DeclarationPtr>(bi->item);
+                        onDeclaration(d);
+                        traverseDeclaration(d);
+                    } else traverseStmt(std::get<StmtPtr>(bi->item));
                 }
                 if (fs->cond) traverseExpr(fs->cond.value());
                 if (fs->step) traverseExpr(fs->step.value());

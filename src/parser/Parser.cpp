@@ -1029,9 +1029,11 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             // attempt to parse declaration specifiers; if none found, treat as statement
             auto specs = parseDeclarationSpecifiers();
             if (!specs.empty()) {
-                std::string name;
-                if (lex.peek() && lex.peek()->kind()==TokenKind::Identifier) { name = lex.peek()->lexeme(); lex.next(); }
-                auto decl = parseDeclaration(specs, name);
+                DeclaratorPtr maybeDeclr = nullptr;
+                if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || (lex.peek()->kind() == TokenKind::Punctuator && (lex.peek()->lexeme() == "(" || lex.peek()->lexeme() == "*")))) {
+                    maybeDeclr = parseDeclarator();
+                }
+                auto decl = parseDeclaration(specs, maybeDeclr);
                 auto bi = make_ast<BlockItem>();
                 bi->item = decl;
                 // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
