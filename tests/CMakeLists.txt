@@ -60,7 +60,7 @@ if(EXISTS ${PP_TOKENIZER_IDENTIFIER_TEST})
 endif()
 
 # Lexer keyword classification test
-set(LEXER_KEYWORD_TEST ${TEST_ROOT}/unit/pp/lexer_keyword_test.cpp)
+set(LEXER_KEYWORD_TEST ${TEST_ROOT}/unit/parser/lexer_keyword_test.cpp)
 if(EXISTS ${LEXER_KEYWORD_TEST})
     add_executable(wvmcc-lexer-keyword-test ${LEXER_KEYWORD_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
     
@@ -68,7 +68,7 @@ if(EXISTS ${LEXER_KEYWORD_TEST})
 endif()
 
 # Lexer identifier classification test
-set(LEXER_IDENTIFIER_TEST ${TEST_ROOT}/unit/pp/lexer_identifier_test.cpp)
+set(LEXER_IDENTIFIER_TEST ${TEST_ROOT}/unit/parser/lexer_identifier_test.cpp)
 if(EXISTS ${LEXER_IDENTIFIER_TEST})
     add_executable(wvmcc-lexer-identifier-test ${LEXER_IDENTIFIER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
     
@@ -138,7 +138,7 @@ if(EXISTS ${PARSER_STATIC_ASSERT_TEST})
 endif()
 
 # Lexer punctuator classification test
-set(LEXER_PUNCTUATOR_TEST ${TEST_ROOT}/unit/pp/lexer_punctuator_test.cpp)
+set(LEXER_PUNCTUATOR_TEST ${TEST_ROOT}/unit/parser/lexer_punctuator_test.cpp)
 if(EXISTS ${LEXER_PUNCTUATOR_TEST})
     add_executable(wvmcc-lexer-punctuator-test ${LEXER_PUNCTUATOR_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
     
@@ -146,7 +146,7 @@ if(EXISTS ${LEXER_PUNCTUATOR_TEST})
 endif()
 
 # Lexer integer constant parsing test
-set(LEXER_INTEGER_TEST ${TEST_ROOT}/unit/pp/lexer_integer_test.cpp)
+set(LEXER_INTEGER_TEST ${TEST_ROOT}/unit/parser/lexer_integer_test.cpp)
 if(EXISTS ${LEXER_INTEGER_TEST})
     add_executable(wvmcc-lexer-integer-test ${LEXER_INTEGER_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
     
@@ -154,7 +154,7 @@ if(EXISTS ${LEXER_INTEGER_TEST})
 endif()
 
 # Lexer floating constant parsing test
-set(LEXER_FLOATING_TEST ${TEST_ROOT}/unit/pp/lexer_floating_test.cpp)
+set(LEXER_FLOATING_TEST ${TEST_ROOT}/unit/parser/lexer_floating_test.cpp)
 if(EXISTS ${LEXER_FLOATING_TEST})
     add_executable(wvmcc-lexer-floating-test ${LEXER_FLOATING_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
     
@@ -162,7 +162,7 @@ if(EXISTS ${LEXER_FLOATING_TEST})
 endif()
 
 # Lexer character constant parsing test
-set(LEXER_CHAR_TEST ${TEST_ROOT}/unit/pp/lexer_char_test.cpp)
+set(LEXER_CHAR_TEST ${TEST_ROOT}/unit/parser/lexer_char_test.cpp)
 if(EXISTS ${LEXER_CHAR_TEST})
     add_executable(wvmcc-lexer-char-test ${LEXER_CHAR_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp)
     
