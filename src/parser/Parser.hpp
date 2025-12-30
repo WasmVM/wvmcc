@@ -81,6 +81,14 @@ private:
     std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> tag_registry{};
     // tag registry for enum names -> specifier (incomplete or complete)
     std::unordered_map<std::string, std::shared_ptr<DeclarationSpecifiers::TypeSpecifier::EnumSpecifier>> enum_tag_registry{};
+    // labels seen in the current function (to enforce uniqueness)
+    std::unordered_set<std::string> labels_in_current_function{};
+    // gotos recorded in the current function (label name + span)
+    std::vector<std::pair<std::string, SourceSpan>> gotos_in_current_function{};
+    // current function's declaration specifiers while parsing body
+    std::optional<DeclarationSpecifiers> current_function_specs{};
+    // context stack to track whether we're inside loops/switches for continue/break
+    std::vector<Stmt::Kind> stmt_context_stack{};
 };
 
 } // namespace wvmcc::parser

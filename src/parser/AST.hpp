@@ -296,6 +296,22 @@ struct ForStmt : Stmt { std::optional<BlockItemPtr> init; std::optional<ExprPtr>
 
 struct ReturnStmt : Stmt { std::optional<ExprPtr> value; };
 
+struct DoWhileStmt : Stmt { StmtPtr body; ExprPtr cond; };
+
+struct BreakStmt : Stmt {};
+
+struct ContinueStmt : Stmt {};
+
+struct GotoStmt : Stmt { std::string label; };
+
+struct SwitchStmt : Stmt { ExprPtr cond; StmtPtr body; };
+
+struct CaseStmt : Stmt { ExprPtr value; StmtPtr stmt; };
+
+struct DefaultStmt : Stmt { StmtPtr stmt; };
+
+struct LabelStmt : Stmt { std::string name; StmtPtr stmt; };
+
 struct BlockItem : Node {
     // either a declaration or a statement
     std::variant<DeclarationPtr, StmtPtr> item;

@@ -846,7 +846,20 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     auto f = make_ast<FunctionDef>();
     f->specifiers = specs;
     f->declarator = decl;
+    // initialize per-function parsing state
+    labels_in_current_function.clear();
+    gotos_in_current_function.clear();
+    stmt_context_stack.clear();
+    current_function_specs = specs;
     f->body = parseCompoundBody();
+    // validate gotos: each goto must name an existing label in this function
+    for (auto &g : gotos_in_current_function) {
+        if (!labels_in_current_function.count(g.first)) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "goto to undefined label '" + g.first + "'"; d.span = g.second; diagnostics.push_back(std::move(d));
+        }
+    }
+    // clear current function speculative state
+    current_function_specs.reset();
     return f;
 }
 
@@ -919,32 +932,157 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             rs->span = p->span;
             rs->value = parseExpression();
             if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+            // validate return vs function return type if available
+            if (current_function_specs.has_value()) {
+                bool funcVoid = false;
+                for (auto &ts : current_function_specs->typeSpecifiers) {
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                        for (auto &st : ts.simple) {
+                            if (st == DeclarationSpecifiers::SimpleTypeSpecifier::Void) funcVoid = true;
+                        }
+                    }
+                }
+                if (rs->value.has_value() && funcVoid) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "return with expression in function returning void"; d.span = rs->span; diagnostics.push_back(std::move(d));
+                }
+                if (!rs->value.has_value() && !funcVoid) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "return without expression in non-void function"; d.span = rs->span; diagnostics.push_back(std::move(d));
+                }
+            }
             auto bi = make_ast<BlockItem>();
             bi->item = std::static_pointer_cast<Stmt>(rs);
             body.push_back(bi);
             continue;
         }
 
-        if (p->kind() == TokenKind::Keyword || p->kind() == TokenKind::Identifier) {
-            auto specs = parseDeclarationSpecifiers();
-            std::string name;
-            if (lex.peek() && lex.peek()->kind()==TokenKind::Identifier) { name = lex.peek()->lexeme(); lex.next(); }
-            auto decl = parseDeclaration(specs, name);
-            auto bi = make_ast<BlockItem>();
-            bi->item = decl;
-            // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
-            // external or internal linkage, the declaration shall have no initializer.
-            if (decl && decl->initializer.has_value() && (specs.hasStorage(StorageClass::Extern) || specs.hasStorage(StorageClass::Static))) {
-                wvmcc::Diagnostic diag;
-                diag.severity = wvmcc::Diagnostic::Severity::Error;
-                diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
-                diag.span = decl->span;
-                diagnostics.push_back(std::move(diag));
+        // case / default labels (only valid inside switch but we parse them here)
+        if (p->kind() == TokenKind::Keyword && p->lexeme() == "case") {
+            // consume 'case'
+            lex.next();
+            // parse constant/conditional expression
+            ExprPtr val = parseConditionalExpression();
+            // expect ':'
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+                if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after case expression"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+            } else lex.next();
+            // ensure we're inside a switch
+            bool inSwitch = false;
+            for (auto it = stmt_context_stack.rbegin(); it != stmt_context_stack.rend(); ++it) { if (*it == Stmt::Kind::Switch) { inSwitch = true; break; } }
+            if (!inSwitch) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "'case' label not within a switch"; if (p) d.span = p->span; diagnostics.push_back(std::move(d));
             }
+            // parse the statement following the case label
+            StmtPtr sub = parseStmt();
+            auto cs = make_ast<CaseStmt>();
+            cs->value = val;
+            cs->stmt = sub;
+            cs->kind = Stmt::Kind::Case;
+            cs->span = val ? val->span : SourceSpan{};
+            auto bi = make_ast<BlockItem>();
+            bi->item = std::static_pointer_cast<Stmt>(cs);
             body.push_back(bi);
             continue;
         }
 
+        if (p->kind() == TokenKind::Keyword && p->lexeme() == "default") {
+            // ensure we're inside a switch
+            bool inSwitch = false;
+            for (auto it = stmt_context_stack.rbegin(); it != stmt_context_stack.rend(); ++it) { if (*it == Stmt::Kind::Switch) { inSwitch = true; break; } }
+            if (!inSwitch) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "'default' label not within a switch"; if (p) d.span = p->span; diagnostics.push_back(std::move(d));
+            }
+            lex.next();
+            if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+                if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after default"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+            } else lex.next();
+            StmtPtr sub = parseStmt();
+            auto ds = make_ast<DefaultStmt>();
+            ds->stmt = sub;
+            ds->kind = Stmt::Kind::Default;
+            ds->span = sub ? sub->span : SourceSpan{};
+            auto bi = make_ast<BlockItem>();
+            bi->item = std::static_pointer_cast<Stmt>(ds);
+            body.push_back(bi);
+            continue;
+        }
+
+        if (p->kind() == TokenKind::Keyword || p->kind() == TokenKind::Identifier) {
+            // attempt to parse declaration specifiers; if none found, treat as statement
+            auto specs = parseDeclarationSpecifiers();
+            if (!specs.empty()) {
+                std::string name;
+                if (lex.peek() && lex.peek()->kind()==TokenKind::Identifier) { name = lex.peek()->lexeme(); lex.next(); }
+                auto decl = parseDeclaration(specs, name);
+                auto bi = make_ast<BlockItem>();
+                bi->item = decl;
+                // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
+                // external or internal linkage, the declaration shall have no initializer.
+                if (decl && decl->initializer.has_value() && (specs.hasStorage(StorageClass::Extern) || specs.hasStorage(StorageClass::Static))) {
+                    wvmcc::Diagnostic diag;
+                    diag.severity = wvmcc::Diagnostic::Severity::Error;
+                    diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
+                    diag.span = decl->span;
+                    diagnostics.push_back(std::move(diag));
+                }
+                body.push_back(bi);
+                continue;
+            }
+            // if we started with a keyword and no declaration specifiers were parsed,
+            // it is likely a statement keyword (if/switch/for/while/return/etc.).
+            if (p->kind() == TokenKind::Keyword) {
+                StmtPtr st = parseStmt();
+                auto bi = make_ast<BlockItem>();
+                bi->item = st;
+                body.push_back(bi);
+                continue;
+            }
+
+            // fall through to statement handling when specs was empty (identifiers handled below)
+        }
+
+        // handle labeled-statement: identifier ':' statement
+        if (p->kind() == TokenKind::Identifier) {
+            // lookahead for ':'
+            auto idtok = *lex.next();
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":") {
+                // it's a label
+                lex.next(); // consume ':'
+                // parse the sub-statement
+                StmtPtr sub = parseStmt();
+                auto ls = make_ast<LabelStmt>();
+                ls->name = idtok.lexeme();
+                ls->stmt = sub;
+                ls->span = idtok.span;
+                ls->kind = Stmt::Kind::Label;
+                // uniqueness check within function
+                if (!labels_in_current_function.insert(ls->name).second) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "duplicate label '" + ls->name + "' in function"; d.span = ls->span; diagnostics.push_back(std::move(d));
+                }
+                auto bi = make_ast<BlockItem>();
+                bi->item = std::static_pointer_cast<Stmt>(ls);
+                body.push_back(bi);
+                continue;
+            } else {
+                // not a label: we consumed an identifier that may start an expression -> rebuild as identifier expression
+                auto idexpr = make_ast<IdentifierExpr>();
+                idexpr->span = idtok.span;
+                idexpr->name = idtok.lexeme();
+                idexpr->kind = Expr::Kind::Ident;
+                // parse the rest of expression using parseExpression (which will parse starting at current lexer position), then if null, use idexpr
+                ExprPtr rest = parseExpression();
+                ExprPtr finalExpr = rest ? rest : idexpr;
+                if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+                auto es = make_ast<ExprStmt>();
+                es->expr = finalExpr;
+                es->span = finalExpr ? finalExpr->span : SourceSpan{};
+                auto bi = make_ast<BlockItem>();
+                bi->item = std::static_pointer_cast<Stmt>(es);
+                body.push_back(bi);
+                continue;
+            }
+        }
+
+        // default: expression statement
         auto expr = parseExpression();
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
         auto es = make_ast<ExprStmt>();
@@ -958,8 +1096,229 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
 }
 
 StmtPtr Parser::parseStmt() {
-    return nullptr;
+    auto p = lex.peek();
+    if (!p) return nullptr;
+    // compound-statement
+    if (p->kind() == TokenKind::Punctuator && p->lexeme() == "{") {
+        // consume '{'
+        lex.next();
+        auto cs = make_ast<CompoundStmt>();
+        cs->items = parseCompoundBody();
+        cs->kind = Stmt::Kind::Compound;
+        return std::static_pointer_cast<Stmt>(cs);
+    }
+
+    // empty statement ';'
+    if (p->kind() == TokenKind::Punctuator && p->lexeme() == ";") {
+        lex.next();
+        auto s = make_ast<Stmt>();
+        s->kind = Stmt::Kind::Empty;
+        return s;
+    }
+
+    // return statement
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "return") {
+        lex.next();
+        auto rs = make_ast<ReturnStmt>();
+        rs->span = p->span;
+        rs->value = parseExpression();
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        rs->kind = Stmt::Kind::Return;
+        return std::static_pointer_cast<Stmt>(rs);
+    }
+
+    // if statement
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "if") {
+        lex.next();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after if"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+        ExprPtr cond = parseExpression();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+        StmtPtr thenS = parseStmt();
+        std::optional<StmtPtr> elseS;
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "else") {
+            lex.next();
+            elseS = parseStmt();
+        }
+        auto ifs = make_ast<IfStmt>();
+        ifs->cond = cond;
+        ifs->thenStmt = thenS;
+        ifs->elseStmt = elseS;
+        ifs->kind = Stmt::Kind::If;
+        ifs->span = cond ? cond->span : SourceSpan{};
+        return std::static_pointer_cast<Stmt>(ifs);
+    }
+
+    // switch statement
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "switch") {
+        lex.next();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after switch"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+        ExprPtr cond = parseExpression();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+        // push switch context so case/default checks work
+        stmt_context_stack.push_back(Stmt::Kind::Switch);
+        StmtPtr body = parseStmt();
+        stmt_context_stack.pop_back();
+        auto ss = make_ast<SwitchStmt>();
+        ss->cond = cond;
+        ss->body = body;
+        ss->kind = Stmt::Kind::Switch;
+        ss->span = cond ? cond->span : SourceSpan{};
+        return std::static_pointer_cast<Stmt>(ss);
+    }
+
+    // while
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "while") {
+        lex.next();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after while"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+        ExprPtr cond = parseExpression();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+        stmt_context_stack.push_back(Stmt::Kind::While);
+        StmtPtr body = parseStmt();
+        stmt_context_stack.pop_back();
+        auto ws = make_ast<WhileStmt>();
+        ws->cond = cond;
+        ws->body = body;
+        ws->kind = Stmt::Kind::While;
+        ws->span = cond ? cond->span : SourceSpan{};
+        return std::static_pointer_cast<Stmt>(ws);
+    }
+
+    // do-while
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "do") {
+        lex.next();
+        stmt_context_stack.push_back(Stmt::Kind::DoWhile);
+        StmtPtr body = parseStmt();
+        stmt_context_stack.pop_back();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "while")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected 'while' after do body"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after while"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+        ExprPtr cond = parseExpression();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        auto ds = make_ast<DoWhileStmt>();
+        ds->body = body;
+        ds->cond = cond;
+        ds->kind = Stmt::Kind::DoWhile;
+        ds->span = cond ? cond->span : SourceSpan{};
+        return std::static_pointer_cast<Stmt>(ds);
+    }
+
+    // for
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "for") {
+        lex.next();
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(")) {
+            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after for"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+        } else lex.next();
+        auto fs = make_ast<ForStmt>();
+        // clause-1: either declaration or expressionopt
+        if (lex.peek() && (lex.peek()->kind() == TokenKind::Keyword || lex.peek()->kind() == TokenKind::Identifier)) {
+            auto specs = parseDeclarationSpecifiers();
+            if (!specs.empty()) {
+                std::string name;
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) { name = lex.peek()->lexeme(); lex.next(); }
+                auto decl = parseDeclaration(specs, name);
+                auto bi = make_ast<BlockItem>();
+                bi->item = decl;
+                fs->init = bi;
+            } else {
+                // expressionopt
+                if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";")) {
+                    auto expr = parseExpression();
+                    auto es = make_ast<ExprStmt>(); es->expr = expr; es->kind = Stmt::Kind::Expr; es->span = expr?expr->span:SourceSpan{};
+                    auto bi = make_ast<BlockItem>(); bi->item = std::static_pointer_cast<Stmt>(es);
+                    fs->init = bi;
+                }
+                if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") {
+                    lex.next();
+                }
+            }
+        } else {
+            // empty init (immediately semicolon expected)
+            if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        }
+
+        // expression-2 (condition) optional
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";")) {
+            fs->cond = parseExpression();
+        }
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+
+        // expression-3 (step) optional
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+            fs->step = parseExpression();
+        }
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==")") lex.next();
+        stmt_context_stack.push_back(Stmt::Kind::For);
+        fs->body = parseStmt();
+        stmt_context_stack.pop_back();
+        fs->kind = Stmt::Kind::For;
+        fs->span = fs->body ? fs->body->span : SourceSpan{};
+        return std::static_pointer_cast<Stmt>(fs);
+    }
+
+    // break
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "break") {
+        lex.next();
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        // ensure we're inside a loop or switch
+        bool ok = false;
+        for (auto it = stmt_context_stack.rbegin(); it != stmt_context_stack.rend(); ++it) {
+            if (*it == Stmt::Kind::While || *it == Stmt::Kind::For || *it == Stmt::Kind::DoWhile || *it == Stmt::Kind::Switch) { ok = true; break; }
+        }
+        if (!ok) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "'break' not inside loop or switch"; if (p) d.span = p->span; diagnostics.push_back(std::move(d));
+        }
+        auto b = make_ast<BreakStmt>(); b->kind = Stmt::Kind::Break; return std::static_pointer_cast<Stmt>(b);
+    }
+
+    // continue
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "continue") {
+        lex.next();
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        bool ok = false;
+        for (auto it = stmt_context_stack.rbegin(); it != stmt_context_stack.rend(); ++it) {
+            if (*it == Stmt::Kind::While || *it == Stmt::Kind::For || *it == Stmt::Kind::DoWhile) { ok = true; break; }
+        }
+        if (!ok) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "'continue' not inside a loop"; if (p) d.span = p->span; diagnostics.push_back(std::move(d));
+        }
+        auto c = make_ast<ContinueStmt>(); c->kind = Stmt::Kind::Continue; return std::static_pointer_cast<Stmt>(c);
+    }
+
+    // goto
+    if (p->kind() == TokenKind::Keyword && p->lexeme() == "goto") {
+        lex.next();
+        std::string label;
+        SourceSpan labspan{};
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) { label = lex.peek()->lexeme(); labspan = lex.peek()->span; lex.next(); }
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        // record goto for later validation
+        gotos_in_current_function.push_back({label, labspan});
+        auto g = make_ast<GotoStmt>(); g->label = label; g->kind = Stmt::Kind::Goto; return std::static_pointer_cast<Stmt>(g);
+    }
+
+    // fallback: expression statement
+    {
+        auto expr = parseExpression();
+        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+        auto es = make_ast<ExprStmt>();
+        es->expr = expr;
+        es->span = expr ? expr->span : SourceSpan{};
+        es->kind = Stmt::Kind::Expr;
+        return std::static_pointer_cast<Stmt>(es);
+    }
 }
+
+
 
 // Simple primary expression parser: integer, identifier, string
 ExprPtr Parser::parsePrimary() {
