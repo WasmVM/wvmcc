@@ -89,6 +89,38 @@ static std::string signatureForDeclaration(const DeclarationPtr &d) {
             case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
                 s += "typedef:" + ts.text + ";";
                 break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Atomic:
+                s += "atomic:";
+                if (ts.atomicInner) {
+                    for (const auto &its : ts.atomicInner->typeSpecifiers) {
+                        switch (its.kind) {
+                            case DeclarationSpecifiers::TypeSpecifier::Kind::Simple:
+                                s += "inner_simple:";
+                                for (auto st : its.simple) s += std::to_string(static_cast<int>(st)) + ",";
+                                s += ";";
+                                break;
+                            case DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion:
+                                s += (its.su->kind == StructOrUnionSpecifier::Kind::Struct) ? "inner_struct:" : "inner_union:";
+                                if (its.su->name) s += *its.su->name; else s += "<anon>";
+                                s += its.su->hasBody ? ":body;" : ":fwd;";
+                                break;
+                            case DeclarationSpecifiers::TypeSpecifier::Kind::Enum:
+                                s += "inner_enum:";
+                                if (its.en->name) s += *its.en->name; else s += "<anon>";
+                                s += its.en->hasBody ? ":body;" : ":fwd;";
+                                break;
+                            case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
+                                s += "inner_typedef:" + its.text + ";";
+                                break;
+                            case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
+                                s += "inner_other:" + its.text + ";";
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                }
+                break;
             case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
                 s += "other:" + ts.text + ";";
                 break;
@@ -123,6 +155,29 @@ static bool isFunctionDeclarator(const DeclaratorPtr &d) {
         if (cur->kind == Declarator::Kind::Function) return true;
         if (cur->inner.has_value()) cur = cur->inner.value();
         else break;
+    }
+    return false;
+}
+
+// Check whether a struct/union specifier contains at least one named member,
+// directly or via anonymous nested structs/unions.
+static bool structOrUnionHasNamedMember(const std::shared_ptr<StructOrUnionSpecifier> &su) {
+    if (!su) return false;
+    for (const auto &m : su->members) {
+        // if any declarator in this member declares an identifier, we have a named member
+        for (const auto &sd : m.declarators) {
+            if (sd.declarator) {
+                if (!declaratorName(sd.declarator).empty()) return true;
+            }
+        }
+        // no declarators: could be an anonymous struct/union specifier in specifiers
+        for (const auto &ts : m.specifiers.typeSpecifiers) {
+            if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
+                if (ts.su && ts.su->hasBody) {
+                    if (structOrUnionHasNamedMember(ts.su)) return true;
+                }
+            }
+        }
     }
     return false;
 }
@@ -297,12 +352,114 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
     return !hasError;
 }
 
+// forward declare helper
+static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics);
+
 void Semantic::checkExternal(const ExternalDeclPtr &e, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!e) return;
     if (std::holds_alternative<FunctionDefPtr>(e->decl)) {
-        checkFunction(std::get<FunctionDefPtr>(e->decl), diagnostics);
+        auto f = std::get<FunctionDefPtr>(e->decl);
+        // record any struct/union/enum definitions appearing in function specifiers
+        processTypeSpecifiersForTags(f->specifiers, structUnionTagDefs, enumTagDefs, f->span, diagnostics);
+        checkFunction(f, diagnostics);
     } else if (std::holds_alternative<DeclarationPtr>(e->decl)) {
-        checkDeclaration(std::get<DeclarationPtr>(e->decl), diagnostics);
+        auto d = std::get<DeclarationPtr>(e->decl);
+        // inspect declaration specifiers for tag definitions
+        processTypeSpecifiersForTags(d->specifiers, structUnionTagDefs, enumTagDefs, d->span, diagnostics);
+        checkDeclaration(d, diagnostics);
+    }
+}
+
+// Helper to inspect type-specifiers in a declaration or function specifiers to
+// record or detect duplicate struct/union and enum tag definitions.
+static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics) {
+    for (const auto &ts : specs.typeSpecifiers) {
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
+            if (ts.su && ts.su->name) {
+                if (ts.su->hasBody) {
+                    const std::string &tag = *ts.su->name;
+                    auto it = structDefs.find(tag);
+                    if (it != structDefs.end()) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "duplicate tag definition for '" + tag + "'"; d.span = span; diagnostics.push_back(std::move(d));
+                    } else {
+                        structDefs[tag] = span;
+                    }
+                }
+            }
+        } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) {
+            if (ts.en && ts.en->name) {
+                if (ts.en->hasBody) {
+                    const std::string &tag = *ts.en->name;
+                    auto it = enumDefs.find(tag);
+                    if (it != enumDefs.end()) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "duplicate enum tag definition for '" + tag + "'"; d.span = span; diagnostics.push_back(std::move(d));
+                    } else {
+                        enumDefs[tag] = span;
+                    }
+                }
+            }
+        } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Atomic) {
+            // If this is `_Atomic(inner)`, recurse into inner specs to find any tag definitions
+            if (ts.atomicInner) {
+                processTypeSpecifiersForTags(*ts.atomicInner, structDefs, enumDefs, span, diagnostics);
+            }
+        }
+            // If this enum has a body, validate enumerators: duplicate names and constant inits
+            if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) {
+                if (ts.en && ts.en->hasBody) {
+                    std::unordered_map<std::string, long long> seenVals;
+                    long long next = 0;
+                    for (const auto &e : ts.en->enumerators) {
+                        if (seenVals.find(e.name) != seenVals.end()) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "duplicate enumerator '" + e.name + "'"; d.span = span; diagnostics.push_back(std::move(d));
+                            continue;
+                        }
+                        if (e.value) {
+                            auto v = ConstExprEvaluator::evalIntegerConstantExpr(e.value.value());
+                            if (!v.has_value()) {
+                                Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "enumerator value must be an integer constant expression"; d.span = e.value.value()->span; diagnostics.push_back(std::move(d));
+                            } else {
+                                seenVals[e.name] = *v;
+                                next = *v + 1;
+                            }
+                        } else {
+                            seenVals[e.name] = next;
+                            next++;
+                        }
+                    }
+                }
+            }
+            if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Atomic) {
+                if (ts.atomicInner) {
+                    // validate any enums inside the atomic inner specifier as well
+                    for (const auto &its : ts.atomicInner->typeSpecifiers) {
+                        if (its.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) {
+                            if (its.en && its.en->hasBody) {
+                                std::unordered_map<std::string, long long> seenVals;
+                                long long next = 0;
+                                for (const auto &e : its.en->enumerators) {
+                                    if (seenVals.find(e.name) != seenVals.end()) {
+                                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "duplicate enumerator '" + e.name + "'"; d.span = span; diagnostics.push_back(std::move(d));
+                                        continue;
+                                    }
+                                    if (e.value) {
+                                        auto v = ConstExprEvaluator::evalIntegerConstantExpr(e.value.value());
+                                        if (!v.has_value()) {
+                                            Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "enumerator value must be an integer constant expression"; d.span = e.value.value()->span; diagnostics.push_back(std::move(d));
+                                        } else {
+                                            seenVals[e.name] = *v;
+                                            next = *v + 1;
+                                        }
+                                    } else {
+                                        seenVals[e.name] = next;
+                                        next++;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
     }
 }
 
@@ -349,6 +506,39 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
     // designator indexes must be integer constant expressions regardless of storage class
     if (d->initializer.has_value()) {
         checkDesignatorIndexes(d->initializer.value(), diagnostics);
+    }
+
+    // Struct/union specifier semantic check (C 6.7.2.1): if a struct-or-union
+    // specifier has a body but contains no named members (neither directly nor
+    // via anonymous nested struct/union), the behavior is undefined — report.
+    for (const auto &ts : d->specifiers.typeSpecifiers) {
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
+            if (ts.su && ts.su->hasBody) {
+                if (!structOrUnionHasNamedMember(ts.su)) {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "struct/union has no named members";
+                    diag.span = d->span;
+                    diagnostics.push_back(std::move(diag));
+                }
+            }
+        } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Atomic) {
+            if (ts.atomicInner) {
+                for (const auto &its : ts.atomicInner->typeSpecifiers) {
+                    if (its.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
+                        if (its.su && its.su->hasBody) {
+                            if (!structOrUnionHasNamedMember(its.su)) {
+                                Diagnostic diag;
+                                diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "struct/union has no named members";
+                                diag.span = d->span;
+                                diagnostics.push_back(std::move(diag));
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     // track internal (static) definitions for duplicate checking

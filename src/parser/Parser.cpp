@@ -91,14 +91,38 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
             lex.next();
             continue;
         }
-        // type qualifiers
+        // type qualifiers and special-case `_Atomic(type)` form
         if (typequal.count(s)) {
-            if (s == "const") specs.addTypeQual(TypeQualifier::Const);
-            else if (s == "volatile") specs.addTypeQual(TypeQualifier::Volatile);
-            else if (s == "restrict") specs.addTypeQual(TypeQualifier::Restrict);
-            else if (s == "_Atomic") specs.addTypeQual(TypeQualifier::Atomic);
-            lex.next();
-            continue;
+            if (s == "const") { specs.addTypeQual(TypeQualifier::Const); lex.next(); continue; }
+            else if (s == "volatile") { specs.addTypeQual(TypeQualifier::Volatile); lex.next(); continue; }
+            else if (s == "restrict") { specs.addTypeQual(TypeQualifier::Restrict); lex.next(); continue; }
+            else if (s == "_Atomic") {
+                // Peek to see if this is the `_Atomic(type)` form (type-specifier)
+                // Consume the `_Atomic` token and inspect next token.
+                lex.next();
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
+                    // consume '('
+                    lex.next();
+                    // parse an inner declaration-specifiers representing the wrapped type
+                    auto innerSpecs = parseDeclarationSpecifiers();
+                    // expect ')'
+                    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Atomic(type)"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                    } else {
+                        lex.next();
+                    }
+                    DeclarationSpecifiers::TypeSpecifier nts;
+                    nts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Atomic;
+                    // store the parsed inner specs so later passes can inspect inner tags
+                    nts.atomicInner = std::make_shared<DeclarationSpecifiers>(std::move(innerSpecs));
+                    specs.typeSpecifiers.push_back(std::move(nts));
+                    continue;
+                } else {
+                    // plain qualifier form: `_Atomic` as type-qualifier
+                    specs.addTypeQual(TypeQualifier::Atomic);
+                    continue;
+                }
+            }
         }
 
         if (types.count(s)) {

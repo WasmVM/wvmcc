@@ -207,6 +207,15 @@ void ASTPrinter::emitSpecifiersEntries(const DeclarationSpecifiers &specs) {
                     }
                 } else if (!ts.text.empty()) simpleTag("Spec", ts.text);
                 break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Atomic:
+                if (ts.atomicInner) {
+                    openTag("atomic", "");
+                    emitSpecifiersEntries(*ts.atomicInner);
+                    closeTag("atomic");
+                } else if (!ts.text.empty()) {
+                    simpleTag("Spec", ts.text);
+                }
+                break;
             case DeclarationSpecifiers::TypeSpecifier::Kind::Enum:
                 if (ts.en) {
                     std::string name;

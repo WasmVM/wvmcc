@@ -42,6 +42,9 @@ private:
     void onExitFunction(const FunctionDefPtr &f) override;
     // internal (static) definitions tracking: name -> (span, definitive)
     std::unordered_map<std::string, std::pair<wvmcc::SourceSpan, bool>> internalDefs{};
+    // recorded tag definitions: tag name -> span (for struct/union and enum definitions)
+    std::unordered_map<std::string, wvmcc::SourceSpan> structUnionTagDefs{};
+    std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};
     // current function nesting depth
     int functionDepth{0};
     // pointer to diagnostics vector during a run so hooks can append

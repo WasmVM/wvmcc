@@ -109,11 +109,32 @@ if(EXISTS ${PARSER_STRUCT_UNION_TEST})
     add_test(NAME parser-struct-union COMMAND wvmcc-parser-struct-union-test)
 endif()
 
+# Semantic struct/union checks
+set(PARSER_SEMA_STRUCT_UNION_TEST ${TEST_ROOT}/unit/parser/sema_struct_union_test.cpp)
+if(EXISTS ${PARSER_SEMA_STRUCT_UNION_TEST})
+    add_executable(wvmcc-sema-struct-union-test ${PARSER_SEMA_STRUCT_UNION_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-struct-union COMMAND wvmcc-sema-struct-union-test)
+endif()
+
 # Parser type-specifiers test
 set(PARSER_TYPE_SPEC_TEST ${TEST_ROOT}/unit/parser/type_specifiers_test.cpp)
 if(EXISTS ${PARSER_TYPE_SPEC_TEST})
     add_executable(wvmcc-parser-type-spec-test ${PARSER_TYPE_SPEC_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/ASTPrinter.cpp)
     add_test(NAME parser-type-spec COMMAND wvmcc-parser-type-spec-test)
+endif()
+
+# Semantic enum checks
+set(PARSER_SEMA_ENUM_TEST ${TEST_ROOT}/unit/parser/sema_enum_test.cpp)
+if(EXISTS ${PARSER_SEMA_ENUM_TEST})
+    add_executable(wvmcc-sema-enum-test ${PARSER_SEMA_ENUM_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-enum COMMAND wvmcc-sema-enum-test)
+endif()
+
+# Semantic atomic type checks
+set(PARSER_SEMA_ATOMIC_TEST ${TEST_ROOT}/unit/parser/sema_atomic_test.cpp)
+if(EXISTS ${PARSER_SEMA_ATOMIC_TEST})
+    add_executable(wvmcc-sema-atomic-test ${PARSER_SEMA_ATOMIC_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-atomic COMMAND wvmcc-sema-atomic-test)
 endif()
 
 # Parser declarator tests

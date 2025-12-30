@@ -92,12 +92,16 @@ struct DeclarationSpecifiers {
     // Aggregate representation for type-specifiers (simple keyword sequences,
     // struct/union specifiers, typedef-names, or other combined forms).
     struct TypeSpecifier {
-        enum class Kind { Simple, StructOrUnion, Enum, TypedefName, Other } kind{Kind::Other};
+        enum class Kind { Simple, StructOrUnion, Enum, TypedefName, Atomic, Other } kind{Kind::Other};
         std::vector<SimpleTypeSpecifier> simple; // used when Kind==Simple
         std::shared_ptr<StructOrUnionSpecifier> su; // used when Kind==StructOrUnion
         // enum specifier (used when Kind==Enum)
         struct EnumSpecifier;
         std::shared_ptr<EnumSpecifier> en;
+        // atomic type wrapper: represents `_Atomic(type)` form. If present,
+        // `atomicInner` holds the inner declaration-specifiers describing the
+        // wrapped type.
+        std::shared_ptr<DeclarationSpecifiers> atomicInner;
         std::string text; // textual fallback (typedef-name or other combined form)
     };
 
