@@ -10,6 +10,7 @@
 #include "../parser/ASTPrinter.hpp"
 #include "../parser/AST.hpp"
 #include "../parser/Parser.hpp"
+#include "../parser/Semantic.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
     std::ofstream ofs(path, std::ios::binary);
@@ -27,6 +28,7 @@ struct CommandLineArgs {
     std::optional<std::string> inputPath;
     std::vector<std::string> includePaths;
     bool dumpAst = false;
+    bool preprocessOnly = false; // -E
 };
 
 void showHelp() {
@@ -34,6 +36,7 @@ void showHelp() {
                  "\n"
                  "Options:\n"
                  "  -o <file>   Write output wasm to <file> (default: a.wasm)\n"
+                 "  -E          Run preprocessor only and write output to stdout\n"
                  "  -I <path>   Add header search path (can repeat)\n"
                  "  -I<path>    Add header search path (attached form)\n"
                  "  --ast       Dump a simple AST (XML) to stdout\n"
@@ -81,6 +84,10 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
         }
         if (arg == "--ast") {
             args.dumpAst = true;
+            continue;
+        }
+        if (arg == "-E") {
+            args.preprocessOnly = true;
             continue;
         }
         if (arg == "-o") {
@@ -134,49 +141,65 @@ int main(int argc, char** argv) {
     int parseResult = parseCommandLine(argc, argv, args);
     if (parseResult >= 0) return parseResult;
 
+    if (!args.inputPath.has_value()) {
+        std::cerr << "error: no input file specified\n";
+        showHelp();
+        return 2;
+    }
+
     wvmcc::Preprocessor pp;
     for (const auto& p : args.includePaths) {
         pp.addIncludePath(p);
     }
     
-    if (args.inputPath.has_value()) {
-        if (!pp.open(*args.inputPath)) {
-            std::cerr << "preprocess error: failed to open input" << std::endl;
+    if (!pp.open(*args.inputPath)) {
+        std::cerr << "preprocess error: failed to open input" << std::endl;
+        return 1;
+    }
+
+    // Print preprocessor diagnostics collected while opening/processing includes
+    printDiagnostics(pp.getDiagnostics());
+
+    // If requested, run preprocessor-only mode: dump tokens' lexemes to stdout
+    if (args.preprocessOnly) {
+        while (auto tok = pp.next()) {
+            std::cout << tok->lexeme;
+        }
+        return 0;
+    }
+
+    wvmcc::parser::Lexer lex(pp);
+    using namespace wvmcc::parser;
+    Parser parser(lex);
+    TranslationUnitPtr main_translation_unit = parser.parseTranslationUnit();
+    // print parser diagnostics if any
+    printDiagnostics(parser.getDiagnostics());
+
+    // If requested, write AST and exit immediately
+    if (args.dumpAst) {
+        std::string astPath = "ast.xml";
+        const std::string &in = *args.inputPath;
+        size_t slash = in.find_last_of("/\\");
+        size_t dot = in.find_last_of('.');
+        std::string base;
+        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) base = in.substr(0, dot);
+        else base = in;
+        astPath = base + "_ast.xml";
+
+        std::ofstream ofs(astPath);
+        if (!ofs) {
+            std::cerr << "error: cannot open AST output file: " << astPath << std::endl;
             return 1;
         }
-        wvmcc::parser::Lexer lex(pp);
-        printDiagnostics(pp.getDiagnostics());
-        if (args.dumpAst) {
-            using namespace wvmcc::parser;
-            Parser parser(lex);
-            TranslationUnitPtr main_translation_unit = parser.parseTranslationUnit();
-            // print parser diagnostics if any
-            printDiagnostics(parser.getDiagnostics());
-            // determine output path by replacing extension of input path with _ast.xml
-            std::string astPath = "ast.xml";
-            if (args.inputPath.has_value()) {
-                const std::string &in = *args.inputPath;
-                size_t slash = in.find_last_of("/\\");
-                size_t dot = in.find_last_of('.');
-                std::string base;
-                if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) base = in.substr(0, dot);
-                else base = in;
-                astPath = base + "_ast.xml";
-            }
-            std::ofstream ofs(astPath);
-            if (!ofs) {
-                std::cerr << "error: cannot open AST output file: " << astPath << std::endl;
-            } else {
-                wvmcc::parser::ASTPrinter printer(ofs);
-                printer.print(main_translation_unit);
-                ofs.flush();
-            }
-        } else {
-            std::vector<wvmcc::parser::Token> tokens;
-            while (auto t = lex.next()) tokens.push_back(*t);
-            printTokenStats(tokens);
-        }
+        wvmcc::parser::ASTPrinter printer(ofs);
+        printer.print(main_translation_unit);
+        ofs.flush();
+        return 0;
     }
+
+    // Not dumping AST: run semantic checks and continue compiler passes
+    wvmcc::parser::Semantic sem(false);
+    sem.run(main_translation_unit);
 
     WasmVM::WasmModule module;
     const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;

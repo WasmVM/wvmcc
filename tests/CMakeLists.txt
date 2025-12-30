@@ -207,6 +207,15 @@ if(EXISTS ${PP_CONCAT_TEST})
     add_test(NAME pp-concat COMMAND wvmcc-pp-concat-test)
 endif()
 
+# CLI tests: preprocess-only (-E)
+set(PREPROCESS_ONLY_TEST ${TEST_ROOT}/unit/exec/preprocess_only_test.cpp)
+if(EXISTS ${PREPROCESS_ONLY_TEST})
+    add_executable(wvmcc-preprocess-only-test ${PREPROCESS_ONLY_TEST})
+    # Ensure the main `wvmcc` executable is built before this test runs
+    add_dependencies(wvmcc-preprocess-only-test wvmcc)
+    add_test(NAME preprocess-only COMMAND wvmcc-preprocess-only-test)
+endif()
+
 # Macro definition tests
 set(PP_MACRO_TEST ${TEST_ROOT}/unit/pp/pp_macro_test.cpp)
 if(EXISTS ${PP_MACRO_TEST})
