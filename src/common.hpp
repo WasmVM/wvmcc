@@ -2,6 +2,8 @@
 #pragma once
 
 #include <cstddef>
+#include <string>
+#include <optional>
 
 namespace wvmcc {
 
@@ -15,6 +17,13 @@ struct SourcePos {
 struct SourceSpan {
     SourcePos begin;
     SourcePos end;
+};
+
+struct Diagnostic {
+    enum class Severity { Info, Warning, Error };
+    std::string message;
+    Severity severity{Severity::Error};
+    std::optional<SourceSpan> span{};
 };
 
 } // namespace wvmcc

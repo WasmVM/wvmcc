@@ -11,7 +11,7 @@
 #include <filesystem>
 #include "Tokenizer.hpp"
 #include "MacroTable.hpp"
-#include "Diagnostics.hpp"
+#include "../common.hpp"
 
 namespace wvmcc {
 

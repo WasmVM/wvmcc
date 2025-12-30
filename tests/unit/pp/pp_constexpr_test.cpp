@@ -4,7 +4,7 @@
 #include <cstdio>
 #include "pp/ConstExprParser.hpp"
 #include "pp/MacroTable.hpp"
-#include "pp/Diagnostics.hpp"
+#include "common.hpp"
 #include "pp/Preprocessor.hpp"
 
 // Test 1: Simple integer literal

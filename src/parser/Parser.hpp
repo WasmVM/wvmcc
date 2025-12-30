@@ -7,7 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <string>
-#include "../pp/Diagnostics.hpp"
+#include "../common.hpp"
 #include <optional>
 
 namespace wvmcc::parser {
@@ -17,6 +17,8 @@ public:
     explicit Parser(Lexer &lexer);
     TranslationUnitPtr parseTranslationUnit();
     const std::vector<wvmcc::Diagnostic>& getDiagnostics() const { return diagnostics; }
+    // Non-const access for passes (semantic checks) to append diagnostics
+    std::vector<wvmcc::Diagnostic>& getDiagnosticsRef() { return diagnostics; }
 
 private:
     Lexer &lex;
