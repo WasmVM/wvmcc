@@ -12,7 +12,7 @@ using namespace wvmcc;
 using namespace wvmcc::parser;
 
 static int run_case(const std::string &src, const std::string &expect_substr) {
-    const std::string fname = "temp_sema_external_decl.c";
+    const std::string fname = "temp_sema_decl_compat.c";
     {
         std::ofstream ofs(fname);
         ofs << src;
@@ -46,14 +46,12 @@ static int run_case(const std::string &src, const std::string &expect_substr) {
 }
 
 int main() {
-    // Cases: storage-class in external decl, duplicate static function, two definitive static objects
+    // Cases: incompatible object redeclaration, incompatible function return type,
+    // incompatible function parameter count
     struct Case { std::string src; std::string expect; } cases[] = {
-        { "auto x = 1;\n", "storage-class specifier" },
-        { "static int f() { return 1; }\nstatic int f() { return 2; }\n", "duplicate internal definition" },
-        { "static int x = 1;\nstatic int x = 2;\n", "duplicate internal definition" },
-        { "static int x = foo;\n", "must be constant expression" },
-        { "void f() { extern int x = 1; }\n", "block scope" },
-        { "int x = 0;\nint arr[] = { [x] = 1 };\n", "designator index must be an integer constant expression" }
+        { "int x; float x;\n", "incompatible declaration" },
+        { "int f(int a); float f(int a);\n", "incompatible declaration" },
+        { "int g(int); int g(int, int);\n", "incompatible declaration" }
     };
 
     for (auto &c : cases) {
@@ -64,6 +62,6 @@ int main() {
         }
     }
 
-    std::cout << "sema-external-decl: OK" << std::endl;
+    std::cout << "sema-decl-compat: OK" << std::endl;
     return 0;
 }

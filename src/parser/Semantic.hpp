@@ -16,8 +16,9 @@ class Semantic : public ASTVisitor {
 public:
     explicit Semantic(const TranslationUnitPtr &tu, bool verbose = false) : verbose_(verbose), tu_(tu) {}
 
-    // Run semantic checks and append diagnostics
-    void run(std::vector<wvmcc::Diagnostic> &diagnostics);
+    // Run semantic checks and append diagnostics. Returns true if semantic
+    // pass produced no error diagnostics, false otherwise.
+    bool run(std::vector<wvmcc::Diagnostic> &diagnostics);
 
 private:
     void checkExternal(const ExternalDeclPtr &e, std::vector<wvmcc::Diagnostic> &diagnostics);
@@ -30,6 +31,8 @@ private:
     std::unordered_map<std::string, int> defCount{};
     std::unordered_map<std::string, wvmcc::SourceSpan> firstDefSpan{};
     std::unordered_set<std::string> usedNames{};
+    // recorded declaration signatures for compatibility checks
+    std::unordered_map<std::string, std::string> declaredSignatures{};
     // ASTVisitor hooks
     void onIdent(const ASTVisitor::IdentifierExprPtr &id) override;
     void onFunctionDef(const FunctionDefPtr &f) override;

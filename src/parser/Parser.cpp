@@ -869,6 +869,28 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
         }
     }
 
+    // Constraint C 6.7.2.2: a declaration (other than static_assert)
+    // shall declare at least a declarator, a tag (struct/union with members),
+    // or the members of an enumeration. Emit a parser-level diagnostic
+    // if none of these are present.
+    bool hasTagWithMembers = false;
+    for (const auto &ts : decl->specifiers.typeSpecifiers) {
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
+            if (ts.su) { hasTagWithMembers = true; break; }
+        }
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) {
+            if (ts.en) { hasTagWithMembers = true; break; }
+        }
+    }
+    if (!decl->declarator && !hasTagWithMembers) {
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "declaration must declare at least a declarator, a tag, or enum members";
+        d.message += " (typeSpecifiers=" + std::to_string(decl->specifiers.typeSpecifiers.size()) + ")";
+        d.span = decl->span;
+        diagnostics.push_back(std::move(d));
+    }
+
     return decl;
 }
 
@@ -894,6 +916,24 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
             typedef_names.insert(decl->declarator->id.name);
         }
     }
+    // Constraint C 6.7.2.2: require declarator/tag/enum-members for declarations
+    bool hasTagWithMembers2 = false;
+    for (const auto &ts : decl->specifiers.typeSpecifiers) {
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
+            if (ts.su) { hasTagWithMembers2 = true; break; }
+        }
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) {
+            if (ts.en) { hasTagWithMembers2 = true; break; }
+        }
+    }
+    if (!decl->declarator && !hasTagWithMembers2) {
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "declaration must declare at least a declarator, a tag, or enum members";
+        d.span = decl->span;
+        diagnostics.push_back(std::move(d));
+    }
+
     return decl;
 }
 

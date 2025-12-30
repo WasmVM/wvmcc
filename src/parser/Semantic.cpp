@@ -65,6 +65,56 @@ static bool checkDesignatorIndexes(const InitializerPtr &init, std::vector<wvmcc
     }
     return true;
 }
+// Create a compact signature string for a declaration's type/specifiers/declarator
+static std::string signatureForDeclaration(const DeclarationPtr &d) {
+    if (!d) return std::string();
+    std::string s;
+    // specifiers
+    for (const auto &ts : d->specifiers.typeSpecifiers) {
+        switch (ts.kind) {
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Simple:
+                s += "simple:";
+                for (auto st : ts.simple) s += std::to_string(static_cast<int>(st)) + ",";
+                s += ";";
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion:
+                s += (ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? "struct:" : "union:";
+                if (ts.su->name) s += *ts.su->name; else s += "<anon>";
+                s += ts.su->hasBody ? ":body;" : ":fwd;";
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Enum:
+                s += "enum:";
+                if (ts.en->name) s += *ts.en->name; else s += "<anon>";
+                s += ts.en->hasBody ? ":body;" : ":fwd;";
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
+                s += "typedef:" + ts.text + ";";
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
+                s += "other:" + ts.text + ";";
+                break;
+        }
+    }
+    // declarator kind basics
+    if (d->declarator) {
+        s += "declkind:" + std::to_string(static_cast<int>(d->declarator->kind));
+        if (d->declarator->kind == Declarator::Kind::Function) {
+            s += ":params=" + std::to_string(d->declarator->function.params.size());
+        }
+    }
+    return s;
+}
+// Extract the identifier name from possibly-nested declarators
+static std::string declaratorName(const DeclaratorPtr &d) {
+    if (!d) return std::string();
+    DeclaratorPtr cur = d;
+    while (cur) {
+        if (cur->kind == Declarator::Kind::Identifier) return cur->id.name;
+        if (cur->inner.has_value()) cur = cur->inner.value();
+        else break;
+    }
+    return std::string();
+}
 void Semantic::recordDef(const std::string &name, const wvmcc::SourceSpan &span) {
     if (name.empty()) return;
     defCount[name]++;
@@ -79,19 +129,64 @@ void Semantic::onIdent(const ASTVisitor::IdentifierExprPtr &id) {
 
 void Semantic::onFunctionDef(const FunctionDefPtr &f) {
     if (!f) return;
-    if (!f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
-        if (f->declarator) recordDef(f->declarator->id.name, f->declarator->span);
+    if (f->declarator) {
+        // check compatibility with prior declarations
+        std::string name = declaratorName(f->declarator);
+        DeclarationPtr fake = std::make_shared<Declaration>();
+        fake->specifiers = f->specifiers;
+        fake->declarator = f->declarator;
+        fake->initializer = std::nullopt;
+        std::string sig = signatureForDeclaration(fake);
+        auto it = declaredSignatures.find(name);
+        if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "incompatible declaration for '" + name + "'";
+            diag.span = f->declarator->span;
+            curDiagnostics->push_back(std::move(diag));
+        } else {
+            declaredSignatures[name] = sig;
+        }
+        if (!f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) recordDef(name, f->declarator->span);
     }
 }
 
 void Semantic::onDeclaration(const DeclarationPtr &d) {
     if (!d) return;
-    if (d->declarator && !d->declarator->id.name.empty()) {
-        bool isDef = false;
-        if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern) && d->initializer.has_value()) isDef = true;
-        if (!d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) isDef = true;
-        if (isDef && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
-            recordDef(d->declarator->id.name, d->declarator->span);
+    // perform a simple declaration compatibility check based on compact signature
+    if (d->declarator) {
+        std::string name = declaratorName(d->declarator);
+        if (name.empty()) {
+            if (curDiagnostics) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "unnamed declarator";
+                diag.span = d->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+            return;
+        }
+        std::string sig = signatureForDeclaration(d);
+        auto it = declaredSignatures.find(name);
+        if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "incompatible declaration for '" + name + "'";
+            diag.span = d->declarator->span;
+            curDiagnostics->push_back(std::move(diag));
+        } else {
+            declaredSignatures[name] = sig;
+        }
+    }
+    if (d->declarator) {
+        std::string rname = declaratorName(d->declarator);
+        if (!rname.empty()) {
+            bool isDef = false;
+            if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern) && d->initializer.has_value()) isDef = true;
+            if (!d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) isDef = true;
+            if (isDef && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
+                recordDef(rname, d->declarator->span);
+            }
         }
     }
 
@@ -118,8 +213,8 @@ void Semantic::onExitFunction(const FunctionDefPtr &f) {
     if (functionDepth > 0) --functionDepth;
 }
 
-void Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
-    if (!tu_) return;
+bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
+    if (!tu_) return true;
     // First pass: per-external checks (tags/enums, storage-class constraints,
     // collect internal (static) definitions for duplicate checking)
     internalDefs.clear();
@@ -131,6 +226,7 @@ void Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
     defCount.clear();
     firstDefSpan.clear();
     usedNames.clear();
+    declaredSignatures.clear();
 
     // Traverse the whole translation unit to collect defs and uses via ASTVisitor hooks
     // set diagnostics pointer so hooks can emit diagnostics while traversing
@@ -168,6 +264,13 @@ void Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
         // if definitive count >1 we would have emitted earlier while building internalDefs
         (void)p;
     }
+    // Determine whether any Error diagnostics were appended by this pass.
+    bool hasError = false;
+    for (const auto &d : diagnostics) {
+        if (d.severity == Diagnostic::Severity::Error) { hasError = true; break; }
+    }
+
+    return !hasError;
 }
 
 void Semantic::checkExternal(const ExternalDeclPtr &e, std::vector<wvmcc::Diagnostic> &diagnostics) {

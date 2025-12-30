@@ -88,6 +88,13 @@ if(EXISTS ${PARSER_SEMA_EXTERNAL_DECL_TEST})
     add_test(NAME parser-sema-external-decl COMMAND wvmcc-sema-external-decl-test)
 endif()
 
+# Declaration compatibility semantic tests
+set(PARSER_SEMA_DECL_COMPAT_TEST ${TEST_ROOT}/unit/parser/sema_decl_compat_test.cpp)
+if(EXISTS ${PARSER_SEMA_DECL_COMPAT_TEST})
+    add_executable(wvmcc-sema-decl-compat-test ${PARSER_SEMA_DECL_COMPAT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-decl-compat COMMAND wvmcc-sema-decl-compat-test)
+endif()
+
 # Parser struct/union tests
 set(PARSER_STRUCT_UNION_TEST ${TEST_ROOT}/unit/parser/struct_union_test.cpp)
 if(EXISTS ${PARSER_STRUCT_UNION_TEST})
