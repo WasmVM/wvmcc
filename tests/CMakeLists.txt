@@ -82,10 +82,10 @@ if(EXISTS ${PARSER_TU_TEST})
     
     add_test(NAME parser-translation-unit COMMAND wvmcc-parser-translation-unit-test)
 endif()
-set(PARSER_EXTERNAL_DECL_DIAG_TEST ${TEST_ROOT}/unit/parser/external_decl_diagnostics_test.cpp)
-if(EXISTS ${PARSER_EXTERNAL_DECL_DIAG_TEST})
-    add_executable(wvmcc-parser-external-decl-diag-test ${PARSER_EXTERNAL_DECL_DIAG_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
-    add_test(NAME parser-external-decl-diag COMMAND wvmcc-parser-external-decl-diag-test)
+set(PARSER_SEMA_EXTERNAL_DECL_TEST ${TEST_ROOT}/unit/parser/sema_external_decl_test.cpp)
+if(EXISTS ${PARSER_SEMA_EXTERNAL_DECL_TEST})
+    add_executable(wvmcc-sema-external-decl-test ${PARSER_SEMA_EXTERNAL_DECL_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-external-decl COMMAND wvmcc-sema-external-decl-test)
 endif()
 
 # Parser struct/union tests

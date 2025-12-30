@@ -247,18 +247,14 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
     // register or merge into tag registry if we have a tag name
     if (tagName.has_value()) {
         auto it = tag_registry.find(*tagName);
-        if (it == tag_registry.end()) {
+            if (it == tag_registry.end()) {
             // no prior tag: insert current specifier (may be incomplete if no body)
             tag_registry[*tagName] = su;
         } else {
             auto existing = it->second;
             if (existing && existing->hasBody && hasBodyNow) {
-                // duplicate tag definition
-                wvmcc::Diagnostic d;
-                d.severity = wvmcc::Diagnostic::Severity::Error;
-                d.message = "redefinition of struct/union tag '" + *tagName + "'";
-                d.span = kw->span;
-                diagnostics.push_back(std::move(d));
+                // duplicate tag definition -- move reporting to Semantic
+                // leave registry unchanged
             } else if (existing && !existing->hasBody && hasBodyNow) {
                 // complete previously incomplete tag: copy members into the registered specifier
                 existing->hasBody = true;
@@ -338,11 +334,7 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
         } else {
             auto existing = it->second;
             if (existing && existing->hasBody && hasBodyNow) {
-                wvmcc::Diagnostic d;
-                d.severity = wvmcc::Diagnostic::Severity::Error;
-                d.message = "redefinition of enum tag '" + *tagName + "'";
-                d.span = kw->span;
-                diagnostics.push_back(std::move(d));
+                // duplicate enum tag definition - defer to Semantic
             } else if (existing && !existing->hasBody && hasBodyNow) {
                 existing->hasBody = true;
                 existing->enumerators = en->enumerators;
@@ -683,22 +675,16 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     }
 
     // Early constraint check: storage-class specifiers 'auto' and 'register' are invalid
-    // in external declarations (C standard 6.9).
+    // in external declarations (C standard 6.9). Emit parser diagnostics (constraint).
     if (specs.hasStorage(StorageClass::Auto) || specs.hasStorage(StorageClass::Register)) {
-        if (specs.hasStorage(StorageClass::Auto)) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "storage-class specifier 'auto' is not allowed in external declarations";
-            if (decl) d.span = decl->span; 
-            diagnostics.push_back(std::move(d));
-        }
-        if (specs.hasStorage(StorageClass::Register)) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "storage-class specifier 'register' is not allowed in external declarations";
-            if (decl) d.span = decl->span;
-            diagnostics.push_back(std::move(d));
-        }
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        if (specs.hasStorage(StorageClass::Auto)) d.message = "storage-class specifier 'auto' is not allowed in external declarations";
+        else d.message = "storage-class specifier 'register' is not allowed in external declarations";
+        // span: use declarator span if available, else current token
+        if (decl && decl->span.begin.line) d.span = decl->span;
+        else if (lex.peek()) d.span = lex.peek()->span;
+        diagnostics.push_back(std::move(d));
     }
 
     // If we parsed a declarator and it (or its nested form) is a function declarator,
@@ -735,15 +721,15 @@ ExternalDeclPtr Parser::parseExternalDecl() {
                 auto it = internal_definitions.find(name);
                 bool is_definitive = true; // function definition is definitive
                 if (it != internal_definitions.end()) {
-                    if (it->second.second && is_definitive) {
-                        wvmcc::Diagnostic d;
-                        d.severity = wvmcc::Diagnostic::Severity::Error;
-                        d.message = "duplicate internal definition of '" + name + "' in translation unit";
-                        d.span = f->span;
-                        diagnostics.push_back(std::move(d));
-                    } else {
-                        it->second = std::make_pair(f->span, true);
+                    // if previous was definitive, this is a duplicate internal definition -> emit parser constraint diagnostic
+                    if (it->second.second) {
+                        wvmcc::Diagnostic dd;
+                        dd.severity = wvmcc::Diagnostic::Severity::Error;
+                        dd.message = "duplicate internal definition of '" + name + "' in translation unit";
+                        dd.span = f->span;
+                        diagnostics.push_back(std::move(dd));
                     }
+                    it->second = std::make_pair(f->span, true);
                 } else {
                     internal_definitions[name] = std::make_pair(f->span, true);
                 }
@@ -755,13 +741,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
                 if (!d) return nullptr;
                 // static/thread storage duration initializers must be constant (C 6.7.9 constraint 4)
                 if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) /*|| specs.hasStorage(StorageClass::ThreadLocal)*/)) {
-                    if (!initializerIsConstant(*d->initializer)) {
-                        wvmcc::Diagnostic diag;
-                        diag.severity = wvmcc::Diagnostic::Severity::Error;
-                        diag.message = "initializer for object with static storage duration must be constant expression or string literal";
-                        diag.span = d->span;
-                        diagnostics.push_back(std::move(diag));
-                    }
+                    // semantic check (constant initializer) moved to Semantic pass
                 }
                 auto ext = make_ast_with_span<ExternalDecl>(d->span);
                 ext->decl = d;
@@ -794,17 +774,19 @@ ExternalDeclPtr Parser::parseExternalDecl() {
             }
         }
         // For object declarations with internal linkage (static): tentative/definitive semantics
-        if (!decl->id.name.empty() && specs.hasStorage(StorageClass::Static)) {
+            if (!decl->id.name.empty() && specs.hasStorage(StorageClass::Static)) {
             std::string nm = decl->id.name;
             bool is_definitive = d->initializer.has_value();
             auto it = internal_definitions.find(nm);
             if (is_definitive) {
+                // if previously definitive, emit duplicate internal definition error (constraint-level)
                 if (it != internal_definitions.end() && it->second.second) {
-                    wvmcc::Diagnostic diag;
-                    diag.severity = wvmcc::Diagnostic::Severity::Error;
-                    diag.message = "duplicate internal definition of '" + nm + "' in translation unit";
-                    diag.span = d->span;
-                    diagnostics.push_back(std::move(diag));
+                    wvmcc::Diagnostic dd;
+                    dd.severity = wvmcc::Diagnostic::Severity::Error;
+                    dd.message = "duplicate internal definition of '" + nm + "' in translation unit";
+                    dd.span = d->span;
+                    diagnostics.push_back(std::move(dd));
+                    it->second = std::make_pair(d->span, true);
                 } else if (it != internal_definitions.end()) {
                     it->second = std::make_pair(d->span, true);
                 } else {
@@ -853,11 +835,7 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     current_function_specs = specs;
     f->body = parseCompoundBody();
     // validate gotos: each goto must name an existing label in this function
-    for (auto &g : gotos_in_current_function) {
-        if (!labels_in_current_function.count(g.first)) {
-            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "goto to undefined label '" + g.first + "'"; d.span = g.second; diagnostics.push_back(std::move(d));
-        }
-    }
+    // (defer reporting to Semantic pass)
     // clear current function speculative state
     current_function_specs.reset();
     return f;
@@ -950,6 +928,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 }
             }
             auto bi = make_ast<BlockItem>();
+            rs->kind = Stmt::Kind::Return;
             bi->item = std::static_pointer_cast<Stmt>(rs);
             body.push_back(bi);
             continue;
@@ -1054,10 +1033,8 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 ls->stmt = sub;
                 ls->span = idtok.span;
                 ls->kind = Stmt::Kind::Label;
-                // uniqueness check within function
-                if (!labels_in_current_function.insert(ls->name).second) {
-                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "duplicate label '" + ls->name + "' in function"; d.span = ls->span; diagnostics.push_back(std::move(d));
-                }
+                // uniqueness check within function: record labels, semantic will report duplicates
+                labels_in_current_function.insert(ls->name);
                 auto bi = make_ast<BlockItem>();
                 bi->item = std::static_pointer_cast<Stmt>(ls);
                 body.push_back(bi);
@@ -1074,6 +1051,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
                 auto es = make_ast<ExprStmt>();
                 es->expr = finalExpr;
+                es->kind = Stmt::Kind::Expr;
                 es->span = finalExpr ? finalExpr->span : SourceSpan{};
                 auto bi = make_ast<BlockItem>();
                 bi->item = std::static_pointer_cast<Stmt>(es);
@@ -1087,6 +1065,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
         auto es = make_ast<ExprStmt>();
         es->expr = expr;
+        es->kind = Stmt::Kind::Expr;
         es->span = expr ? expr->span : SourceSpan{};
         auto bi = make_ast<BlockItem>();
         bi->item = std::static_pointer_cast<Stmt>(es);
@@ -2161,14 +2140,7 @@ Designator Parser::parseDesignator() {
         d.kind = Designator::Kind::Index;
         d.index = e;
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()=="]") lex.next();
-            // designator index must be an integer constant expression (C 6.7.9 constraint 6)
-            if (e && !ConstExprEvaluator::isIntegerConstantExpr(e)) {
-                wvmcc::Diagnostic diag;
-                diag.severity = wvmcc::Diagnostic::Severity::Error;
-                diag.message = "designator index must be an integer constant expression";
-                diag.span = e->span;
-                diagnostics.push_back(std::move(diag));
-            }
+            // designator index expression recorded; semantic checks (constantness) moved to Semantic
             return d;
     }
     if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==".") {

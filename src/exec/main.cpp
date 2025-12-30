@@ -198,8 +198,8 @@ int main(int argc, char** argv) {
     }
 
     // Not dumping AST: run semantic checks and continue compiler passes
-    wvmcc::parser::Semantic sem(false);
-    sem.run(main_translation_unit, parser.getDiagnosticsRef());
+    wvmcc::parser::Semantic sem(main_translation_unit, false);
+    sem.run(parser.getDiagnosticsRef());
 
     WasmVM::WasmModule module;
     const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;

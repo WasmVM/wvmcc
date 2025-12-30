@@ -6,12 +6,13 @@
 #include "pp/Preprocessor.hpp"
 #include "parser/Lexer.hpp"
 #include "parser/Parser.hpp"
+#include "parser/Semantic.hpp"
 
 using namespace wvmcc;
 using namespace wvmcc::parser;
 
 static int run_case(const std::string &src, const std::string &expect_substr) {
-    const std::string fname = "temp_external_decl_diag.c";
+    const std::string fname = "temp_sema_external_decl.c";
     {
         std::ofstream ofs(fname);
         ofs << src;
@@ -21,11 +22,24 @@ static int run_case(const std::string &src, const std::string &expect_substr) {
     if (!pp.open(fname)) { std::remove(fname.c_str()); return 2; }
     Lexer lex(pp);
     Parser parser(lex);
-    (void)parser.parseTranslationUnit();
+    auto tu = parser.parseTranslationUnit();
+    // run semantic pass to append diagnostics
+    wvmcc::parser::Semantic sem(tu, false);
+    sem.run(parser.getDiagnosticsRef());
     const auto &diags = parser.getDiagnostics();
     bool found = false;
     for (const auto &d : diags) {
         if (d.message.find(expect_substr) != std::string::npos) { found = true; break; }
+    }
+    if (!found) {
+        std::cerr << "--- diagnostics for case (source):\n" << src << "\n---\n";
+        for (const auto &d : diags) {
+            std::cerr << (d.severity==wvmcc::Diagnostic::Severity::Error?"error: ":"note: ") << d.message;
+            if (d.span.has_value()) {
+                std::cerr << " (line " << d.span->begin.line << ")";
+            }
+            std::cerr << "\n";
+        }
     }
     std::remove(fname.c_str());
     return found ? 0 : 3;
@@ -50,6 +64,6 @@ int main() {
         }
     }
 
-    std::cout << "external-decl-diagnostics: OK" << std::endl;
+    std::cout << "sema-external-decl: OK" << std::endl;
     return 0;
 }
