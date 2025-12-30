@@ -917,7 +917,7 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             lex.next();
             auto rs = make_ast<ReturnStmt>();
             rs->span = p->span;
-            rs->value = parseAssignmentExpression();
+            rs->value = parseExpression();
             if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
             auto bi = make_ast<BlockItem>();
             bi->item = std::static_pointer_cast<Stmt>(rs);
@@ -1151,8 +1151,8 @@ ExprPtr Parser::parsePrimary() {
 
 // Parse assignment-expression (right-associative for assignment operators)
 ExprPtr Parser::parseAssignmentExpression() {
-    // parse left-hand primary (incomplete support: primary/unary only)
-    ExprPtr lhs = parsePrimary();
+    // parse conditional-expression first (to support ternary operator as lhs)
+    ExprPtr lhs = parseConditionalExpression();
     if (!lhs) return nullptr;
 
     // check for assignment operators
@@ -1519,14 +1519,15 @@ ExprPtr Parser::parseInclusiveOrExpression() {
 }
 
 // shift-expression: parse left-associative '<<' and '>>' using assignment-expression as base
+// shift-expression: parse left-associative '<<' and '>>' using additive-expression as base
 ExprPtr Parser::parseShiftExpression() {
-    ExprPtr lhs = parseMultiplicativeExpression();
+    ExprPtr lhs = parseAdditiveExpression();
     if (!lhs) return nullptr;
     while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
         std::string op = lex.peek()->lexeme();
         if (op != "<<" && op != ">>") break;
         lex.next();
-        ExprPtr rhs = parseMultiplicativeExpression();
+        ExprPtr rhs = parseAdditiveExpression();
         auto be = make_ast<BinaryExpr>();
         be->op = op;
         be->lhs = lhs;

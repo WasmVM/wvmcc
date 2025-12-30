@@ -116,6 +116,13 @@ if(EXISTS ${PARSER_INITIALIZER_TEST})
     add_test(NAME parser-initializer COMMAND wvmcc-parser-initializer-test)
 endif()
 
+# Parser expressions tests (assignment + conditional)
+set(PARSER_EXPRESSIONS_TEST ${TEST_ROOT}/unit/parser/expressions_test.cpp)
+if(EXISTS ${PARSER_EXPRESSIONS_TEST})
+    add_executable(wvmcc-parser-expressions-test ${PARSER_EXPRESSIONS_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
+    add_test(NAME parser-expressions COMMAND wvmcc-parser-expressions-test)
+endif()
+
 # Parser _Static_assert tests
 set(PARSER_STATIC_ASSERT_TEST ${TEST_ROOT}/unit/parser/static_assert_test.cpp)
 if(EXISTS ${PARSER_STATIC_ASSERT_TEST})
