@@ -45,6 +45,8 @@ private:
     // recorded tag definitions: tag name -> span (for struct/union and enum definitions)
     std::unordered_map<std::string, wvmcc::SourceSpan> structUnionTagDefs{};
     std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};
+    // restrict associations: object name -> (restrict pointer name, span)
+    std::unordered_map<std::string, std::pair<std::string, wvmcc::SourceSpan>> restrictAssoc{};
     // current function nesting depth
     int functionDepth{0};
     // pointer to diagnostics vector during a run so hooks can append

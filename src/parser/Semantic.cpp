@@ -68,7 +68,13 @@ static bool checkDesignatorIndexes(const InitializerPtr &init, std::vector<wvmcc
 static std::string signatureForDeclaration(const DeclarationPtr &d) {
     if (!d) return std::string();
     std::string s;
-    // specifiers
+
+    // include top-level type qualifiers
+    if (d->specifiers.typeQualFlags != TypeQualifier::None) {
+        s += "quals:" + std::to_string(static_cast<int>(d->specifiers.typeQualFlags)) + ";";
+    }
+
+    // specifiers (including `_Atomic(inner)` handling)
     for (const auto &ts : d->specifiers.typeSpecifiers) {
         switch (ts.kind) {
             case DeclarationSpecifiers::TypeSpecifier::Kind::Simple:
@@ -86,12 +92,10 @@ static std::string signatureForDeclaration(const DeclarationPtr &d) {
                 if (ts.en->name) s += *ts.en->name; else s += "<anon>";
                 s += ts.en->hasBody ? ":body;" : ":fwd;";
                 break;
-            case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
-                s += "typedef:" + ts.text + ";";
-                break;
             case DeclarationSpecifiers::TypeSpecifier::Kind::Atomic:
                 s += "atomic:";
                 if (ts.atomicInner) {
+                    if (ts.atomicInner->typeQualFlags != TypeQualifier::None) s += "innerquals:" + std::to_string(static_cast<int>(ts.atomicInner->typeQualFlags)) + ";";
                     for (const auto &its : ts.atomicInner->typeSpecifiers) {
                         switch (its.kind) {
                             case DeclarationSpecifiers::TypeSpecifier::Kind::Simple:
@@ -121,11 +125,15 @@ static std::string signatureForDeclaration(const DeclarationPtr &d) {
                     }
                 }
                 break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
+                s += "typedef:" + ts.text + ";";
+                break;
             case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
                 s += "other:" + ts.text + ";";
                 break;
         }
     }
+
     // declarator kind basics
     if (d->declarator) {
         s += "declkind:" + std::to_string(static_cast<int>(d->declarator->kind));
@@ -133,7 +141,36 @@ static std::string signatureForDeclaration(const DeclarationPtr &d) {
             s += ":params=" + std::to_string(d->declarator->function.params.size());
         }
     }
+
+    // include pointer/array qualifiers in nested declarators
+    auto cur = d->declarator;
+    while (cur) {
+        if (cur->kind == Declarator::Kind::Pointer) {
+            if (cur->ptrQual != TypeQualifier::None) s += "ptrquals:" + std::to_string(static_cast<int>(cur->ptrQual)) + ";";
+        } else if (cur->kind == Declarator::Kind::Array) {
+            if (cur->array.qual != TypeQualifier::None) s += "arrquals:" + std::to_string(static_cast<int>(cur->array.qual)) + ";";
+        }
+        if (cur->inner.has_value()) cur = cur->inner.value(); else break;
+    }
+
     return s;
+}
+
+// Strip qualifier-related substrings from a signature so structural comparison
+// can ignore qualifiers. Removes 'quals:', 'innerquals:', 'ptrquals:', 'arrquals:'.
+static std::string stripQualParts(const std::string &sig) {
+    std::string out = sig;
+    const std::vector<std::string> parts = {"quals:", "innerquals:", "ptrquals:", "arrquals:"};
+    for (const auto &p : parts) {
+        size_t pos = 0;
+        while ((pos = out.find(p, pos)) != std::string::npos) {
+            // find end of numeric value (terminated by ';')
+            size_t semi = out.find(';', pos);
+            if (semi == std::string::npos) { out.erase(pos); break; }
+            out.erase(pos, semi - pos + 1);
+        }
+    }
+    return out;
 }
 // Extract the identifier name from possibly-nested declarators
 static std::string declaratorName(const DeclaratorPtr &d) {
@@ -205,11 +242,21 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
         std::string sig = signatureForDeclaration(fake);
         auto it = declaredSignatures.find(name);
         if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
-            Diagnostic diag;
-            diag.severity = Diagnostic::Severity::Error;
-            diag.message = "incompatible declaration for '" + name + "'";
-            diag.span = f->declarator->span;
-            curDiagnostics->push_back(std::move(diag));
+            // Determine whether the only difference is in qualifiers
+            std::string prev = it->second;
+            if (stripQualParts(prev) == stripQualParts(sig)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "incompatible declaration for '" + name + "': qualifiers differ";
+                diag.span = f->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            } else {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "incompatible declaration for '" + name + "'";
+                diag.span = f->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
         } else {
             declaredSignatures[name] = sig;
         }
@@ -236,11 +283,20 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
         std::string sig = signatureForDeclaration(d);
         auto it = declaredSignatures.find(name);
         if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
-            Diagnostic diag;
-            diag.severity = Diagnostic::Severity::Error;
-            diag.message = "incompatible declaration for '" + name + "'";
-            diag.span = d->declarator->span;
-            curDiagnostics->push_back(std::move(diag));
+            std::string prev = it->second;
+            if (stripQualParts(prev) == stripQualParts(sig)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "incompatible declaration for '" + name + "': qualifiers differ";
+                diag.span = d->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            } else {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "incompatible declaration for '" + name + "'";
+                diag.span = d->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
         } else {
             declaredSignatures[name] = sig;
         }
@@ -475,6 +531,18 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         }
         return;
     }
+    // If the declarator denotes a function type, applying type qualifiers to
+    // the function type is undefined (C 6.7.3.10). Report an error if any
+    // type qualifiers are present on the function type specifier-list.
+    if (d->declarator && isFunctionDeclarator(d->declarator)) {
+        if (d->specifiers.typeQualFlags != TypeQualifier::None) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "type qualifiers on function type are undefined behavior";
+            diag.span = d->span;
+            diagnostics.push_back(std::move(diag));
+        }
+    }
     if (d->declarator->id.name.empty()) {
         Diagnostic diag;
         diag.severity = Diagnostic::Severity::Error;
@@ -553,6 +621,65 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
             internalDefs[nm] = std::make_pair(d->span, true);
         } else {
             if (it == internalDefs.end()) internalDefs[nm] = std::make_pair(d->span, false);
+        }
+    }
+
+    // Restrict qualifier association check (C 6.7.3.1, conservative):
+    // If a restrict-qualified pointer is initialized from the address of an
+    // object (e.g., `T * restrict p = &obj;`), record association. If later a
+    // non-restrict pointer is initialized to the address of the same object,
+    // emit a diagnostic because that may violate the restrict association.
+    auto declaratorIsPointer = [](const DeclaratorPtr &dd)->bool {
+        DeclaratorPtr cur = dd;
+        while (cur) {
+            if (cur->kind == Declarator::Kind::Pointer) return true;
+            if (cur->inner.has_value()) cur = cur->inner.value(); else break;
+        }
+        return false;
+    };
+
+    bool hasRestrict = false;
+    // top-level qualifiers
+    if (d->specifiers.hasTypeQual(TypeQualifier::Restrict)) hasRestrict = true;
+    // pointer-level qualifiers: check any pointer node
+    DeclaratorPtr curd = d->declarator;
+    while (curd) {
+        if (curd->kind == Declarator::Kind::Pointer) {
+            if (hasTypeQual(curd->ptrQual, TypeQualifier::Restrict)) hasRestrict = true;
+        }
+        if (curd->inner.has_value()) curd = curd->inner.value(); else break;
+    }
+
+    if (d->initializer && declaratorIsPointer(d->declarator)) {
+        // check initializer is address-of an identifier: unary '&' with IdentifierExpr
+        if (d->initializer.value()->kind == Initializer::Kind::Expr && d->initializer.value()->expr) {
+            auto ie = d->initializer.value()->expr;
+            if (ie->kind == Expr::Kind::Unary) {
+                auto ue = std::dynamic_pointer_cast<UnaryExpr>(ie);
+                if (ue && ue->op == "&" && ue->rhs && ue->rhs->kind == Expr::Kind::Ident) {
+                    auto id = std::dynamic_pointer_cast<IdentifierExpr>(ue->rhs);
+                    if (id && !id->name.empty()) {
+                        const std::string obj = id->name;
+                        // if this declaration has restrict, record association
+                        if (hasRestrict) {
+                            // record first seen restrict association for this object
+                            if (restrictAssoc.find(obj) == restrictAssoc.end()) {
+                                restrictAssoc[obj] = std::make_pair(declaratorName(d->declarator), d->span);
+                            }
+                        } else {
+                            // non-restrict pointer initialized to &obj; if we have prior restrict association, emit diagnostic
+                            auto it = restrictAssoc.find(obj);
+                            if (it != restrictAssoc.end()) {
+                                Diagnostic diag;
+                                diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "non-restrict pointer '" + declaratorName(d->declarator) + "' may alias object '" + obj + "' associated with restrict pointer '" + it->second.first + "'";
+                                diag.span = d->span;
+                                diagnostics.push_back(std::move(diag));
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

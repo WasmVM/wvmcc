@@ -137,6 +137,20 @@ if(EXISTS ${PARSER_SEMA_ATOMIC_TEST})
     add_test(NAME parser-sema-atomic COMMAND wvmcc-sema-atomic-test)
 endif()
 
+    # Semantic qualifiers tests
+    set(PARSER_SEMA_QUAL_TEST ${TEST_ROOT}/unit/parser/sema_qualifiers_test.cpp)
+    if(EXISTS ${PARSER_SEMA_QUAL_TEST})
+        add_executable(wvmcc-sema-qualifiers-test ${PARSER_SEMA_QUAL_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+        add_test(NAME parser-sema-qualifiers COMMAND wvmcc-sema-qualifiers-test)
+    endif()
+
+        # Semantic restrict association tests
+        set(PARSER_SEMA_RESTRICT_TEST ${TEST_ROOT}/unit/parser/sema_restrict_test.cpp)
+        if(EXISTS ${PARSER_SEMA_RESTRICT_TEST})
+            add_executable(wvmcc-sema-restrict-test ${PARSER_SEMA_RESTRICT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+            add_test(NAME parser-sema-restrict COMMAND wvmcc-sema-restrict-test)
+        endif()
+
 # Parser declarator tests
 set(PARSER_DECLARATOR_TEST ${TEST_ROOT}/unit/parser/declarator_test.cpp)
 if(EXISTS ${PARSER_DECLARATOR_TEST})
