@@ -47,6 +47,18 @@ private:
     std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};
     // restrict associations: object name -> (restrict pointer name, span)
     std::unordered_map<std::string, std::pair<std::string, wvmcc::SourceSpan>> restrictAssoc{};
+    // Function declaration summary per TU for inline rules
+    struct FuncDeclInfo {
+        int totalDecls = 0;
+        int inlineDecls = 0;
+        int externDecls = 0;
+        int staticDecls = 0;
+        bool hasDef = false;
+        bool defIsInline = false;
+    };
+    std::unordered_map<std::string, FuncDeclInfo> functionDecls{};
+    // names for which all file-scope declarations include inline (without extern)
+    std::unordered_set<std::string> inlineOnlyNames{};
     // current function nesting depth
     int functionDepth{0};
     // pointer to diagnostics vector during a run so hooks can append

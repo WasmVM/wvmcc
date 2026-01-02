@@ -137,6 +137,13 @@ if(EXISTS ${PARSER_SEMA_ATOMIC_TEST})
     add_test(NAME parser-sema-atomic COMMAND wvmcc-sema-atomic-test)
 endif()
 
+# Semantic inline/function-specifier tests
+set(PARSER_SEMA_INLINE_TEST ${TEST_ROOT}/unit/parser/sema_inline_test.cpp)
+if(EXISTS ${PARSER_SEMA_INLINE_TEST})
+    add_executable(wvmcc-sema-inline-test ${PARSER_SEMA_INLINE_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-inline COMMAND wvmcc-sema-inline-test)
+endif()
+
     # Semantic qualifiers tests
     set(PARSER_SEMA_QUAL_TEST ${TEST_ROOT}/unit/parser/sema_qualifiers_test.cpp)
     if(EXISTS ${PARSER_SEMA_QUAL_TEST})

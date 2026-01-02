@@ -261,6 +261,14 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
             declaredSignatures[name] = sig;
         }
         if (!f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) recordDef(name, f->declarator->span);
+        // Record file-scope function definition info for function-specifier rules
+        if (functionDepth == 0) {
+            auto &info = functionDecls[name];
+            info.hasDef = true;
+            if (f->specifiers.hasFuncSpec(FunctionSpecifier::Inline)) info.defIsInline = true;
+            if (f->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) info.externDecls++;
+            if (f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) info.staticDecls++;
+        }
     }
 }
 
@@ -310,6 +318,15 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             if (!d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) isDef = true;
             if (isDef && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
                 recordDef(rname, d->declarator->span);
+            }
+
+            // If this is a file-scope function declaration, update summary counts
+            if (functionDepth == 0 && isFunctionDeclarator(d->declarator)) {
+                auto &info = functionDecls[rname];
+                info.totalDecls++;
+                if (d->specifiers.hasFuncSpec(FunctionSpecifier::Inline)) info.inlineDecls++;
+                if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) info.externDecls++;
+                if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) info.staticDecls++;
             }
         }
     }
@@ -387,9 +404,41 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
         auto it = defCount.find(name);
         int count = (it == defCount.end()) ? 0 : it->second;
         if (count == 0) {
+            // If all file-scope declarations for this function are inline (no extern),
+            // they do not provide an external definition and we should not warn here.
+            if (functionDecls.find(name) != functionDecls.end()) {
+                const auto &info = functionDecls[name];
+                if (info.inlineDecls > 0 && info.externDecls == 0 && info.staticDecls == 0) {
+                    continue;
+                }
+            }
             Diagnostic diag;
             diag.severity = Diagnostic::Severity::Warning;
             diag.message = "identifier '" + name + "' used but no external definition in this translation unit";
+            diagnostics.push_back(std::move(diag));
+        }
+    }
+
+    // After traversal, compute inline-only names and emit diagnostics for
+    // functions declared inline with extern declarations but lacking a
+    // definition in this translation unit.
+    inlineOnlyNames.clear();
+    for (const auto &p : functionDecls) {
+        const auto &name = p.first;
+        const auto &info = p.second;
+        if (info.totalDecls > 0 && info.inlineDecls > 0 && info.externDecls == 0 && info.staticDecls == 0) {
+            inlineOnlyNames.insert(name);
+        }
+        // If the function has inline declarations and also extern declarations,
+        // require a definition in this TU (conservative enforcement)
+        if (info.inlineDecls > 0 && info.externDecls > 0 && !info.hasDef) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "function '" + name + "' declared inline with external linkage must be defined in this translation unit";
+            // try to provide a span from any prior declaration
+            if (declaredSignatures.find(name) != declaredSignatures.end()) {
+                // no span available here; emit without span
+            }
             diagnostics.push_back(std::move(diag));
         }
     }
