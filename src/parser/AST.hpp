@@ -109,9 +109,10 @@ struct DeclarationSpecifiers {
     TypeQualifier typeQualFlags{TypeQualifier::None};
     FunctionSpecifier funcSpecFlags{FunctionSpecifier::None};
     std::vector<std::string> alignSpec; // alignment specifiers may contain expressions
+    std::vector<ExprPtr> alignExprs; // parsed alignment expressions from _Alignas(...)
 
     bool empty() const {
-        return storageFlags == StorageClass::None && typeSpecifiers.empty() && typeQualFlags == TypeQualifier::None && funcSpecFlags == FunctionSpecifier::None && alignSpec.empty();
+        return storageFlags == StorageClass::None && typeSpecifiers.empty() && typeQualFlags == TypeQualifier::None && funcSpecFlags == FunctionSpecifier::None && alignSpec.empty() && alignExprs.empty();
     }
 
     void addStorage(StorageClass s) { storageFlags |= s; }
@@ -247,6 +248,7 @@ struct SizeofExpr : Expr {
 
 struct AlignOfExpr : Expr {
     TypeNodePtr type;
+    std::string typeText; // textual representation of the type inside _Alignof
 };
 
 struct CompoundLiteral : Expr {

@@ -158,6 +158,13 @@ endif()
             add_test(NAME parser-sema-restrict COMMAND wvmcc-sema-restrict-test)
         endif()
 
+        # Semantic alignas tests
+        set(PARSER_SEMA_ALIGNAS_TEST ${TEST_ROOT}/unit/parser/sema_alignas_test.cpp)
+        if(EXISTS ${PARSER_SEMA_ALIGNAS_TEST})
+            add_executable(wvmcc-sema-alignas-test ${PARSER_SEMA_ALIGNAS_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+            add_test(NAME parser-sema-alignas COMMAND wvmcc-sema-alignas-test)
+        endif()
+
 # Parser declarator tests
 set(PARSER_DECLARATOR_TEST ${TEST_ROOT}/unit/parser/declarator_test.cpp)
 if(EXISTS ${PARSER_DECLARATOR_TEST})

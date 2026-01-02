@@ -407,6 +407,13 @@ void ASTPrinter::visitExpr(const ExprPtr &e) {
             }
             break;
         }
+        case Expr::Kind::AlignOf: {
+            auto ae = std::dynamic_pointer_cast<AlignOfExpr>(e);
+            if (ae) {
+                simpleTag("AlignOf", ae->typeText);
+            }
+            break;
+        }
         case Expr::Kind::PostfixUnary: {
             auto pe = std::dynamic_pointer_cast<PostfixUnaryExpr>(e);
             if (pe) {

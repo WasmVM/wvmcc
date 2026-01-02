@@ -181,8 +181,25 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
             continue;
         }
         if (alignspec.count(s)) {
-            specs.alignSpec.push_back(s);
+            // parse _Alignas( constant-expression ) and store parsed expr
             lex.next();
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
+                lex.next();
+                // parse an inner constant-expression (or arbitrary expression)
+                auto expr = parseConditionalExpression();
+                // expect ')'
+                if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Alignas expression"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                } else {
+                    lex.next();
+                }
+                // record both textual placeholder and parsed expr for Semantic to evaluate
+                specs.alignSpec.push_back(s); // keep marker for legacy uses
+                specs.alignExprs.push_back(expr);
+            } else {
+                // malformed: treat as simple spec for recovery
+                specs.alignSpec.push_back(s);
+            }
             continue;
         }
         if (types.count(s)) {
@@ -1702,7 +1719,54 @@ ExprPtr Parser::parseUnaryExpression() {
             auto ae = make_ast<AlignOfExpr>();
             ae->type = make_ast<TypeNode>();
             ae->type->repr = "type";
-            ae->kind = Expr::Kind::Sizeof; // reuse Kind::Sizeof for alignof variant
+            // build a simple textual representation of the parsed type-specifiers
+            auto makeTypeText = [&](const DeclarationSpecifiers &specs)->std::string {
+                std::string out;
+                for (const auto &ts : specs.typeSpecifiers) {
+                    if (!out.empty()) out += " ";
+                    switch (ts.kind) {
+                        case DeclarationSpecifiers::TypeSpecifier::Kind::Simple: {
+                            bool first = true;
+                            for (auto st : ts.simple) {
+                                if (!first) out += " ";
+                                first = false;
+                                using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+                                switch (st) {
+                                    case S::Void: out += "void"; break;
+                                    case S::Char: out += "char"; break;
+                                    case S::Short: out += "short"; break;
+                                    case S::Int: out += "int"; break;
+                                    case S::Long: out += "long"; break;
+                                    case S::Float: out += "float"; break;
+                                    case S::Double: out += "double"; break;
+                                    case S::Signed: out += "signed"; break;
+                                    case S::Unsigned: out += "unsigned"; break;
+                                    case S::Bool: out += "_Bool"; break;
+                                    case S::Complex: out += "_Complex"; break;
+                                    case S::Imaginary: out += "_Imaginary"; break;
+                                    default: break;
+                                }
+                            }
+                            break;
+                        }
+                        case DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion:
+                            out += (ts.su && ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? "struct" : "union";
+                            if (ts.su && ts.su->name) { out += " "; out += *ts.su->name; }
+                            break;
+                        case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
+                            out += ts.text; break;
+                        case DeclarationSpecifiers::TypeSpecifier::Kind::Enum:
+                            out += "enum"; if (ts.en && ts.en->name) { out += " "; out += *ts.en->name; } break;
+                        case DeclarationSpecifiers::TypeSpecifier::Kind::Atomic:
+                            out += "_Atomic"; break;
+                        case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
+                            out += ts.text; break;
+                    }
+                }
+                return out;
+            };
+            ae->typeText = makeTypeText(specs);
+            ae->kind = Expr::Kind::AlignOf;
             ae->span = t->span;
             return ae;
         }

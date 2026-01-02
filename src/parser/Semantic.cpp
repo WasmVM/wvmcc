@@ -10,6 +10,269 @@ using wvmcc::Diagnostic;
 
 
 namespace wvmcc::parser {
+// Try to parse an alignment expression string to a numeric value.
+// Supports simple integer literals (decimal) and returns std::nullopt for others.
+static std::optional<long long> parseAlignmentValue(const std::string &s) {
+    // trim
+    size_t a = 0; while (a < s.size() && isspace((unsigned char)s[a])) a++;
+    size_t b = s.size(); while (b > a && isspace((unsigned char)s[b-1])) b--;
+    if (b <= a) return std::nullopt;
+    std::string t = s.substr(a, b - a);
+    // If it's a simple decimal integer literal
+    bool allDigits = true;
+    for (char c : t) { if (!isdigit((unsigned char)c)) { allDigits = false; break; } }
+    if (allDigits) {
+        try {
+            long long v = std::stoll(t);
+            return v;
+        } catch (...) { return std::nullopt; }
+    }
+    // Could add support for more forms (_Alignof(...)) in future
+    // Support simple _Alignof(type-name) forms by mapping common builtins
+    // to target alignment values (assume typical LP64 layout: char=1, short=2,
+    // int=4, long=8, long long=8, float=4, double=8, pointer=8).
+    // Accept forms like "_Alignof(int)" or "_Alignof( unsigned long )".
+    auto starts_with = [&](const std::string &p) {
+        if (t.size() < p.size()) return false;
+        return t.compare(0, p.size(), p) == 0;
+    };
+    // find _Alignof(...)
+    const std::string key = "_Alignof";
+    size_t pos = std::string::npos;
+    for (size_t i = 0; i + key.size() <= t.size(); ++i) {
+        if (t.compare(i, key.size(), key) == 0) { pos = i; break; }
+    }
+    if (pos != std::string::npos) {
+        // find '(' after key
+        size_t p = t.find('(', pos + key.size());
+        if (p == std::string::npos) return std::nullopt;
+        size_t q = t.find(')', p+1);
+        if (q == std::string::npos) return std::nullopt;
+        std::string inner = t.substr(p+1, q - (p+1));
+        // trim inner
+        size_t ia = 0; while (ia < inner.size() && isspace((unsigned char)inner[ia])) ia++;
+        size_t ib = inner.size(); while (ib > ia && isspace((unsigned char)inner[ib-1])) ib--;
+        if (ib <= ia) return std::nullopt;
+        std::string typ = inner.substr(ia, ib-ia);
+        // normalize multiple spaces to single and lower-case
+        std::string norm;
+        bool lastSpace = false;
+        for (char c : typ) {
+            if (isspace((unsigned char)c)) {
+                if (!lastSpace) { norm.push_back(' '); lastSpace = true; }
+            } else { norm.push_back((char)tolower((unsigned char)c)); lastSpace = false; }
+        }
+        // simple mapping for common type-names
+        static const std::unordered_map<std::string,long long> alignMap = {
+            {"char",1}, {"signed char",1}, {"unsigned char",1},
+            {"short",2}, {"short int",2}, {"signed short",2}, {"signed short int",2}, {"unsigned short",2}, {"unsigned short int",2},
+            {"int",4}, {"signed",4}, {"signed int",4}, {"unsigned",4}, {"unsigned int",4},
+            {"long",8}, {"long int",8}, {"signed long",8}, {"signed long int",8}, {"unsigned long",8}, {"unsigned long int",8},
+            {"long long",8}, {"long long int",8}, {"unsigned long long",8}, {"unsigned long long int",8},
+            {"float",4}, {"double",8}, {"long double",16}, {"_bool",1},
+            {"void *",8}, {"char *",8}
+        };
+        // If the normalized type is a pointer-like form ending with '*', treat as pointer
+        if (!norm.empty() && norm.back() == '*') return 8;
+        auto it = alignMap.find(norm);
+        if (it != alignMap.end()) return it->second;
+        return std::nullopt;
+    }
+    return std::nullopt;
+}
+
+// Compute effective alignment value from a vector of align-spec strings.
+// Returns optional numeric value (max of numeric entries) and also returns
+// a canonical concatenated text for fallback comparisons.
+static std::pair<std::optional<long long>, std::string> computeAlignFromSpecs(const std::vector<std::string> &specs) {
+    std::optional<long long> maxv;
+    std::string canon;
+    for (const auto &a : specs) {
+        if (!canon.empty()) canon += ";";
+        // trim each element
+        size_t i = 0; while (i < a.size() && isspace((unsigned char)a[i])) i++;
+        size_t j = a.size(); while (j > i && isspace((unsigned char)a[j-1])) j--;
+        std::string t = a.substr(i, j - i);
+        canon += t;
+        auto val = parseAlignmentValue(t);
+        if (val.has_value()) {
+            if (!maxv.has_value() || *val > *maxv) maxv = val;
+        }
+    }
+    return {maxv, canon};
+}
+
+// forward declarations for helper functions defined later in this file
+static std::string declaratorName(const DeclaratorPtr &d);
+
+
+// Member-level implementation that can resolve _Alignof(type-name) via the
+// translation unit when possible. It delegates to the static computeAlignFromSpecs
+// for basic canonicalization, but attempts to evaluate _Alignof(...) expressions
+// that name structs/unions/typedefs by walking the TU.
+std::pair<std::optional<long long>, std::string> Semantic::computeAlignFromSpecsTU(const DeclarationSpecifiers &specs) const {
+    std::optional<long long> maxv;
+    std::string canon;
+    auto trim = [](const std::string &s) {
+        size_t a = 0; while (a < s.size() && isspace((unsigned char)s[a])) a++;
+        size_t b = s.size(); while (b > a && isspace((unsigned char)s[b-1])) b--;
+        return s.substr(a, b - a);
+    };
+    // helper to compute struct/union alignment from its specifier (recursive)
+    std::function<long long(const std::shared_ptr<StructOrUnionSpecifier>&)> computeAlignForSU;
+    computeAlignForSU = [&](const std::shared_ptr<StructOrUnionSpecifier> &su)->long long {
+        long long amax = 1;
+        if (!su) return amax;
+        for (const auto &m : su->members) {
+            if (m.declarators.empty()) {
+                // anonymous nested specifiers: try nested structs/unions
+                for (const auto &nts : m.specifiers.typeSpecifiers) {
+                    if (nts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && nts.su && nts.su->hasBody) {
+                        long long sub = computeAlignForSU(nts.su);
+                        if (sub > amax) amax = sub;
+                    }
+                }
+                continue;
+            }
+            for (const auto &sd : m.declarators) {
+                bool isPtr = false;
+                if (sd.declarator) {
+                    DeclaratorPtr cur = sd.declarator;
+                    while (cur) {
+                        if (cur->kind == Declarator::Kind::Pointer) { isPtr = true; break; }
+                        if (cur->inner.has_value()) cur = cur->inner.value(); else break;
+                    }
+                }
+                if (isPtr) { if (8 > amax) amax = 8; continue; }
+                // look at the specifiers for a simple mapping
+                for (const auto &mts : m.specifiers.typeSpecifiers) {
+                    if (mts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                        for (auto st : mts.simple) {
+                            long long v = 4;
+                            using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+                            if (st == S::Char) v = 1;
+                            else if (st == S::Short) v = 2;
+                            else if (st == S::Int) v = 4;
+                            else if (st == S::Long) v = 8;
+                            else if (st == S::Float) v = 4;
+                            else if (st == S::Double) v = 8;
+                            if (v > amax) amax = v;
+                        }
+                    } else if (mts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && mts.su && mts.su->hasBody) {
+                        long long sub = computeAlignForSU(mts.su);
+                        if (sub > amax) amax = sub;
+                    }
+                }
+            }
+        }
+        return amax;
+    };
+
+    // First, try parsed expression forms from _Alignas(...)
+    for (const auto &e : specs.alignExprs) {
+        if (!canon.empty()) canon += ";";
+        if (!e) {
+            canon += "<expr>";
+            continue;
+        }
+        // try constant-eval
+        auto v = ConstExprEvaluator::evalIntegerConstantExpr(e);
+        if (v.has_value()) {
+            if (!maxv.has_value() || *v > *maxv) maxv = v;
+            // canonical text for integer literals
+            if (e->kind == Expr::Kind::Integer) {
+                auto il = std::dynamic_pointer_cast<IntegerLiteral>(e);
+                canon += il ? il->raw : "<int>";
+            } else {
+                canon += "<const-expr>";
+            }
+            continue;
+        }
+        // if it's an AlignOfExpr with recorded typeText, attempt TU resolution
+        if (e->kind == Expr::Kind::AlignOf) {
+            auto ae = std::dynamic_pointer_cast<AlignOfExpr>(e);
+            if (ae) {
+                std::string norm;
+                // normalize typeText to lower-case and single spaces
+                bool lastSpace = false;
+                for (char c : ae->typeText) {
+                    if (isspace((unsigned char)c)) { if (!lastSpace) { norm.push_back(' '); lastSpace = true; } }
+                    else { norm.push_back((char)tolower((unsigned char)c)); lastSpace = false; }
+                }
+                canon += std::string("_Alignof(") + ae->typeText + ")";
+                // struct/union name
+                if (norm.rfind("struct ", 0) == 0 || norm.rfind("union ", 0) == 0) {
+                    std::string tag = norm.substr(norm.find(' ')+1);
+                    if (tu_) {
+                        for (const auto &ext : tu_->externals) {
+                            if (!ext) continue;
+                            if (auto decl = std::get_if<DeclarationPtr>(&ext->decl)) {
+                                if (!*decl) continue;
+                                for (const auto &ts : (*decl)->specifiers.typeSpecifiers) {
+                                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su && ts.su->hasBody && ts.su->name && *ts.su->name == tag) {
+                                        long long a = computeAlignForSU(ts.su);
+                                        if (!maxv.has_value() || a > *maxv) maxv = a;
+                                        goto next_expr;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // typedef resolution via TU
+                    if (tu_) {
+                        for (const auto &ext : tu_->externals) {
+                            if (!ext) continue;
+                            if (auto decl = std::get_if<DeclarationPtr>(&ext->decl)) {
+                                if (!*decl) continue;
+                                if ((*decl)->specifiers.hasStorage(StorageClass::Typedef) && (*decl)->declarator) {
+                                    std::string dn = declaratorName((*decl)->declarator);
+                                    if (dn == norm) {
+                                        for (const auto &ts : (*decl)->specifiers.typeSpecifiers) {
+                                            if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su && ts.su->hasBody) {
+                                                long long a = computeAlignForSU(ts.su);
+                                                if (!maxv.has_value() || a > *maxv) maxv = a;
+                                                goto next_expr;
+                                            }
+                                            if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                                                long long a = 4;
+                                                for (auto st : ts.simple) {
+                                                    using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+                                                    if (st == S::Char) a = std::max(a, 1LL);
+                                                    else if (st == S::Short) a = std::max(a, 2LL);
+                                                    else if (st == S::Int) a = std::max(a, 4LL);
+                                                    else if (st == S::Long) a = std::max(a, 8LL);
+                                                    else if (st == S::Float) a = std::max(a, 4LL);
+                                                    else if (st == S::Double) a = std::max(a, 8LL);
+                                                }
+                                                if (!maxv.has_value() || a > *maxv) maxv = a;
+                                                goto next_expr;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // fallback canonical text for unknown expr
+        canon += "<expr>";
+        next_expr: ;
+    }
+
+    // Then process any legacy textual alignSpec strings
+    if (!specs.alignSpec.empty()) {
+        auto [val, c] = computeAlignFromSpecs(specs.alignSpec);
+        if (!canon.empty() && !c.empty()) canon += ";";
+        canon += c;
+        if (val.has_value()) {
+            if (!maxv.has_value() || *val > *maxv) maxv = val;
+        }
+    }
+    return {maxv, canon};
+}
 // Helper: determine whether an initializer is a constant (or composed of constants).
 static bool initializerIsConstant(const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!init) return false;
@@ -244,21 +507,25 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
         if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
             // Determine whether the only difference is in qualifiers
             std::string prev = it->second;
+            int prevLine = -1;
+            auto itspan = declaredSignatureSpan.find(name);
+            if (itspan != declaredSignatureSpan.end()) prevLine = itspan->second.begin.line;
             if (stripQualParts(prev) == stripQualParts(sig)) {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "': qualifiers differ";
+                diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = f->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
             } else {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "'";
+                diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = f->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
             }
         } else {
             declaredSignatures[name] = sig;
+            if (f->declarator) declaredSignatureSpan.emplace(name, f->declarator->span);
         }
         if (!f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) recordDef(name, f->declarator->span);
         // Record file-scope function definition info for function-specifier rules
@@ -292,21 +559,25 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
         auto it = declaredSignatures.find(name);
         if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
             std::string prev = it->second;
+            int prevLine = -1;
+            auto itspan = declaredSignatureSpan.find(name);
+            if (itspan != declaredSignatureSpan.end()) prevLine = itspan->second.begin.line;
             if (stripQualParts(prev) == stripQualParts(sig)) {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "': qualifiers differ";
+                diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = d->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
             } else {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "'";
+                diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = d->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
             }
         } else {
             declaredSignatures[name] = sig;
+            if (d->declarator) declaredSignatureSpan.emplace(name, d->declarator->span);
         }
     }
     
@@ -316,8 +587,153 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             bool isDef = false;
             if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern) && d->initializer.has_value()) isDef = true;
             if (!d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) isDef = true;
+            // Compute canonical alignment and numeric value (if possible)
+            auto [maybeVal, canon] = computeAlignFromSpecsTU(d->specifiers);
+            std::string alignStr = canon;
+            // record definition marker
             if (isDef && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
                 recordDef(rname, d->declarator->span);
+            }
+
+            if (!rname.empty()) {
+                if (isDef) {
+                    // check against prior recorded definition
+                    auto its = seenAlign.find(rname);
+                    if (its != seenAlign.end()) {
+                        // if both are numeric, compare numerically
+                        if (its->second.value.has_value() && maybeVal.has_value()) {
+                            if (its->second.value.value() != *maybeVal) {
+                                if (curDiagnostics) {
+                                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                    diag.message = "conflicting alignment specifier for '" + rname + "'";
+                                    diag.span = d->span;
+                                    curDiagnostics->push_back(std::move(diag));
+                                }
+                            }
+                        } else if (its->second.canon != alignStr) {
+                            // fallback string comparison
+                            if (curDiagnostics) {
+                                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "conflicting alignment specifier for '" + rname + "'";
+                                diag.span = d->span;
+                                curDiagnostics->push_back(std::move(diag));
+                            }
+                        }
+                    } else {
+                        seenAlign[rname] = {alignStr, maybeVal};
+                        seenAlignSpan.emplace(rname, d->span);
+                    }
+                    if (!maybeVal.has_value()) {
+                        if (its != seenAlign.end() && !its->second.canon.empty()) {
+                            if (curDiagnostics) {
+                                int prevLine = -1;
+                                auto itspan = seenAlignSpan.find(rname);
+                                if (itspan != seenAlignSpan.end()) prevLine = itspan->second.begin.line;
+                                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "definition of '" + rname + "' has no alignment-specifier but prior declaration" + (prevLine>0 ? (" at line " + std::to_string(prevLine)) : std::string()) + " specifies alignment";
+                                diag.span = d->span;
+                                curDiagnostics->push_back(std::move(diag));
+                            }
+                        }
+                    } else {
+                        if (its != seenAlign.end()) {
+                            if (its->second.value.has_value()) {
+                                if (its->second.value.value() != *maybeVal) {
+                                    if (curDiagnostics) {
+                                        int prevLine = -1;
+                                        auto itspan = seenAlignSpan.find(rname);
+                                        if (itspan != seenAlignSpan.end()) prevLine = itspan->second.begin.line;
+                                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                        std::string prevVal = its->second.value.has_value() ? std::to_string(its->second.value.value()) : its->second.canon;
+                                        std::string curVal = std::to_string(*maybeVal);
+                                        diag.message = "definition of '" + rname + "' has alignment (" + curVal + ") not equivalent to prior declaration" + (prevLine>0 ? (" at line " + std::to_string(prevLine) + " (" + prevVal + ")") : std::string());
+                                        diag.span = d->span;
+                                        curDiagnostics->push_back(std::move(diag));
+                                    }
+                                }
+                            } else if (its->second.canon != alignStr) {
+                                if (curDiagnostics) {
+                                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                    diag.message = "definition of '" + rname + "' has alignment not equivalent to a prior declaration";
+                                    diag.span = d->span;
+                                    curDiagnostics->push_back(std::move(diag));
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // not a definition: compare against any recorded definition
+                    auto itd = defAlign.find(rname);
+                    if (itd != defAlign.end()) {
+                        // if both sides have numeric values, compare numerically
+                        if (itd->second.value.has_value() && maybeVal.has_value()) {
+                            if (itd->second.value.value() != *maybeVal) {
+                                if (curDiagnostics) {
+                                    int defLine = -1;
+                                    auto itdefspan = defAlignSpan.find(rname);
+                                    if (itdefspan != defAlignSpan.end()) defLine = itdefspan->second.begin.line;
+                                    std::string defVal = itd->second.value.has_value() ? std::to_string(itd->second.value.value()) : itd->second.canon;
+                                    std::string curVal = maybeVal.has_value() ? std::to_string(*maybeVal) : alignStr;
+                                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                    diag.message = "declaration of '" + rname + "' specifies alignment (" + curVal + ") not equivalent to definition" + (defLine>0 ? (" at line " + std::to_string(defLine) + " (" + defVal + ")") : std::string());
+                                    diag.span = d->span;
+                                    curDiagnostics->push_back(std::move(diag));
+                                }
+                            }
+                        } else if (itd->second.canon.empty() && !alignStr.empty()) {
+                            if (curDiagnostics) {
+                                int defLine = -1;
+                                auto itdefspan = defAlignSpan.find(rname);
+                                if (itdefspan != defAlignSpan.end()) defLine = itdefspan->second.begin.line;
+                                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "declaration of '" + rname + "' specifies alignment but definition" + (defLine>0 ? (" at line " + std::to_string(defLine)) : std::string()) + " has none";
+                                diag.span = d->span;
+                                curDiagnostics->push_back(std::move(diag));
+                            }
+                        } else if (!itd->second.canon.empty() && !alignStr.empty() && itd->second.canon != alignStr) {
+                                if (curDiagnostics) {
+                                    int defLine = -1;
+                                    auto itdefspan = defAlignSpan.find(rname);
+                                    if (itdefspan != defAlignSpan.end()) defLine = itdefspan->second.begin.line;
+                                    std::string defVal = itd->second.value.has_value() ? std::to_string(itd->second.value.value()) : itd->second.canon;
+                                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                    diag.message = "declaration of '" + rname + "' specifies alignment not equivalent to definition" + (defLine>0 ? (" at line " + std::to_string(defLine) + " (" + defVal + ")") : std::string());
+                                    diag.span = d->span;
+                                    curDiagnostics->push_back(std::move(diag));
+                                }
+                        }
+                    } else {
+                        // no definition yet: record seen alignment and conservatively
+                        // error if multiple non-def declarations in this TU disagree
+                        auto its = seenAlign.find(rname);
+                        if (its == seenAlign.end()) {
+                            seenAlign[rname] = {alignStr, maybeVal};
+                        } else {
+                            if (its->second.value.has_value() && maybeVal.has_value()) {
+                                if (its->second.value.value() != *maybeVal) {
+                                    if (curDiagnostics) {
+                                        int prevLine = -1;
+                                        auto itspan = seenAlignSpan.find(rname);
+                                        if (itspan != seenAlignSpan.end()) prevLine = itspan->second.begin.line;
+                                        std::string prevVal = its->second.value.has_value() ? std::to_string(its->second.value.value()) : its->second.canon;
+                                        std::string curVal = maybeVal.has_value() ? std::to_string(*maybeVal) : alignStr;
+                                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                        diag.message = "conflicting alignment specifiers for '" + rname + "' in this translation unit: previous" + (prevLine>0 ? (" at line " + std::to_string(prevLine)) : std::string()) + " (" + prevVal + ") vs current (" + curVal + ")";
+                                        diag.span = d->span;
+                                        curDiagnostics->push_back(std::move(diag));
+                                    }
+                                }
+                            } else if (!its->second.canon.empty() && !alignStr.empty() && its->second.canon != alignStr) {
+                                if (curDiagnostics) {
+                                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                    diag.message = "conflicting alignment specifiers for '" + rname + "' in this translation unit";
+                                    diag.span = d->span;
+                                    curDiagnostics->push_back(std::move(diag));
+                                }
+                            }
+                        }
+                    }
+                }
             }
 
             // If this is a file-scope function declaration, update summary counts

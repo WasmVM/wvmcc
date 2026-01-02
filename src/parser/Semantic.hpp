@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <string>
+#include <optional>
 #include "../common.hpp"
 #include "ASTVisitor.hpp"
 
@@ -33,6 +34,8 @@ private:
     std::unordered_set<std::string> usedNames{};
     // recorded declaration signatures for compatibility checks
     std::unordered_map<std::string, std::string> declaredSignatures{};
+    // record the span of the first-seen declaration for better diagnostics
+    std::unordered_map<std::string, wvmcc::SourceSpan> declaredSignatureSpan{};
     // ASTVisitor hooks
     void onIdent(const ASTVisitor::IdentifierExprPtr &id) override;
     void onFunctionDef(const FunctionDefPtr &f) override;
@@ -59,8 +62,23 @@ private:
     std::unordered_map<std::string, FuncDeclInfo> functionDecls{};
     // names for which all file-scope declarations include inline (without extern)
     std::unordered_set<std::string> inlineOnlyNames{};
+    // Alignment information: canonical text and optional parsed numeric value
+    struct AlignInfo {
+        std::string canon;
+        std::optional<long long> value;
+    };
+    // alignment specifiers seen for declarations (name -> AlignInfo)
+    std::unordered_map<std::string, AlignInfo> seenAlign{};
+    // span where an alignment spec was first seen for a name
+    std::unordered_map<std::string, wvmcc::SourceSpan> seenAlignSpan{};
+    // alignment specifiers recorded for definitions (name -> AlignInfo; empty.canon means no align)
+    std::unordered_map<std::string, AlignInfo> defAlign{};
+    // span where a definition's alignment was recorded
+    std::unordered_map<std::string, wvmcc::SourceSpan> defAlignSpan{};
     // current function nesting depth
     int functionDepth{0};
+    // Compute alignment information from DeclarationSpecifiers (exprs and strings) with access to TU
+    std::pair<std::optional<long long>, std::string> computeAlignFromSpecsTU(const DeclarationSpecifiers &specs) const;
     // pointer to diagnostics vector during a run so hooks can append
     std::vector<wvmcc::Diagnostic> *curDiagnostics{nullptr};
 };
