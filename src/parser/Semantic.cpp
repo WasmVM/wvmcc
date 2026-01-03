@@ -398,6 +398,254 @@ static ExprPtr makeIntegerLiteral(long long v) {
     return il;
 }
 
+// Recursive validation of an initializer against a TypeNode. This implements
+// a conservative, structural traversal of aggregate initializers to:
+// - validate nested initializer forms (list vs expr) against subobject types
+// - complete array sizes for arrays of unknown size when initializer-list
+//   without designators is provided
+// - report simple excess-element and unknown-member designator errors
+static void validateInitializerAgainstType(const std::shared_ptr<TypeNode> &type, const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics, bool isStaticStorage, const Semantic &sem) {
+    if (!type || !init) return;
+    // Scalars: expect an expression (or a single-element braced list)
+    if (type->kind == TypeNode::Kind::Builtin || type->kind == TypeNode::Kind::Enum || type->kind == TypeNode::Kind::Qualified) {
+        if (init->kind == Initializer::Kind::List) {
+            size_t n = init->clauses.size();
+            if (n == 0) return; // empty braced initializer -> OK
+            if (n > 1) {
+                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                diag.message = "too many initializers for scalar";
+                diag.span = init->span;
+                diagnostics.push_back(std::move(diag));
+            }
+            // if exactly one, treat its nested init as an assignment-expression
+            if (n == 1 && init->clauses[0].init) {
+                if (init->clauses[0].init->kind == Initializer::Kind::Expr) return;
+                // nested list for scalar -> error
+                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                diag.message = "invalid initializer for scalar";
+                diag.span = init->clauses[0].init ? init->clauses[0].init->span : init->span;
+                diagnostics.push_back(std::move(diag));
+            }
+        }
+        return;
+    }
+
+    // Arrays
+    if (type->kind == TypeNode::Kind::Array) {
+        auto elem = type->element;
+        if (init->kind == Initializer::Kind::Expr) {
+            // string literal special-case handled elsewhere; otherwise valid
+            return;
+        }
+        // list form: support designated initializers and sequential mapping
+        size_t nclauses = init->clauses.size();
+        // detect if any designators exist at top level
+        bool anyDesignators = false;
+        for (const auto &cl : init->clauses) if (!cl.designators.empty()) { anyDesignators = true; break; }
+
+        // If no size and no designators, size can be completed from count
+        if (!type->sizeExpr.has_value() && !anyDesignators) {
+            type->sizeExpr = makeIntegerLiteral(static_cast<long long>(nclauses));
+        }
+
+        // Helper to map a clause with designators to a subobject type
+        auto mapDesignatorsToType = [&](const std::vector<Designator> &designators)->std::shared_ptr<TypeNode> {
+            std::shared_ptr<TypeNode> cur = type;
+            for (const auto &d : designators) {
+                if (!cur) return nullptr;
+                if (d.kind == Designator::Kind::Index) {
+                    if (cur->kind != TypeNode::Kind::Array) {
+                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "index designator applied to non-array type";
+                        diag.span = d.index ? d.index.value()->span : init->span;
+                        diagnostics.push_back(std::move(diag));
+                        return nullptr;
+                    }
+                    if (!d.index) {
+                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "missing index in designator";
+                        diag.span = init->span;
+                        diagnostics.push_back(std::move(diag));
+                        return nullptr;
+                    }
+                    auto vi = ConstExprEvaluator::evalIntegerConstantExpr(d.index.value());
+                    if (!vi.has_value()) {
+                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "designator index must be an integer constant expression";
+                        diag.span = d.index.value()->span;
+                        diagnostics.push_back(std::move(diag));
+                        return nullptr;
+                    }
+                    long long idx = *vi;
+                    // Complete array size if unknown
+                    if (!cur->sizeExpr.has_value()) {
+                        cur->sizeExpr = makeIntegerLiteral(idx + 1);
+                    } else {
+                        auto vsz = ConstExprEvaluator::evalIntegerConstantExpr(cur->sizeExpr.value());
+                        if (vsz.has_value()) {
+                            if (idx >= *vsz) {
+                                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "designator index out of range";
+                                diag.span = d.index.value()->span;
+                                diagnostics.push_back(std::move(diag));
+                                // continue mapping to element type nonetheless
+                            }
+                        }
+                    }
+                    cur = cur->element;
+                } else if (d.kind == Designator::Kind::Member) {
+                    if (cur->kind != TypeNode::Kind::Struct && cur->kind != TypeNode::Kind::Union) {
+                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "member designator applied to non-struct/union type";
+                        diag.span = init->span;
+                        diagnostics.push_back(std::move(diag));
+                        return nullptr;
+                    }
+                    bool found = false;
+                    if (cur->su && cur->su->hasBody) {
+                        for (const auto &m : cur->su->members) {
+                            for (const auto &sd : m.declarators) {
+                                if (sd.declarator) {
+                                    if (declaratorName(sd.declarator) == d.member) {
+                                        DeclarationSpecifiers ms = m.specifiers;
+                                        bool vm = false;
+                                        cur = sem.buildTypeFromDeclaration(ms, sd.declarator, false, &vm);
+                                        found = true;
+                                        break;
+                                    }
+                                }
+                            }
+                            if (found) break;
+                        }
+                    }
+                    if (!found) {
+                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "designator refers to unknown member '" + d.member + "'";
+                        diag.span = init->span;
+                        diagnostics.push_back(std::move(diag));
+                        return nullptr;
+                    }
+                }
+            }
+            return cur;
+        };
+
+        // If any designators present, map each clause individually
+        if (anyDesignators) {
+            for (const auto &cl : init->clauses) {
+                if (!cl.designators.empty()) {
+                    auto target = mapDesignatorsToType(cl.designators);
+                    if (target && cl.init) validateInitializerAgainstType(target, cl.init, diagnostics, isStaticStorage, sem);
+                } else {
+                    // no designators: fall back to sequential mapping
+                    // sequential mapping handled below after building member/element sequence
+                }
+            }
+            // also handle non-designator clauses sequentially below by falling through
+        }
+
+        // Recurse per element for non-designated clauses (sequential mapping)
+        for (size_t i = 0; i < nclauses; ++i) {
+            const auto &cl = init->clauses[i];
+            if (!cl.designators.empty()) continue; // already handled
+            if (cl.init) validateInitializerAgainstType(elem, cl.init, diagnostics, isStaticStorage, sem);
+        }
+        return;
+    }
+
+    // Structs: map initializer clauses to members in order (simple support)
+    if (type->kind == TypeNode::Kind::Struct && type->su && type->su->hasBody) {
+        // Build list of named members' type nodes
+        std::vector<std::shared_ptr<TypeNode>> memberTypes;
+        for (const auto &m : type->su->members) {
+            for (const auto &sd : m.declarators) {
+                if (sd.declarator) {
+                    // Build the member's declaration specifiers
+                    DeclarationSpecifiers ms = m.specifiers;
+                    // Use Semantic::buildTypeFromDeclaration to construct member type
+                    bool vm = false;
+                    auto mtn = sem.buildTypeFromDeclaration(ms, sd.declarator, false, &vm);
+                    memberTypes.push_back(mtn);
+                }
+            }
+            // anonymous members (no declarators) are treated as nested anonymous structs/unions
+            for (const auto &ts : m.specifiers.typeSpecifiers) {
+                if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su && ts.su->hasBody && m.declarators.empty()) {
+                    // anonymous nested specifier: expose its members as flattened sequence
+                    for (const auto &nm : ts.su->members) {
+                        for (const auto &nsd : nm.declarators) {
+                            if (nsd.declarator) {
+                                DeclarationSpecifiers nms = nm.specifiers;
+                                bool nvm = false;
+                                auto ntn = sem.buildTypeFromDeclaration(nms, nsd.declarator, false, &nvm);
+                                memberTypes.push_back(ntn);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // If initializer is an expr, it's invalid except when single-member aggregate? Conservative: error
+        if (init->kind == Initializer::Kind::Expr) {
+            Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+            diag.message = "invalid initializer for struct/union";
+            diag.span = init->span;
+            diagnostics.push_back(std::move(diag));
+            return;
+        }
+        // Map clauses in order to members
+        size_t mcount = memberTypes.size();
+        size_t ccount = init->clauses.size();
+        size_t idx = 0;
+        for (size_t i = 0; i < ccount; ++i) {
+            const auto &cl = init->clauses[i];
+            if (!cl.designators.empty()) {
+                // Basic designated member check handled elsewhere; conservatively skip mapping
+                continue;
+            }
+            if (idx >= mcount) {
+                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                diag.message = "excess elements in initializer";
+                diag.span = init->span;
+                diagnostics.push_back(std::move(diag));
+                break;
+            }
+            if (cl.init) validateInitializerAgainstType(memberTypes[idx], cl.init, diagnostics, isStaticStorage, sem);
+            idx++;
+        }
+        return;
+    }
+
+    // Unions: simple check — accept a single initializer for the first member or a designated member
+    if (type->kind == TypeNode::Kind::Union && type->su && type->su->hasBody) {
+        if (init->kind == Initializer::Kind::Expr) return;
+        // list form: if more than one clause without designators, error
+        size_t n = init->clauses.size();
+        if (n > 1) {
+            Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+            diag.message = "too many initializers for union";
+            diag.span = init->span;
+            diagnostics.push_back(std::move(diag));
+            return;
+        }
+        if (n == 1 && init->clauses[0].init) {
+            // find first member type
+            for (const auto &m : type->su->members) {
+                for (const auto &sd : m.declarators) {
+                    if (sd.declarator) {
+                        DeclarationSpecifiers ms = m.specifiers;
+                        bool vm = false;
+                        auto mtn = sem.buildTypeFromDeclaration(ms, sd.declarator, false, &vm);
+                        validateInitializerAgainstType(mtn, init->clauses[0].init, diagnostics, isStaticStorage, sem);
+                        return;
+                    }
+                }
+            }
+        }
+        return;
+    }
+}
+
 // Create a compact signature string for a declaration's type/specifiers/declarator
 static std::string signatureForDeclaration(const DeclarationPtr &d) {
     if (!d) return std::string();
@@ -1378,6 +1626,10 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         // Ensure we have a diagnostics sink usable both from first-pass checks
         // (when `curDiagnostics` may be null) and traversal-time checks.
         auto outDiag = curDiagnostics ? curDiagnostics : &diagnostics;
+
+        // Perform recursive validation of the initializer against the canonical type
+        // (this will also complete array sizes in some nested cases).
+        validateInitializerAgainstType(typeNode, d->initializer.value(), *outDiag, d->specifiers.hasStorage(StorageClass::Static), *this);
 
         // Heuristic pre-check: if the specifiers look like a simple scalar
         // type (e.g., `int`) and the declarator is not an array/function,
