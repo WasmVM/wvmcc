@@ -1469,13 +1469,19 @@ ExprPtr Parser::parsePrimary() {
                     auto specs = parseDeclarationSpecifiers();
                     // build minimal TypeNode from specs
                     auto tn = make_ast<TypeNode>();
-                    tn->kind = TypeNode::Kind::Builtin;
                     if (!specs.typeSpecifiers.empty()) {
                         auto &ts = specs.typeSpecifiers.front();
-                        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) tn->repr = "simple-type";
-                        else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) tn->repr = ts.text;
-                        else tn->repr = "type";
-                    } else tn->repr = "type";
+                        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                            tn->kind = TypeNode::Kind::Builtin;
+                            tn->simple = ts.simple;
+                        } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) {
+                            tn->kind = TypeNode::Kind::Builtin;
+                            tn->text = ts.text;
+                        } else {
+                            tn->kind = TypeNode::Kind::Builtin;
+                            tn->text = "type";
+                        }
+                    } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                     // expect ':'
                     if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
                         if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after type name in _Generic association"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
@@ -1533,16 +1539,15 @@ ExprPtr Parser::parsePrimary() {
             } else lex.next();
 
             // if a '{' follows, this is a compound-literal
-            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
                 auto clit = make_ast<CompoundLiteral>();
                 auto tn = make_ast<TypeNode>();
-                tn->kind = TypeNode::Kind::Builtin;
                 if (!specs.typeSpecifiers.empty()) {
                     auto &ts = specs.typeSpecifiers.front();
-                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) tn->repr = "simple-type";
-                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) tn->repr = ts.text;
-                    else tn->repr = "type";
-                } else tn->repr = "type";
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
+                    else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+                } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                 clit->type = tn;
                 clit->init = parseInitializer();
                 clit->kind = Expr::Kind::CompoundLiteral;
@@ -1679,7 +1684,7 @@ ExprPtr Parser::parseUnaryExpression() {
                     } else lex.next();
                     auto se = make_ast<SizeofExpr>();
                     se->type = make_ast<TypeNode>();
-                    se->type.value()->repr = "type"; // minimal
+                    se->type.value()->kind = TypeNode::Kind::Builtin; se->type.value()->text = "type"; // minimal
                     se->expr = nullptr;
                     se->kind = Expr::Kind::Sizeof;
                     se->span = t->span;
@@ -1718,7 +1723,7 @@ ExprPtr Parser::parseUnaryExpression() {
             } else lex.next();
             auto ae = make_ast<AlignOfExpr>();
             ae->type = make_ast<TypeNode>();
-            ae->type->repr = "type";
+            ae->type->kind = TypeNode::Kind::Builtin; ae->type->text = "type";
             // build a simple textual representation of the parsed type-specifiers
             auto makeTypeText = [&](const DeclarationSpecifiers &specs)->std::string {
                 std::string out;
@@ -2065,13 +2070,12 @@ ExprPtr Parser::parseCastExpression() {
                 auto clit = make_ast<CompoundLiteral>();
                 // build a minimal TypeNode from specs
                 auto tn = make_ast<TypeNode>();
-                tn->kind = TypeNode::Kind::Builtin;
                 if (!specs.typeSpecifiers.empty()) {
                     auto &ts = specs.typeSpecifiers.front();
-                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) tn->repr = "simple-type";
-                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) tn->repr = ts.text;
-                    else tn->repr = "type";
-                } else tn->repr = "type";
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
+                    else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+                } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                 clit->type = tn;
                 // parse initializer-list using existing helper
                 clit->init = parseInitializer();
@@ -2086,18 +2090,13 @@ ExprPtr Parser::parseCastExpression() {
             ce->kind = Expr::Kind::Cast;
             // build a minimal TypeNode from specs
             auto tn = make_ast<TypeNode>();
-            tn->kind = TypeNode::Kind::Builtin;
             if (!specs.typeSpecifiers.empty()) {
                 // try to stringify first specifier
                 auto &ts = specs.typeSpecifiers.front();
-                if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
-                    tn->repr = "simple-type";
-                } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) {
-                    tn->repr = ts.text;
-                } else {
-                    tn->repr = "type";
-                }
-            } else tn->repr = "type";
+                if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
+                else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+            } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
             ce->type = tn;
             ce->span = ce->expr ? ce->expr->span : SourceSpan{};
             return ce;

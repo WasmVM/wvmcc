@@ -263,7 +263,15 @@ void ASTPrinter::visitDeclarator(const DeclaratorPtr &d) {
 
 void ASTPrinter::visitTypeNode(const TypeNodePtr &t) {
     openTag("TypeNode", "kind=\"" + std::to_string(static_cast<int>(t->kind)) + "\"");
-    simpleTag("Repr", t->repr);
+    std::string repr;
+    if (t->kind == TypeNode::Kind::Builtin) {
+        if (!t->text.empty()) repr = t->text;
+        else if (!t->simple.empty()) repr = "simple";
+        else repr = "builtin";
+    } else {
+        repr = std::to_string(static_cast<int>(t->kind));
+    }
+    simpleTag("Repr", repr);
     closeTag("TypeNode");
 }
 

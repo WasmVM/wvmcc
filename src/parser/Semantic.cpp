@@ -273,6 +273,55 @@ std::pair<std::optional<long long>, std::string> Semantic::computeAlignFromSpecs
     }
     return {maxv, canon};
 }
+
+// Structural equality for TypeNode trees. Compares Kind and recursively
+// compares child nodes and relevant flags; does not consider source spans.
+bool Semantic::typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::shared_ptr<TypeNode> &b) {
+    if (a == b) return true;
+    if (!a || !b) return false;
+    if (a->kind != b->kind) return false;
+    switch (a->kind) {
+        case TypeNode::Kind::Builtin:
+            if (a->simple != b->simple) return false;
+            if (a->text != b->text) return false;
+            return true;
+        case TypeNode::Kind::Struct:
+        case TypeNode::Kind::Union:
+            // compare tag names if present
+            if ((a->su && a->su->name.has_value()) != (b->su && b->su->name.has_value())) return false;
+            if (a->su && b->su && a->su->name.has_value() && b->su->name.has_value()) return a->su->name == b->su->name;
+            return true;
+        case TypeNode::Kind::Enum:
+            return a->text == b->text;
+        case TypeNode::Kind::Pointer:
+            if (a->ptrQual != b->ptrQual) return false;
+            return typeNodesEqual(a->pointee, b->pointee);
+        case TypeNode::Kind::Array:
+            if (a->arrayIsStar != b->arrayIsStar) return false;
+            if (a->arrayIsStatic != b->arrayIsStatic) return false;
+            if (a->arrayQual != b->arrayQual) return false;
+            // sizeExpr comparison: if both constant and integer literal, compare raw; otherwise ignore
+            if (a->sizeExpr.has_value() != b->sizeExpr.has_value()) return false;
+            if (a->sizeExpr.has_value() && b->sizeExpr.has_value()) {
+                if (a->sizeExpr.value()->kind == Expr::Kind::Integer && b->sizeExpr.value()->kind == Expr::Kind::Integer) {
+                    auto ia = std::dynamic_pointer_cast<IntegerLiteral>(a->sizeExpr.value());
+                    auto ib = std::dynamic_pointer_cast<IntegerLiteral>(b->sizeExpr.value());
+                    if (!ia || !ib) return false;
+                    if (ia->raw != ib->raw) return false;
+                }
+            }
+            return typeNodesEqual(a->element, b->element);
+        case TypeNode::Kind::Function:
+            if (a->hasParamTypeList != b->hasParamTypeList) return false;
+            if (!typeNodesEqual(a->element, b->element)) return false;
+            if (a->params.size() != b->params.size()) return false;
+            for (size_t i = 0; i < a->params.size(); ++i) if (!typeNodesEqual(a->params[i], b->params[i])) return false;
+            return true;
+        case TypeNode::Kind::Qualified:
+            return a->text == b->text;
+    }
+    return false;
+}
 // Helper: determine whether an initializer is a constant (or composed of constants).
 static bool initializerIsConstant(const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!init) return false;
@@ -481,6 +530,188 @@ static bool structOrUnionHasNamedMember(const std::shared_ptr<StructOrUnionSpeci
     }
     return false;
 }
+
+// Build a simple TypeNode representation from declaration specifiers and a
+// possibly-nested declarator. This produces a readable `repr` and sets the
+// `kind` to a best-effort value. It also detects variably-modified types
+// (VLAs) when array sizes are non-constant.
+std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl, bool inParamPrototype, bool *outVariablyModified) const {
+    auto tn = std::make_shared<TypeNode>();
+    bool variablyModified = false;
+
+    // Base type from specs
+    if (!specs.typeSpecifiers.empty()) {
+        const auto &ts = specs.typeSpecifiers.front();
+        switch (ts.kind) {
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Simple:
+                tn->kind = TypeNode::Kind::Builtin;
+                tn->simple = ts.simple;
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion:
+                tn->kind = (ts.su && ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? TypeNode::Kind::Struct : TypeNode::Kind::Union;
+                tn->su = ts.su;
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Enum:
+                tn->kind = TypeNode::Kind::Enum;
+                tn->text = ts.en && ts.en->name.has_value() ? *ts.en->name : std::string();
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName:
+                tn->kind = TypeNode::Kind::Builtin;
+                tn->text = ts.text;
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Atomic:
+                tn->kind = TypeNode::Kind::Qualified;
+                tn->text = "_Atomic";
+                break;
+            case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
+                tn->kind = TypeNode::Kind::Builtin;
+                tn->text = ts.text;
+                break;
+        }
+    } else {
+        tn->kind = TypeNode::Kind::Builtin;
+        // default int: represent as empty simple (fallback)
+    }
+
+    // Collect declarator layers (outer->inner) and apply inner-first
+    std::vector<DeclaratorPtr> layers;
+    DeclaratorPtr cur = decl;
+    while (cur) { layers.push_back(cur); if (cur->inner.has_value()) cur = cur->inner.value(); else break; }
+    // Start from baseType and wrap
+    std::shared_ptr<TypeNode> curType = tn;
+    for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
+        auto layer = layers[i];
+        if (!layer) continue;
+        if (layer->kind == Declarator::Kind::Pointer) {
+            auto p = std::make_shared<TypeNode>();
+            p->kind = TypeNode::Kind::Pointer;
+            p->pointee = curType;
+            p->ptrQual = layer->ptrQual;
+            curType = p;
+        } else if (layer->kind == Declarator::Kind::Array) {
+            auto a = std::make_shared<TypeNode>();
+            a->kind = TypeNode::Kind::Array;
+            a->element = curType;
+            a->arrayIsStar = layer->array.isStar;
+            a->arrayIsStatic = layer->array.isStatic;
+            a->arrayQual = layer->array.qual;
+            if (layer->array.size.has_value()) a->sizeExpr = layer->array.size.value();
+            if (a->arrayIsStar || (a->sizeExpr.has_value() && !ConstExprEvaluator::isIntegerConstantExpr(a->sizeExpr.value()))) {
+                if (!inParamPrototype) variablyModified = true;
+            }
+            curType = a;
+        } else if (layer->kind == Declarator::Kind::Function) {
+            auto f = std::make_shared<TypeNode>();
+            f->kind = TypeNode::Kind::Function;
+            // return type is curType
+            // represent return type as element (reuse element field)
+            f->element = curType;
+            f->hasParamTypeList = layer->function.hasParamTypeList;
+            for (const auto &p : layer->function.params) {
+                // best-effort: build param type nodes (limited info)
+                std::shared_ptr<TypeNode> ptn = nullptr;
+                if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);
+                else if (p.typeSpec.has_value()) { ptn = std::make_shared<TypeNode>(); ptn->kind = TypeNode::Kind::Builtin; ptn->text = *p.typeSpec; }
+                if (!ptn) ptn = std::make_shared<TypeNode>();
+                f->params.push_back(ptn);
+            }
+            curType = f;
+        }
+    }
+
+    if (outVariablyModified) *outVariablyModified = variablyModified;
+    return curType;
+}
+
+// Resolve typedef-names by scanning the translation unit and produce a
+// canonical type representation string. This recursively expands typedefs
+// to their underlying type representations when possible.
+std::shared_ptr<TypeNode> Semantic::canonicalTypeRepr(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl) const {
+    // Helper: resolve a typedef name to its canonical repr by finding its
+    // typedef declaration in the TU. Use `visited` to avoid infinite recursion.
+    std::function<std::shared_ptr<TypeNode>(const std::string&, std::unordered_set<std::string>&)> resolveTypedef;
+    resolveTypedef = [&](const std::string &td, std::unordered_set<std::string> &visited)->std::shared_ptr<TypeNode> {
+        if (visited.count(td)) return nullptr; // cycle -> return null
+        visited.insert(td);
+        if (!tu_) return nullptr;
+        for (const auto &ext : tu_->externals) {
+            if (!ext) continue;
+            if (auto pdecl = std::get_if<DeclarationPtr>(&ext->decl)) {
+                if (!*pdecl) continue;
+                if ((*pdecl)->specifiers.hasStorage(StorageClass::Typedef) && (*pdecl)->declarator) {
+                    std::string dn = declaratorName((*pdecl)->declarator);
+                    if (dn == td) {
+                        // recursively canonicalize the typedef's underlying type
+                        return canonicalTypeRepr((*pdecl)->specifiers, (*pdecl)->declarator);
+                    }
+                }
+            }
+        }
+        return nullptr;
+    };
+
+    // Helper: apply declarator layers (pointer/array/function) onto a base repr
+    auto applyDeclaratorLayers = [&](const std::shared_ptr<TypeNode> &base, const DeclaratorPtr &d, bool inParamPrototype, bool *outVM)->std::shared_ptr<TypeNode> {
+        std::shared_ptr<TypeNode> cur = base ? base : std::make_shared<TypeNode>();
+        bool variablyModified = false;
+        std::vector<DeclaratorPtr> layers;
+        DeclaratorPtr curd = d;
+        while (curd) { layers.push_back(curd); if (curd->inner.has_value()) curd = curd->inner.value(); else break; }
+        for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
+            auto layer = layers[i];
+            if (!layer) continue;
+            if (layer->kind == Declarator::Kind::Pointer) {
+                auto p = std::make_shared<TypeNode>();
+                p->kind = TypeNode::Kind::Pointer;
+                p->pointee = cur;
+                p->ptrQual = layer->ptrQual;
+                cur = p;
+            } else if (layer->kind == Declarator::Kind::Array) {
+                auto a = std::make_shared<TypeNode>();
+                a->kind = TypeNode::Kind::Array;
+                a->element = cur;
+                a->arrayIsStar = layer->array.isStar;
+                a->arrayIsStatic = layer->array.isStatic;
+                a->arrayQual = layer->array.qual;
+                if (layer->array.size.has_value()) a->sizeExpr = layer->array.size.value();
+                if (a->arrayIsStar || (a->sizeExpr.has_value() && !ConstExprEvaluator::isIntegerConstantExpr(a->sizeExpr.value()))) {
+                    if (!inParamPrototype) variablyModified = true;
+                }
+                cur = a;
+            } else if (layer->kind == Declarator::Kind::Function) {
+                auto f = std::make_shared<TypeNode>();
+                f->kind = TypeNode::Kind::Function;
+                f->element = cur;
+                f->hasParamTypeList = layer->function.hasParamTypeList;
+                for (const auto &p : layer->function.params) {
+                    std::shared_ptr<TypeNode> ptn = nullptr;
+                    if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);
+                    else if (p.typeSpec.has_value()) { ptn = std::make_shared<TypeNode>(); ptn->kind = TypeNode::Kind::Builtin; ptn->text = *p.typeSpec; }
+                    if (!ptn) ptn = std::make_shared<TypeNode>();
+                    f->params.push_back(ptn);
+                }
+                cur = f;
+            }
+        }
+        if (outVM) *outVM = variablyModified;
+        return cur;
+    };
+
+    // If there is a typedef-name specifier, prefer resolving it structurally
+    for (const auto &ts : specs.typeSpecifiers) {
+        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName) {
+            std::unordered_set<std::string> visited;
+            auto baseType = resolveTypedef(ts.text, visited);
+            bool vm = false;
+            auto applied = applyDeclaratorLayers(baseType, decl, false, &vm);
+            return applied;
+        }
+    }
+
+    // Fallback: build structured type from specs+decl
+    return buildTypeFromDeclaration(specs, decl, false, nullptr);
+}
+
 void Semantic::recordDef(const std::string &name, const wvmcc::SourceSpan &span) {
     if (name.empty()) return;
     defCount[name]++;
@@ -503,13 +734,18 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
         fake->declarator = f->declarator;
         fake->initializer = std::nullopt;
         std::string sig = signatureForDeclaration(fake);
+        // build canonical type representation and compare if available
+        bool vm = false;
+        auto tn = buildTypeFromDeclaration(f->specifiers, f->declarator, false, &vm);
+        auto typeNode = tn;
+        auto canonRepr = canonicalTypeRepr(f->specifiers, f->declarator);
         auto it = declaredSignatures.find(name);
-        if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
-            // Determine whether the only difference is in qualifiers
+            if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
             std::string prev = it->second;
             int prevLine = -1;
             auto itspan = declaredSignatureSpan.find(name);
             if (itspan != declaredSignatureSpan.end()) prevLine = itspan->second.begin.line;
+            // check if qualifiers-only differ
             if (stripQualParts(prev) == stripQualParts(sig)) {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
@@ -517,15 +753,26 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
                 diag.span = f->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
             } else {
-                Diagnostic diag;
-                diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
-                diag.span = f->declarator->span;
-                curDiagnostics->push_back(std::move(diag));
+                        // fallback: if structural type representations differ, report incompatible declaration
+                        auto itype = declaredTypeRepr.find(name);
+                        if (itype != declaredTypeRepr.end() && !Semantic::typeNodesEqual(itype->second, canonRepr)) {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "incompatible declaration for '" + name + "': type mismatch" + (prevLine > 0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
+                    diag.span = f->declarator->span;
+                    curDiagnostics->push_back(std::move(diag));
+                } else {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
+                    diag.span = f->declarator->span;
+                    curDiagnostics->push_back(std::move(diag));
+                }
             }
         } else {
             declaredSignatures[name] = sig;
             if (f->declarator) declaredSignatureSpan.emplace(name, f->declarator->span);
+            if (canonRepr) declaredTypeRepr[name] = canonRepr;
         }
         if (!f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) recordDef(name, f->declarator->span);
         // Record file-scope function definition info for function-specifier rules
@@ -556,8 +803,20 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             return;
         }
         std::string sig = signatureForDeclaration(d);
+        bool vm = false;
+        auto tn = buildTypeFromDeclaration(d->specifiers, d->declarator, false, &vm);
+        if (vm && curDiagnostics) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Warning;
+            diag.message = "declaration has variably-modified type";
+            diag.span = d->declarator->span;
+            curDiagnostics->push_back(std::move(diag));
+        }
+        auto typeNode = tn;
+        // produce canonical form (resolve typedefs) when possible
+        auto canonRepr = canonicalTypeRepr(d->specifiers, d->declarator);
         auto it = declaredSignatures.find(name);
-        if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
+            if (it != declaredSignatures.end() && it->second != sig && curDiagnostics) {
             std::string prev = it->second;
             int prevLine = -1;
             auto itspan = declaredSignatureSpan.find(name);
@@ -568,16 +827,26 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
                 diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = d->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
-            } else {
-                Diagnostic diag;
-                diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
-                diag.span = d->declarator->span;
-                curDiagnostics->push_back(std::move(diag));
+                } else {
+                    auto itype = declaredTypeRepr.find(name);
+                    if (itype != declaredTypeRepr.end() && !Semantic::typeNodesEqual(itype->second, canonRepr)) {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "incompatible declaration for '" + name + "': type mismatch" + (prevLine > 0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
+                    diag.span = d->declarator->span;
+                    curDiagnostics->push_back(std::move(diag));
+                } else {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
+                    diag.span = d->declarator->span;
+                    curDiagnostics->push_back(std::move(diag));
+                }
             }
         } else {
             declaredSignatures[name] = sig;
             if (d->declarator) declaredSignatureSpan.emplace(name, d->declarator->span);
+            if (canonRepr) declaredTypeRepr[name] = canonRepr;
         }
     }
     

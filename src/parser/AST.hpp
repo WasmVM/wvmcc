@@ -165,8 +165,28 @@ struct ExternalDecl : Node {
 // Basic type node (placeholder, to be expanded by semantic phase)
 struct TypeNode : Node {
     enum class Kind { Builtin, Pointer, Array, Function, Struct, Union, Enum, Qualified } kind;
-    // A human-readable representation for early stages
-    std::string repr;
+    // Structured type representation
+    // Builtin: list of simple tokens (e.g., int, unsigned) or textual fallback
+    std::vector<DeclarationSpecifiers::SimpleTypeSpecifier> simple;
+    std::string text; // textual fallback (typedef-name or other)
+    // Struct/Union/Enum
+    std::shared_ptr<StructOrUnionSpecifier> su;
+
+    // Pointer
+    std::shared_ptr<TypeNode> pointee;
+    TypeQualifier ptrQual{TypeQualifier::None};
+
+    // Array
+    std::shared_ptr<TypeNode> element;
+    std::optional<ExprPtr> sizeExpr;
+    bool arrayIsStatic{false};
+    bool arrayIsStar{false};
+    TypeQualifier arrayQual{TypeQualifier::None};
+
+    // Function
+    std::vector<std::shared_ptr<TypeNode>> params;
+    bool hasParamTypeList{false};
+    // For function type, returnType is represented by nesting: function -> pointee? use element/pointee as appropriate
 };
 
 // Declarators (identifier, pointer, array, function)
