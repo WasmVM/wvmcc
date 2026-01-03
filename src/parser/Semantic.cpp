@@ -1613,6 +1613,286 @@ void Semantic::onStaticAssert(const ExternalDecl::StaticAssertPtr &sa) {
     }
 }
 
+Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
+    ExprTypeResult res;
+    if (!e) return res;
+    switch (e->kind) {
+        case Expr::Kind::Ident: {
+            auto id = std::dynamic_pointer_cast<IdentifierExpr>(e);
+            if (!id) break;
+            // Look up declared type representation for the identifier
+            auto it = declaredTypeRepr.find(id->name);
+            if (it != declaredTypeRepr.end() && it->second) {
+                res.type = it->second;
+                if (res.type->kind == TypeNode::Kind::Function) {
+                    res.isFunctionDesignator = true;
+                } else {
+                    // If it's not a function, the identifier designates an object and is an lvalue
+                    res.isLvalue = true;
+                }
+            }
+            break;
+        }
+        case Expr::Kind::Integer: {
+            // integer literal -> int type
+            auto tn = std::make_shared<TypeNode>();
+            tn->kind = TypeNode::Kind::Builtin;
+            tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+            res.type = tn;
+            break;
+        }
+        case Expr::Kind::Float: {
+            auto tn = std::make_shared<TypeNode>();
+            tn->kind = TypeNode::Kind::Builtin;
+            tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Double);
+            res.type = tn;
+            break;
+        }
+        case Expr::Kind::Char: {
+            auto tn = std::make_shared<TypeNode>();
+            tn->kind = TypeNode::Kind::Builtin;
+            tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Char);
+            res.type = tn;
+            break;
+        }
+        case Expr::Kind::String: {
+            // string literal is an lvalue of array of char
+            auto sl = std::dynamic_pointer_cast<StringLiteral>(e);
+            auto elem = std::make_shared<TypeNode>();
+            elem->kind = TypeNode::Kind::Builtin;
+            elem->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Char);
+
+            auto arr = std::make_shared<TypeNode>();
+            arr->kind = TypeNode::Kind::Array;
+            arr->element = elem;
+            // sizeExpr left null (unknown/implicit) and array is an lvalue
+            res.type = arr;
+            res.isLvalue = true;
+            break;
+        }
+        case Expr::Kind::GenericSelection: {
+            auto g = std::dynamic_pointer_cast<GenericSelectionExpr>(e);
+            if (!g) break;
+            // compute controlling expression type (do not evaluate it)
+            ExprTypeResult ctrl = typeOfExpr(g->controlling);
+            // find first association whose type is compatible
+            std::shared_ptr<Expr> chosenExpr;
+            for (const auto &assoc : g->assocs) {
+                if (!assoc.isDefault && assoc.type) {
+                    if (typeNodesEqual(assoc.type, ctrl.type)) { chosenExpr = assoc.expr; break; }
+                }
+            }
+            if (!chosenExpr) {
+                // use default association
+                for (const auto &assoc : g->assocs) {
+                    if (assoc.isDefault) { chosenExpr = assoc.expr; break; }
+                }
+            }
+            if (chosenExpr) {
+                // type/value category equals that of the chosen expression
+                res = typeOfExpr(chosenExpr);
+            }
+            break;
+        }
+        case Expr::Kind::Call: {
+            auto c = std::dynamic_pointer_cast<CallExpr>(e);
+            if (!c) break;
+            // determine callee type
+            ExprTypeResult calleeRes = typeOfExpr(c->callee);
+            std::shared_ptr<TypeNode> fnType;
+            if (calleeRes.isFunctionDesignator && calleeRes.type && calleeRes.type->kind == TypeNode::Kind::Function) {
+                fnType = calleeRes.type;
+            } else if (calleeRes.type && calleeRes.type->kind == TypeNode::Kind::Pointer && calleeRes.type->pointee && calleeRes.type->pointee->kind == TypeNode::Kind::Function) {
+                fnType = calleeRes.type->pointee;
+            }
+            // compute argument types
+            std::vector<ExprTypeResult> argTypes;
+            for (const auto &a : c->args) argTypes.push_back(typeOfExpr(a));
+
+            // helper: apply default argument promotions to a TypeNode (returns new node)
+            auto applyDefaultPromotions = [&](std::shared_ptr<TypeNode> t)->std::shared_ptr<TypeNode> {
+                if (!t) return t;
+                if (t->kind != TypeNode::Kind::Builtin) return t;
+                using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+                // promote char/short -> int; float -> double
+                if (!t->simple.empty()) {
+                    if (t->simple.size() == 1) {
+                        if (t->simple[0] == S::Char || t->simple[0] == S::Short) {
+                            auto nt = std::make_shared<TypeNode>(); nt->kind = TypeNode::Kind::Builtin; nt->simple.push_back(S::Int); return nt;
+                        }
+                        if (t->simple[0] == S::Float) {
+                            auto nt = std::make_shared<TypeNode>(); nt->kind = TypeNode::Kind::Builtin; nt->simple.push_back(S::Double); return nt;
+                        }
+                    }
+                }
+                return t;
+            };
+
+            if (fnType) {
+                // Determine result type: function returning object -> return type, otherwise void
+                if (fnType->element) res.type = fnType->element;
+                else res.isVoid = true;
+                // If prototype present, check argument count and types
+                if (fnType->hasParamTypeList) {
+                    size_t pcount = fnType->params.size();
+                    if (argTypes.size() != pcount && curDiagnostics) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "argument count does not match function prototype";
+                        d.span = e->span; curDiagnostics->push_back(std::move(d));
+                    }
+                    // compare each parameter where possible
+                    size_t n = std::min(argTypes.size(), pcount);
+                    for (size_t i = 0; i < n; ++i) {
+                        auto at = argTypes[i].type;
+                        auto pt = fnType->params[i];
+                        if (!typeNodesEqual(at, pt) && curDiagnostics) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "argument type mismatch for parameter " + std::to_string(i);
+                            if (c->args.size() > i && c->args[i]) d.span = c->args[i]->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
+                    }
+                } else {
+                    // no prototype: apply default promotions to arguments (no diagnostic)
+                    for (size_t i = 0; i < argTypes.size(); ++i) {
+                        if (argTypes[i].type) argTypes[i].type = applyDefaultPromotions(argTypes[i].type);
+                    }
+                }
+            } else {
+                // callee is not function or pointer to function: call has void type per C
+                res.isVoid = true;
+                if (curDiagnostics) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "called object is not a function or function pointer"; d.span = c->callee ? c->callee->span : e->span; curDiagnostics->push_back(std::move(d));
+                }
+            }
+            break;
+        }
+        case Expr::Kind::Member: {
+            auto m = std::dynamic_pointer_cast<MemberExpr>(e);
+            if (!m) break;
+            ExprTypeResult baseRes = typeOfExpr(m->base);
+            std::shared_ptr<StructOrUnionSpecifier> suSpec;
+            bool baseIsLvalue = baseRes.isLvalue;
+            if (m->isArrow) {
+                // base must be pointer to struct/union
+                if (!baseRes.type || baseRes.type->kind != TypeNode::Kind::Pointer || !baseRes.type->pointee) {
+                    if (curDiagnostics) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "left operand of '->' must be pointer to struct/union"; d.span = m->base ? m->base->span : e->span; curDiagnostics->push_back(std::move(d));
+                    }
+                } else if (baseRes.type->pointee->kind != TypeNode::Kind::Struct && baseRes.type->pointee->kind != TypeNode::Kind::Union) {
+                    if (curDiagnostics) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "left operand of '->' must point to struct/union type"; d.span = m->base ? m->base->span : e->span; curDiagnostics->push_back(std::move(d));
+                    }
+                } else {
+                    suSpec = baseRes.type->pointee->su;
+                    baseIsLvalue = true; // result is lvalue
+                }
+            } else {
+                // '.' operator: base must be lvalue of struct/union
+                if (!baseRes.type || (baseRes.type->kind != TypeNode::Kind::Struct && baseRes.type->kind != TypeNode::Kind::Union)) {
+                    if (curDiagnostics) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "left operand of '.' must be struct or union type"; d.span = m->base ? m->base->span : e->span; curDiagnostics->push_back(std::move(d));
+                    }
+                } else {
+                    suSpec = baseRes.type->su;
+                }
+            }
+
+            if (suSpec) {
+                // find member by name
+                bool found = false;
+                for (const auto &member : suSpec->members) {
+                    for (const auto &sd : member.declarators) {
+                        if (!sd.declarator) continue;
+                        std::string mname = sd.declarator->id.name;
+                        if (mname == m->member) {
+                            // build member type from member.specifiers + sd.declarator
+                            bool vm = false;
+                            auto mt = buildTypeFromDeclaration(member.specifiers, sd.declarator, false, &vm);
+                            if (mt) {
+                                res.type = mt;
+                                res.isLvalue = baseIsLvalue;
+                            }
+                            found = true;
+                            break;
+                        }
+                    }
+                    if (found) break;
+                }
+                if (!found && curDiagnostics) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "no member named '" + m->member + "' in object"; d.span = m->span; curDiagnostics->push_back(std::move(d));
+                }
+            }
+            break;
+        }
+        case Expr::Kind::PostfixUnary: {
+            auto pu = std::dynamic_pointer_cast<PostfixUnaryExpr>(e);
+            if (!pu) break;
+            ExprTypeResult baseRes = typeOfExpr(pu->base);
+            // operand must be modifiable lvalue
+            if (!baseRes.isLvalue && curDiagnostics) {
+                Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                d.message = "operand of postfix operator must be modifiable lvalue";
+                d.span = pu->base ? pu->base->span : e->span;
+                curDiagnostics->push_back(std::move(d));
+            }
+            // operand type must be arithmetic or pointer
+            bool okType = false;
+            if (baseRes.type) {
+                if (baseRes.type->kind == TypeNode::Kind::Builtin) okType = true;
+                if (baseRes.type->kind == TypeNode::Kind::Pointer) okType = true;
+                if (baseRes.type->kind == TypeNode::Kind::Enum) okType = true;
+            }
+            if (!okType && curDiagnostics) {
+                Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                d.message = "operand of postfix ++/-- must have arithmetic or pointer type";
+                d.span = pu->base ? pu->base->span : e->span;
+                curDiagnostics->push_back(std::move(d));
+            }
+            // result has the value of the operand (not an lvalue)
+            res.type = baseRes.type;
+            res.isLvalue = false;
+            break;
+        }
+        case Expr::Kind::CompoundLiteral: {
+            auto cl = std::dynamic_pointer_cast<CompoundLiteral>(e);
+            if (!cl) break;
+            // The type of a compound literal is the specified type; the result is an lvalue.
+            if (cl->type) {
+                res.type = cl->type;
+                res.isLvalue = true;
+                // If it's an array of unknown size, complete the size from the initializer
+                if (res.type->kind == TypeNode::Kind::Array && !res.type->sizeExpr.has_value() && cl->init) {
+                    if (cl->init->kind == Initializer::Kind::List) {
+                        // number of top-level clauses determines array size
+                        size_t count = cl->init->clauses.size();
+                        auto il = std::make_shared<IntegerLiteral>();
+                        il->kind = Expr::Kind::Integer;
+                        il->value = (long long)count;
+                        il->raw = std::to_string(count);
+                        res.type->sizeExpr = il;
+                    } else if (cl->init->kind == Initializer::Kind::Expr && cl->init->expr && cl->init->expr->kind == Expr::Kind::String) {
+                        // string literal initializes char array: size = strlen + 1
+                        auto sl = std::dynamic_pointer_cast<StringLiteral>(cl->init->expr);
+                        if (sl) {
+                            size_t len = sl->value.size();
+                            auto il = std::make_shared<IntegerLiteral>();
+                            il->kind = Expr::Kind::Integer;
+                            il->value = (long long)(len + 1);
+                            il->raw = std::to_string(len + 1);
+                            res.type->sizeExpr = il;
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        default: {
+            // For other expression kinds, leave type empty for now.
+            break;
+        }
+    }
+    return res;
+}
+
 void Semantic::checkFunction(const FunctionDefPtr &f, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!f) return;
     if (!f->declarator) {

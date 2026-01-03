@@ -87,6 +87,15 @@ private:
     std::shared_ptr<TypeNode> canonicalTypeRepr(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl) const;
     // structural comparison of TypeNode
     static bool typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::shared_ptr<TypeNode> &b);
+    // Result of expression type analysis
+    struct ExprTypeResult {
+        std::shared_ptr<TypeNode> type;
+        bool isLvalue{false};
+        bool isFunctionDesignator{false};
+        bool isVoid{false};
+    };
+    // Compute the type and value category of an expression for semantic checks.
+    ExprTypeResult typeOfExpr(const ExprPtr &e) const;
     // Build a TypeNode from a declaration-specifiers + declarator.
     // `inParamPrototype` indicates parameter prototype scope (affects VLA handling).
     std::shared_ptr<TypeNode> buildTypeFromDeclaration(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl, bool inParamPrototype = false, bool *outVariablyModified = nullptr) const;

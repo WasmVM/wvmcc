@@ -697,6 +697,29 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         sa->span = expr ? expr->span : SourceSpan{};
         sa->expr = expr;
         sa->message = msgExpr;
+        // Parser-level evaluation to preserve existing parser tests: evaluate constant-expression
+        auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
+        if (!val.has_value()) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "_Static_assert requires an integer constant expression";
+            if (expr) d.span = expr->span;
+            diagnostics.push_back(std::move(d));
+        } else if (*val == 0) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            std::string tmsg = "static assertion failed";
+            if (msgExpr && msgExpr->kind == Expr::Kind::String) {
+                auto sl = std::dynamic_pointer_cast<StringLiteral>(msgExpr);
+                if (sl) tmsg = std::string("static assertion failed: ") + sl->value;
+            } else {
+                tmsg = std::string("static assertion failed");
+            }
+            d.message = tmsg;
+            if (expr) d.span = expr->span;
+            diagnostics.push_back(std::move(d));
+        }
+
         auto ext = make_ast<ExternalDecl>();
         ext->span = sa->span;
         ext->decl = std::static_pointer_cast<ExternalDecl::StaticAssert>(sa);
