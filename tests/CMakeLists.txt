@@ -186,6 +186,13 @@ if(EXISTS ${PARSER_INITIALIZER_TEST})
     add_test(NAME parser-initializer COMMAND wvmcc-parser-initializer-test)
 endif()
 
+# Initialization semantics tests
+set(PARSER_SEMA_INIT_TEST ${TEST_ROOT}/unit/parser/sema_initialization_test.cpp)
+if(EXISTS ${PARSER_SEMA_INIT_TEST})
+    add_executable(wvmcc-sema-initialization-test ${PARSER_SEMA_INIT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-initialization COMMAND wvmcc-sema-initialization-test)
+endif()
+
 # Parser expressions tests (assignment + conditional)
 set(PARSER_EXPRESSIONS_TEST ${TEST_ROOT}/unit/parser/expressions_test.cpp)
 if(EXISTS ${PARSER_EXPRESSIONS_TEST})
@@ -205,6 +212,13 @@ set(PARSER_STATIC_ASSERT_TEST ${TEST_ROOT}/unit/parser/static_assert_test.cpp)
 if(EXISTS ${PARSER_STATIC_ASSERT_TEST})
     add_executable(wvmcc-parser-static-assert-test ${PARSER_STATIC_ASSERT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp)
     add_test(NAME parser-static-assert COMMAND wvmcc-parser-static-assert-test)
+endif()
+
+# Semantic static_assert tests
+set(PARSER_SEMA_STATIC_ASSERT_TEST ${TEST_ROOT}/unit/parser/sema_static_assert_test.cpp)
+if(EXISTS ${PARSER_SEMA_STATIC_ASSERT_TEST})
+    add_executable(wvmcc-sema-static-assert-test ${PARSER_SEMA_STATIC_ASSERT_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-static-assert COMMAND wvmcc-sema-static-assert-test)
 endif()
 
 # Lexer punctuator classification test

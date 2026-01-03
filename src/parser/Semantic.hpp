@@ -41,6 +41,7 @@ private:
     // ASTVisitor hooks
     void onIdent(const ASTVisitor::IdentifierExprPtr &id) override;
     void onFunctionDef(const FunctionDefPtr &f) override;
+    void onStaticAssert(const ExternalDecl::StaticAssertPtr &sa) override;
     void onDeclaration(const DeclarationPtr &d) override;
     // function enter/exit hooks for block-scope checks
     void onEnterFunction(const FunctionDefPtr &f) override;

@@ -376,6 +376,28 @@ static bool checkDesignatorIndexes(const InitializerPtr &init, std::vector<wvmcc
     }
     return true;
 }
+// Find the first array declarator (outermost-first) that has no size expression
+static DeclaratorPtr findFirstArrayDeclaratorWithoutSize(const DeclaratorPtr &d) {
+    if (!d) return nullptr;
+    DeclaratorPtr cur = d;
+    while (cur) {
+        if (cur->kind == Declarator::Kind::Array) {
+            if (!cur->array.size.has_value()) return cur;
+        }
+        if (cur->inner.has_value()) cur = cur->inner.value(); else break;
+    }
+    return nullptr;
+}
+
+// Create an integer literal expression node for a given numeric value
+static ExprPtr makeIntegerLiteral(long long v) {
+    auto il = make_ast<IntegerLiteral>();
+    il->kind = Expr::Kind::Integer;
+    il->value = v;
+    il->raw = std::to_string(v);
+    return il;
+}
+
 // Create a compact signature string for a declaration's type/specifiers/declarator
 static std::string signatureForDeclaration(const DeclarationPtr &d) {
     if (!d) return std::string();
@@ -1343,6 +1365,154 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         }
     }
 
+    // Initialization checks (C 6.7.9): basic validation for initializer forms
+    if (d->initializer) {
+        auto typeNode = canonicalTypeRepr(d->specifiers, d->declarator);
+        // helper: count top-level initializer clauses
+        auto countInitClauses = [](const InitializerPtr &init)->size_t {
+            if (!init) return 0;
+            if (init->kind == Initializer::Kind::Expr) return 1;
+            return init->clauses.size();
+        };
+        size_t nclauses = countInitClauses(d->initializer.value());
+        // Ensure we have a diagnostics sink usable both from first-pass checks
+        // (when `curDiagnostics` may be null) and traversal-time checks.
+        auto outDiag = curDiagnostics ? curDiagnostics : &diagnostics;
+
+        // Heuristic pre-check: if the specifiers look like a simple scalar
+        // type (e.g., `int`) and the declarator is not an array/function,
+        // then a braced initializer-list with more than one element is
+        // invalid for a scalar. This covers the common `int x = {1,2};`
+        // case even if canonicalization later does not yield a Builtin node.
+        if (d->initializer.value()->kind == Initializer::Kind::List && nclauses > 1) {
+            bool simpleSpec = false;
+            if (!d->specifiers.typeSpecifiers.empty() && d->specifiers.typeSpecifiers.front().kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) simpleSpec = true;
+            if (simpleSpec && !isFunctionDeclarator(d->declarator)) {
+                // ensure not an array declarator
+                DeclaratorPtr c = d->declarator; bool hasArray = false;
+                while (c) { if (c->kind == Declarator::Kind::Array) { hasArray = true; break; } if (c->inner.has_value()) c = c->inner.value(); else break; }
+                if (!hasArray) {
+                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "too many initializers for scalar";
+                    diag.span = d->span;
+                    outDiag->push_back(std::move(diag));
+                }
+            }
+        }
+
+        // If the declaration has an array declarator with no size, try to
+        // complete it from the initializer in simple cases (string-literal
+        // for char arrays or braced list with no designators).
+        DeclaratorPtr arrayDeclWithoutSize = findFirstArrayDeclaratorWithoutSize(d->declarator);
+        if (arrayDeclWithoutSize) {
+            // string-literal -> char[] special-case: set size to length+1
+            if (d->initializer.value()->kind == Initializer::Kind::Expr && d->initializer.value()->expr && d->initializer.value()->expr->kind == Expr::Kind::String) {
+                if (typeNode && typeNode->kind == TypeNode::Kind::Array && typeNode->element) {
+                    bool isChar = false;
+                    if (typeNode->element->kind == TypeNode::Kind::Builtin) {
+                        for (auto st : typeNode->element->simple) {
+                            using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+                            if (st == S::Char) { isChar = true; break; }
+                        }
+                        if (!isChar && !typeNode->element->text.empty()) {
+                            if (typeNode->element->text == "char") isChar = true;
+                        }
+                    }
+                    if (isChar) {
+                        auto sl = std::dynamic_pointer_cast<StringLiteral>(d->initializer.value()->expr);
+                        if (sl) {
+                            long long len = static_cast<long long>(sl->value.size()) + 1; // include NUL
+                            arrayDeclWithoutSize->array.size = makeIntegerLiteral(len);
+                            if (typeNode && typeNode->kind == TypeNode::Kind::Array) typeNode->sizeExpr = arrayDeclWithoutSize->array.size.value();
+                            nclauses = 1;
+                        }
+                    }
+                }
+            } else if (d->initializer.value()->kind == Initializer::Kind::List) {
+                bool anyDesignators = false;
+                for (const auto &cl : d->initializer.value()->clauses) { if (!cl.designators.empty()) { anyDesignators = true; break; } }
+                if (!anyDesignators) {
+                    long long sz = static_cast<long long>(nclauses);
+                    arrayDeclWithoutSize->array.size = makeIntegerLiteral(sz);
+                    if (typeNode && typeNode->kind == TypeNode::Kind::Array) typeNode->sizeExpr = arrayDeclWithoutSize->array.size.value();
+                }
+            }
+        }
+
+        if (typeNode) {
+            if (typeNode->kind == TypeNode::Kind::Builtin) {
+                // scalar: initializer list must contain at most one initializer
+                if (d->initializer.value()->kind == Initializer::Kind::List && nclauses > 1) {
+                            {
+                                Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                diag.message = "too many initializers for scalar";
+                                diag.span = d->span;
+                                outDiag->push_back(std::move(diag));
+                            }
+                }
+            } else if (typeNode->kind == TypeNode::Kind::Struct || typeNode->kind == TypeNode::Kind::Union) {
+                // count named members
+                size_t members = 0;
+                if (typeNode->su && typeNode->su->hasBody) {
+                    for (const auto &m : typeNode->su->members) {
+                        for (const auto &sd : m.declarators) {
+                            if (sd.declarator) {
+                                if (!declaratorName(sd.declarator).empty()) { members++; break; }
+                            }
+                        }
+                    }
+                }
+                    if (d->initializer.value()->kind == Initializer::Kind::List && members > 0 && nclauses > members) {
+                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "excess elements in initializer";
+                    diag.span = d->span;
+                    outDiag->push_back(std::move(diag));
+                }
+                // Basic check for designated member initializers: ensure member exists
+                if (d->initializer.value()->kind == Initializer::Kind::List) {
+                    for (const auto &cl : d->initializer.value()->clauses) {
+                        if (!cl.designators.empty()) {
+                            for (const auto &des : cl.designators) {
+                                if (des.kind == Designator::Kind::Member) {
+                                    bool found = false;
+                                    if (typeNode->su && typeNode->su->hasBody) {
+                                        for (const auto &m : typeNode->su->members) {
+                                            for (const auto &sd : m.declarators) {
+                                                if (sd.declarator) {
+                                                    if (declaratorName(sd.declarator) == des.member) { found = true; break; }
+                                                }
+                                            }
+                                            if (found) break;
+                                        }
+                                    }
+                                    if (!found) {
+                                        Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                                        diag.message = "designator refers to unknown member '" + des.member + "'";
+                                        outDiag->push_back(std::move(diag));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (typeNode->kind == TypeNode::Kind::Array) {
+                // If array size known and initializer is list, check for excess elements
+                if (typeNode->sizeExpr.has_value()) {
+                    auto v = ConstExprEvaluator::evalIntegerConstantExpr(typeNode->sizeExpr.value());
+                    if (v.has_value() && d->initializer.value()->kind == Initializer::Kind::List) {
+                        if (nclauses > static_cast<size_t>(*v)) {
+                            Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                            diag.message = "excess elements in initializer";
+                            diag.span = d->span;
+                            outDiag->push_back(std::move(diag));
+                        }
+                    }
+                }
+                // special-case: char array initialized with string literal handled above
+            }
+        }
+    }
+
     // track internal (static) definitions for duplicate checking
     if (!d->declarator->id.name.empty() && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
         std::string nm = d->declarator->id.name;
@@ -1415,6 +1585,31 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
                 }
             }
         }
+    }
+}
+
+void Semantic::onStaticAssert(const ExternalDecl::StaticAssertPtr &sa) {
+    (void)sa;
+    if (!sa) return;
+    if (!curDiagnostics) return;
+    // Evaluate the controlling constant-expression
+    auto val = ConstExprEvaluator::evalIntegerConstantExpr(sa->expr);
+    if (!val.has_value()) {
+        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";
+        if (sa->expr) d.span = sa->expr->span;
+        curDiagnostics->push_back(std::move(d));
+        return;
+    }
+    // If value != 0, declaration has no effect; if value == 0, emit diagnostic with string literal text
+    if (*val == 0) {
+        std::string msgText = "static assertion failed";
+        if (sa->message && sa->message->kind == Expr::Kind::String) {
+            auto sl = std::dynamic_pointer_cast<StringLiteral>(sa->message);
+            if (sl) msgText = sl->value;
+        }
+        Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = msgText;
+        if (sa->expr) d.span = sa->expr->span;
+        curDiagnostics->push_back(std::move(d));
     }
 }
 

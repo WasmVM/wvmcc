@@ -634,7 +634,8 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     // gather specifiers (keywords like 'int', 'static', etc.)
     auto specs = parseDeclarationSpecifiers();
 
-    // Handle _Static_assert (C 6.7.10): _Static_assert ( constant-expression , string-literal ) ;
+    // Handle _Static_assert (C 6.7.10): create a StaticAssert external node so
+    // semantic checks can evaluate the constant-expression with TU context.
     if (lex.peek() && lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "_Static_assert") {
         // consume keyword
         lex.next();
@@ -665,10 +666,14 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         }
 
         // expect string-literal
-        std::string msg;
+        ExprPtr msgExpr = nullptr;
         if (lex.peek() && lex.peek()->kind() == TokenKind::StringLiteral) {
-            msg = lex.peek()->lexeme();
-            lex.next();
+            auto tok = *lex.next();
+            auto sl = make_ast<StringLiteral>();
+            sl->span = tok.span;
+            sl->value = tok.lexeme();
+            sl->kind = Expr::Kind::String;
+            msgExpr = sl;
         } else {
             wvmcc::Diagnostic d;
             d.severity = wvmcc::Diagnostic::Severity::Error;
@@ -687,23 +692,15 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         // expect ';'
         if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
 
-        // Evaluate constant-expression
-        auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
-        if (!val.has_value()) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "_Static_assert requires an integer constant expression";
-            if (expr) d.span = expr->span;
-            diagnostics.push_back(std::move(d));
-        } else if (*val == 0) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = std::string("static assertion failed: ") + msg;
-            if (expr) d.span = expr->span;
-            diagnostics.push_back(std::move(d));
-        }
-
-        return nullptr; // static assert is its own external declaration but we don't create AST node for it
+        // build AST node for static assert and return as external declaration
+        auto sa = make_ast<ExternalDecl::StaticAssert>();
+        sa->span = expr ? expr->span : SourceSpan{};
+        sa->expr = expr;
+        sa->message = msgExpr;
+        auto ext = make_ast<ExternalDecl>();
+        ext->span = sa->span;
+        ext->decl = std::static_pointer_cast<ExternalDecl::StaticAssert>(sa);
+        return ext;
     }
 
     // Try to parse an optional declarator (may be null for declarations like "struct S;")

@@ -19,6 +19,12 @@ void ASTVisitor::traverseExternalDecl(const ExternalDeclPtr &ext) {
         auto d = std::get<DeclarationPtr>(ext->decl);
         onDeclaration(d);
         traverseDeclaration(d);
+    } else if (std::holds_alternative<ExternalDecl::StaticAssertPtr>(ext->decl)) {
+        auto sa = std::get<ExternalDecl::StaticAssertPtr>(ext->decl);
+        onStaticAssert(sa);
+        if (sa && sa->expr) traverseExpr(sa->expr);
+        // message is a string literal; traverse it for completeness
+        if (sa && sa->message) traverseExpr(sa->message);
     }
 }
 

@@ -159,7 +159,19 @@ struct DeclarationSpecifiers::TypeSpecifier::EnumSpecifier {
 
 // ExternalDecl is either a function definition or a declaration
 struct ExternalDecl : Node {
-    std::variant<FunctionDefPtr, DeclarationPtr> decl;
+    // External declaration may be a function definition, a declaration, or
+    // a static assertion (C 6.7.10). Static assertions are represented as
+    // a small AST node so semantic checks can evaluate them with TU context.
+    struct StaticAssert;
+    using StaticAssertPtr = std::shared_ptr<StaticAssert>;
+
+    std::variant<FunctionDefPtr, DeclarationPtr, StaticAssertPtr> decl;
+};
+
+// Static assertion node for `_Static_assert(constant-expression, string-literal);`
+struct ExternalDecl::StaticAssert : Node {
+    ExprPtr expr; // constant-expression
+    ExprPtr message; // string-literal expression
 };
 
 // Basic type node (placeholder, to be expanded by semantic phase)
