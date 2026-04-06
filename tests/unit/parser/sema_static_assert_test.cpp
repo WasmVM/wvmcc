@@ -59,9 +59,15 @@ static int run_case(const std::string &src, const std::string &expect_substr) {
 
 int main() {
     struct Case { std::string src; std::string expect; } cases[] = {
+        // file-scope static asserts
         { "_Static_assert(1, \"ok\");\n", "" },
         { "_Static_assert(0, \"failed message\");\n", "failed message" },
-        { "int x = 1; _Static_assert(x, \"non-const\");\n", "_Static_assert requires an integer constant expression" }
+        { "int x = 1; _Static_assert(x, \"non-const\");\n", "_Static_assert requires an integer constant expression" },
+        // block-scope static asserts (C17 §6.8.2)
+        { "void f(void) { _Static_assert(1, \"ok\"); }\n", "" },
+        { "void f(void) { _Static_assert(0, \"block failed\"); }\n", "block failed" },
+        { "void f(void) { int x = 1; _Static_assert(2 > 1, \"math broken\"); }\n", "" },
+        { "void f(void) { _Static_assert(1 == 1, \"identity failed\"); }\n", "" },
     };
 
     for (auto &c : cases) {

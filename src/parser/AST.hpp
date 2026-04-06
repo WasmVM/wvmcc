@@ -351,8 +351,8 @@ struct DefaultStmt : Stmt { StmtPtr stmt; };
 struct LabelStmt : Stmt { std::string name; StmtPtr stmt; };
 
 struct BlockItem : Node {
-    // either a declaration or a statement
-    std::variant<DeclarationPtr, StmtPtr> item;
+    // either a declaration, a statement, or a _Static_assert (C17 §6.8.2)
+    std::variant<DeclarationPtr, StmtPtr, ExternalDecl::StaticAssertPtr> item;
 };
 
 // Designators used in designated initializers (e.g., [3], .member)

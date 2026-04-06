@@ -19,6 +19,7 @@ std::optional<long long> ConstExprEvaluator::evalIntegerConstantExpr(const ExprP
         if (ue->op == "-") return -(*v);
         if (ue->op == "+") return *v;
         if (ue->op == "~") return ~(*v);
+        if (ue->op == "!") return (long long)(!(*v));
         return std::nullopt;
     }
     if (e->kind == Expr::Kind::PostfixUnary) {
@@ -52,6 +53,14 @@ std::optional<long long> ConstExprEvaluator::evalIntegerConstantExpr(const ExprP
         if (be->op == "&") return l & r;
         if (be->op == "|") return l | r;
         if (be->op == "^") return l ^ r;
+        if (be->op == "<") return (long long)(l < r);
+        if (be->op == ">") return (long long)(l > r);
+        if (be->op == "<=") return (long long)(l <= r);
+        if (be->op == ">=") return (long long)(l >= r);
+        if (be->op == "==") return (long long)(l == r);
+        if (be->op == "!=") return (long long)(l != r);
+        if (be->op == "&&") return (long long)(l && r);
+        if (be->op == "||") return (long long)(l || r);
     }
     if (e->kind == Expr::Kind::Ternary) {
         auto te = std::static_pointer_cast<TernaryExpr>(e);

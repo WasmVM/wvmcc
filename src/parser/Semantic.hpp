@@ -94,11 +94,15 @@ private:
         bool isFunctionDesignator{false};
         bool isVoid{false};
     };
+public:
     // Compute the type and value category of an expression for semantic checks.
     ExprTypeResult typeOfExpr(const ExprPtr &e) const;
     // Build a TypeNode from a declaration-specifiers + declarator.
     // `inParamPrototype` indicates parameter prototype scope (affects VLA handling).
+    // Public so static helper functions in Semantic.cpp can call it.
     std::shared_ptr<TypeNode> buildTypeFromDeclaration(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl, bool inParamPrototype = false, bool *outVariablyModified = nullptr) const;
+
+private:
     // pointer to diagnostics vector during a run so hooks can append
     std::vector<wvmcc::Diagnostic> *curDiagnostics{nullptr};
 };

@@ -832,6 +832,9 @@ std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSp
             case DeclarationSpecifiers::TypeSpecifier::Kind::Atomic:
                 tn->kind = TypeNode::Kind::Qualified;
                 tn->text = "_Atomic";
+                if (ts.atomicInner) {
+                    tn->pointee = buildTypeFromDeclaration(*ts.atomicInner, nullptr, inParamPrototype, outVariablyModified);
+                }
                 break;
             case DeclarationSpecifiers::TypeSpecifier::Kind::Other:
                 tn->kind = TypeNode::Kind::Builtin;
@@ -1077,8 +1080,13 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
         auto tn = buildTypeFromDeclaration(d->specifiers, d->declarator, false, &vm);
         if (vm && curDiagnostics) {
             Diagnostic diag;
-            diag.severity = Diagnostic::Severity::Warning;
-            diag.message = "declaration has variably-modified type";
+            if (functionDepth == 0) {
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "variably-modified type not allowed at file scope";
+            } else {
+                diag.severity = Diagnostic::Severity::Warning;
+                diag.message = "declaration has variably-modified type";
+            }
             diag.span = d->declarator->span;
             curDiagnostics->push_back(std::move(diag));
         }

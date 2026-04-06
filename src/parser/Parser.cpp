@@ -801,7 +801,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
                 auto d = parseDeclaration(specs, decl);
                 if (!d) return nullptr;
                 // static/thread storage duration initializers must be constant (C 6.7.9 constraint 4)
-                if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) /*|| specs.hasStorage(StorageClass::ThreadLocal)*/)) {
+                if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
                     // semantic check (constant initializer) moved to Semantic pass
                 }
                 auto ext = make_ast_with_span<ExternalDecl>(d->span);
@@ -825,7 +825,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         if (!d) return nullptr;
         // If this declaration has static/thread storage duration, its initializer
         // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
-        if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) /*|| specs.hasStorage(StorageClass::ThreadLocal)*/)) {
+        if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
             if (!initializerIsConstant(*d->initializer)) {
                 wvmcc::Diagnostic diag;
                 diag.severity = wvmcc::Diagnostic::Severity::Error;
@@ -1082,6 +1082,54 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             ds->span = sub ? sub->span : SourceSpan{};
             auto bi = make_ast<BlockItem>();
             bi->item = std::static_pointer_cast<Stmt>(ds);
+            body.push_back(bi);
+            continue;
+        }
+
+        // _Static_assert as block item (C17 §6.8.2)
+        if (p->kind() == TokenKind::Keyword && p->lexeme() == "_Static_assert") {
+            lex.next();
+            if (!acceptPunct("(")) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after _Static_assert";
+                if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                while (lex.peek() && !(lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";")) lex.next();
+                if (lex.peek()) lex.next();
+                continue;
+            }
+            auto expr = parseConditionalExpression();
+            if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ',' in _Static_assert";
+                if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+            } else { lex.next(); }
+            ExprPtr msgExpr = nullptr;
+            if (lex.peek() && lex.peek()->kind() == TokenKind::StringLiteral) {
+                auto tok = *lex.next();
+                auto sl = make_ast<StringLiteral>(); sl->span = tok.span; sl->value = tok.lexeme(); sl->kind = Expr::Kind::String;
+                msgExpr = sl;
+            } else {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected string literal in _Static_assert";
+                if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+            }
+            if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==")")) {
+                if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Static_assert"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+            } else { lex.next(); }
+            if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+            auto sa = make_ast<ExternalDecl::StaticAssert>();
+            sa->span = expr ? expr->span : SourceSpan{};
+            sa->expr = expr;
+            sa->message = msgExpr;
+            auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
+            if (!val.has_value()) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";
+                if (expr) d.span = expr->span; diagnostics.push_back(std::move(d));
+            } else if (*val == 0) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+                std::string tmsg = "static assertion failed";
+                if (msgExpr && msgExpr->kind == Expr::Kind::String) { auto sl = std::dynamic_pointer_cast<StringLiteral>(msgExpr); if (sl) tmsg = std::string("static assertion failed: ") + sl->value; }
+                d.message = tmsg; if (expr) d.span = expr->span; diagnostics.push_back(std::move(d));
+            }
+            auto bi = make_ast<BlockItem>();
+            bi->item = std::static_pointer_cast<ExternalDecl::StaticAssert>(sa);
             body.push_back(bi);
             continue;
         }

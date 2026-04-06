@@ -41,6 +41,11 @@ void ASTVisitor::traverseFunction(const FunctionDefPtr &f) {
             auto d = std::get<DeclarationPtr>(bi->item);
             onDeclaration(d);
             traverseDeclaration(d);
+        } else if (std::holds_alternative<ExternalDecl::StaticAssertPtr>(bi->item)) {
+            auto sa = std::get<ExternalDecl::StaticAssertPtr>(bi->item);
+            onStaticAssert(sa);
+            if (sa && sa->expr) traverseExpr(sa->expr);
+            if (sa && sa->message) traverseExpr(sa->message);
         } else {
             traverseStmt(std::get<StmtPtr>(bi->item));
         }
@@ -82,6 +87,11 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
                         auto d = std::get<DeclarationPtr>(bi->item);
                         onDeclaration(d);
                         traverseDeclaration(d);
+                    } else if (std::holds_alternative<ExternalDecl::StaticAssertPtr>(bi->item)) {
+                        auto sa = std::get<ExternalDecl::StaticAssertPtr>(bi->item);
+                        onStaticAssert(sa);
+                        if (sa && sa->expr) traverseExpr(sa->expr);
+                        if (sa && sa->message) traverseExpr(sa->message);
                     } else traverseStmt(std::get<StmtPtr>(bi->item));
                 }
             }
