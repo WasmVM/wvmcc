@@ -95,6 +95,13 @@ if(EXISTS ${PARSER_SEMA_DECL_COMPAT_TEST})
     add_test(NAME parser-sema-decl-compat COMMAND wvmcc-sema-decl-compat-test)
 endif()
 
+# _Thread_local storage class checks
+set(PARSER_SEMA_THREAD_LOCAL_TEST ${TEST_ROOT}/unit/parser/sema_thread_local_test.cpp)
+if(EXISTS ${PARSER_SEMA_THREAD_LOCAL_TEST})
+    add_executable(wvmcc-sema-thread-local-test ${PARSER_SEMA_THREAD_LOCAL_TEST} ${SRC_ROOT}/pp/Preprocessor.cpp ${SRC_ROOT}/pp/Tokenizer.cpp ${SRC_ROOT}/pp/MacroTable.cpp ${SRC_ROOT}/pp/ConstExprParser.cpp ${SRC_ROOT}/parser/Lexer.cpp ${SRC_ROOT}/parser/Parser.cpp ${SRC_ROOT}/parser/ConstExprEval.cpp ${SRC_ROOT}/parser/Semantic.cpp ${SRC_ROOT}/parser/ASTVisitor.cpp)
+    add_test(NAME parser-sema-thread-local COMMAND wvmcc-sema-thread-local-test)
+endif()
+
 # Storage-class checks for block-scope functions
 set(PARSER_SEMA_STORAGE_BLOCK_TEST ${TEST_ROOT}/unit/parser/sema_storage_class_block_test.cpp)
 if(EXISTS ${PARSER_SEMA_STORAGE_BLOCK_TEST})

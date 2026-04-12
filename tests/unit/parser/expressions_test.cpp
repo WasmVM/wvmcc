@@ -256,6 +256,20 @@ int main() {
     bo = std::dynamic_pointer_cast<BinaryExpr>(e);
     if (!bo || bo->op != "-") { std::cerr << "expected '-' BinaryExpr" << std::endl; return 57; }
 
+    // compound literal: (int){42} (C17 §6.5.2.5)
+    if (parse_return_expr("int main() { return (int){42}; }\n", e) != 0) { std::cerr << "scalar compound literal parse failed" << std::endl; return 110; }
+    {
+        auto cl = std::dynamic_pointer_cast<CompoundLiteral>(e);
+        if (!cl) { std::cerr << "expected CompoundLiteral for (int){42}" << std::endl; return 111; }
+    }
+
+    // compound literal with multiple elements
+    if (parse_return_expr("int main() { return (double){3.14}; }\n", e) != 0) { std::cerr << "double compound literal parse failed" << std::endl; return 112; }
+    {
+        auto cl = std::dynamic_pointer_cast<CompoundLiteral>(e);
+        if (!cl) { std::cerr << "expected CompoundLiteral for (double){3.14}" << std::endl; return 113; }
+    }
+
     std::cout << "expressions-test: OK" << std::endl;
     return 0;
 }

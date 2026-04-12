@@ -83,10 +83,12 @@ int main() {
         }
     }
 
-        // VLA-specific diagnostics: expect a variably-modified warning
+        // VLA-specific diagnostics: expect a variably-modified warning at block scope
         struct Case vlaCases[] = {
             { "void h(int n) { int arr[n]; }\n", "variably-modified" },
-            { "void f(int n) { typedef int A[n]; A x; }\n", "variably-modified" }
+            { "void f(int n) { typedef int A[n]; A x; }\n", "variably-modified" },
+            // VLA at file scope must be an error (C17 §6.9.2 — not allowed)
+            { "int n = 5; int arr[n];\n", "variably-modified type not allowed at file scope" },
         };
         for (auto &c : vlaCases) {
             int r = run_case(c.src, c.expect);

@@ -22,6 +22,10 @@ int main() {
         ofs << "enum E { A, B = 3, C } e1;\n";
         ofs << "enum { X = 1, Y, };\n";
         ofs << "enum F;\n";
+        // C17 §6.7.2: _Bool, _Complex, _Imaginary type specifiers
+        ofs << "_Bool flag;\n";
+        ofs << "_Complex double cd;\n";
+        ofs << "_Imaginary float imf;\n";
     }
 
     Preprocessor pp;
@@ -53,6 +57,9 @@ int main() {
     if (out.find("<Name>A</Name>") == std::string::npos || out.find("<Name>B</Name>") == std::string::npos || out.find("<Name>C</Name>") == std::string::npos) { std::remove(fname.c_str()); return 11; }
     if (out.find("<Name>X</Name>") == std::string::npos || out.find("<Name>Y</Name>") == std::string::npos) { std::remove(fname.c_str()); return 12; }
     if (out.find("enum F") == std::string::npos && out.find("name=\"F\"") == std::string::npos) { std::remove(fname.c_str()); return 13; }
+    if (out.find("_Bool") == std::string::npos) { std::cerr << "_Bool not found in AST output\n"; std::remove(fname.c_str()); return 14; }
+    if (out.find("_Complex") == std::string::npos) { std::cerr << "_Complex not found in AST output\n"; std::remove(fname.c_str()); return 15; }
+    if (out.find("_Imaginary") == std::string::npos) { std::cerr << "_Imaginary not found in AST output\n"; std::remove(fname.c_str()); return 16; }
 
     std::cout << "type-specifiers-test: OK" << std::endl;
     std::remove(fname.c_str());

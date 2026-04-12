@@ -46,7 +46,7 @@ int main() {
     struct Case { std::string src; std::string expect; bool present; } cases[] = {
         { "int x; int *restrict p = &x; int *q = &x;\n", "may alias object 'x' associated with restrict pointer 'p'", true },
         { "int x; int *restrict p = &x; int *q = &x; int *restrict r = &x;\n", "may alias object 'x' associated with restrict pointer 'p'", true },
-        { "int x; int *restrict p = &x; int *q = &y;\n int y;", "may alias", false }
+        { "int x; int y; int *restrict p = &x; int *q = &y;", "may alias", false }
     };
 
     for (auto &c : cases) {

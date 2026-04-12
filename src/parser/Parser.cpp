@@ -39,7 +39,7 @@ static bool initializerIsConstant(const InitializerPtr &init) {
 DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
     DeclarationSpecifiers specs;
 
-    static const std::unordered_set<std::string> storage = {"typedef","extern","static","auto","register"};
+    static const std::unordered_set<std::string> storage = {"typedef","extern","static","auto","register","_Thread_local"};
     static const std::unordered_set<std::string> typequal = {"const","volatile","restrict","_Atomic"};
     static const std::unordered_set<std::string> funcspec = {"inline","_Noreturn"};
     static const std::unordered_set<std::string> alignspec = {"_Alignas"};
@@ -88,6 +88,7 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
             else if (s == "static") specs.addStorage(StorageClass::Static);
             else if (s == "auto") specs.addStorage(StorageClass::Auto);
             else if (s == "register") specs.addStorage(StorageClass::Register);
+            else if (s == "_Thread_local") specs.addStorage(StorageClass::ThreadLocal);
             lex.next();
             continue;
         }
