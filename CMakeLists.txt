@@ -27,6 +27,7 @@ file(GLOB_RECURSE WVMCC_SOURCES
 	${SRC_ROOT}/exec/*.cpp
     ${SRC_ROOT}/pp/*.cpp
     ${SRC_ROOT}/parser/*.cpp
+    ${SRC_ROOT}/codegen/*.cpp
 )
 
 add_executable(wvmcc ${WVMCC_SOURCES})
