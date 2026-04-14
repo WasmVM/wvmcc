@@ -125,6 +125,29 @@ All expression emission is stack-machine style: `emitExpr(ExprPtr, bool need_lva
 
 ---
 
+## Host Modules
+
+WasmVM provides a `sys_proc` host module (registered under the module name `"sys_proc"`) that supplies argc/argv and process control. C programs import these as `extern` declarations:
+
+| C declaration | Host function | Notes |
+|---|---|---|
+| `extern int sys_proc_argc(void);` | `argc() → i32` | number of command-line args |
+| `extern int sys_proc_argv_len(int idx);` | `argv_len(i32) → i32` | byte length of arg at index |
+| `extern int sys_proc_argv(int idx, char *buf, int len);` | `argv(i32, i32, i32) → i32` | copy arg string into `mem[0]` |
+| `extern void sys_proc_exit(int code);` | `exit(i32) → ()` | process exit |
+| `extern int sys_proc_getenv(const char *n, int nlen, char *buf, int len);` | `getenv(i32, i32, i32, i32) → i32` | env var lookup |
+| `extern int sys_proc_clock_gettime(int clk, void *ts);` | `clock_gettime(i32, i32) → i32` | wall/monotonic clock |
+
+`wasmvm` populates `wasmvm_args` from the command line before instantiation; `argc`/`argv` read from that vector at runtime.
+
+**Wasm64 native support** (updated 2026-04-13): `sys_proc` now registers each pointer-taking function twice — once with `i32` params (Wasm32 callers) and once with `i64` params (Wasm64 callers). The `wasmvm` runtime matches imports by **name AND type**, so our Wasm64 module will automatically bind to the `i64`-pointer variants. No truncation or wrapping needed. The `sysenv.hpp` `get_ptr()` helper handles both variants in the same host function body.
+
+The `MemType` struct in `Types.hpp` now has an `is64` flag — set `is64 = true` on both `mem[0]` and `mem[1]` when building the module to declare memory64.
+
+A `sys_fs` sub-module (file system) is also available under the same host library.
+
+---
+
 ## Calling Convention
 
 - **Scalar params/return** → direct Wasm param/result types
@@ -179,7 +202,7 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 
 #### Step 1.2 — ModuleCodegen skeleton
 - `ModuleCodegen.hpp/.cpp`: constructor + `generate()` shell
-- Emit two `MemType` entries: `mem[0]` (heap/static, 1 page min), `mem[1]` (shadow stack, 1 page min); indices 2–15 reserved
+- Emit two `MemType` entries: `mem[0]` (heap/static, 1 page min, `is64=true`), `mem[1]` (shadow stack, 1 page min, `is64=true`); indices 2–15 reserved
 - Emit `__stack_pointer` mutable i64 global (init = top of `mem[1]`, e.g. `0x10000`)
 - First pass: iterate TU externals; register every function definition and `extern` function declaration in `symtab_` and `mod_.imports`/`mod_.funcs`; export all non-`static` functions
 - First pass: register file-scope scalar variables as `WasmGlobal` (i64, mutable, init 0)
@@ -213,9 +236,10 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 - Verify call site type matches registered `FuncType`
 
 #### Step 1.7 — Verification
-- Compile `int add(int a, int b) { return a+b; }` → `wasm-validate output.wasm` passes
+- Compile `int add(int a, int b) { return a+b; }` → `module_validate()` returns no error
+- Inspect output with `readwasm --func --type output.wasm` to confirm correct function type and body
 - Run existing parser/semantic unit tests — all pass
-- Smoke-test `extern` import: compile `extern int puts(int s); int greet() { return puts(0); }` → validate
+- Smoke-test `extern` import: compile `extern int puts(int s); int greet() { return puts(0); }` → `module_validate()` passes
 
 ---
 
@@ -261,9 +285,9 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 - `emitExpr`: `CompoundLiteral` → allocate on shadow stack (`mem[1]`); emit initializer bytes; push i64 address
 
 #### Step 2.9 — Verification
-- Compile struct-using C file; inspect with `wasm-objdump -d`
-- Compile pointer-arithmetic C file; verify loads/stores target correct memory indices
-- Regression: all unit tests pass
+- Compile struct-using C file; inspect with `readwasm --func --data output.wasm` to confirm field offsets and load/store memory indices
+- Compile pointer-arithmetic C file; verify `mem[0]`/`mem[1]` indices in `readwasm` output
+- Run via `wasmvm output.wasm`; regression: all unit tests pass
 
 ---
 
@@ -300,8 +324,8 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 - Sparse case (`max−min > 4 × num_cases`): emit chained `if`/`else` comparisons
 
 #### Step 3.9 — Verification
-- Compile switch/loop-heavy C file; verify control flow in WAT dump
-- Regression: all unit tests pass
+- Compile switch/loop-heavy C file; inspect control flow with `readwasm --func output.wasm`
+- Run via `wasmvm output.wasm`; regression: all unit tests pass
 
 ---
 
@@ -332,9 +356,9 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 - `_Complex`: pair of f32/f64 locals (real + imaginary); basic arithmetic only
 
 #### Step 4.6 — Verification
-- Compile callback-passing C file; verify `call_indirect` in WAT dump
-- Compile `static`-local counter function; verify single initialization
-- Regression: all unit tests pass
+- Compile callback-passing C file; verify `call_indirect` with `readwasm --func --table output.wasm`
+- Compile `static`-local counter function; verify single initialization via `readwasm --global output.wasm`
+- Run via `wasmvm output.wasm`; regression: all unit tests pass
 
 ---
 
@@ -352,7 +376,7 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 
 #### Step 5.4 — Integration tests
 - Write a suite of small `.c` files covering each phase milestone
-- Build and run each via WasmVM; verify return values match expected output
+- Inspect each output with `readwasm --all`; run each via `wasmvm`; verify return values match expected output
 - Regression: all existing parser/semantic unit tests pass
 
 ---
@@ -375,9 +399,9 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 
 ## Verification
 
-1. **Phase 1**: `wasm-validate output.wasm` passes; run via WasmVM
-2. **Phase 2**: Compile a struct-using C file; inspect with `wasm-objdump -d`; verify `mem[0]`/`mem[1]` load/store indices
-3. **Phase 3**: Compile a switch/loop-heavy C file; verify control flow in WAT dump
-4. **Phase 4**: Compile callback and `static`-local C files; verify `call_indirect` and single-init in WAT dump
-5. **Phase 5**: Full integration test suite run via WasmVM
+1. **Phase 1**: `module_validate()` passes; `readwasm --func --type` confirms correct output; run via `wasmvm`
+2. **Phase 2**: `readwasm --func --data` confirms field offsets and correct `mem[0]`/`mem[1]` indices; run via `wasmvm`
+3. **Phase 3**: `readwasm --func` confirms control flow structure; run via `wasmvm`
+4. **Phase 4**: `readwasm --func --table --global` confirms `call_indirect` and static-local guards; run via `wasmvm`
+5. **Phase 5**: Full integration test suite passes via `wasmvm`; `readwasm --all` on each output
 6. **Regression**: All existing parser/semantic unit tests pass after each phase
