@@ -11,6 +11,7 @@
 #include "../parser/AST.hpp"
 #include "../parser/Parser.hpp"
 #include "../parser/Semantic.hpp"
+#include "../codegen/ModuleCodegen.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
     std::ofstream ofs(path, std::ios::binary);
@@ -205,7 +206,12 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    WasmVM::WasmModule module;
+    wvmcc::codegen::ModuleCodegen codegen(sem);
+    auto module = codegen.generate(main_translation_unit);
+    if (auto err = WasmVM::module_validate(module)) {
+        std::cerr << "error: module validation failed: " << err->what() << std::endl;
+        return 1;
+    }
     const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
     if (!write_module_to_file(module, target)) {
         return 1;
