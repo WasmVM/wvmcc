@@ -1,4 +1,5 @@
 #include "TypeMap.hpp"
+#include "LayoutEngine.hpp"
 #include "../parser/Semantic.hpp"
 
 namespace wvmcc::codegen {
@@ -122,9 +123,12 @@ size_t TypeMap::byteSize(const wvmcc::parser::TypeNodePtr& type) const {
         }
         case wvmcc::parser::TypeNode::Kind::Struct:
         case wvmcc::parser::TypeNode::Kind::Union: {
-            // For structs/unions, we'd need to calculate based on field layout
-            // This is a placeholder - in a real implementation we'd use LayoutEngine
-            return 8; // Placeholder
+            // For structs/unions, use LayoutEngine to calculate size and alignment
+            if (type->su) {
+                auto layout = layoutEngine_.computeLayout(*type->su);
+                return layout.byteSize;
+            }
+            return 8; // Fallback
         }
         case wvmcc::parser::TypeNode::Kind::Enum: {
             // Enums are typically represented as int-sized values
@@ -189,9 +193,12 @@ size_t TypeMap::byteAlignment(const wvmcc::parser::TypeNodePtr& type) const {
         }
         case wvmcc::parser::TypeNode::Kind::Struct:
         case wvmcc::parser::TypeNode::Kind::Union: {
-            // Structs/unions align to the maximum alignment of their members
-            // Placeholder implementation
-            return 8;
+            // For structs/unions, use LayoutEngine to calculate alignment
+            if (type->su) {
+                auto layout = layoutEngine_.computeLayout(*type->su);
+                return layout.byteAlignment;
+            }
+            return 8; // Fallback
         }
         case wvmcc::parser::TypeNode::Kind::Enum: {
             // Enums align like integers

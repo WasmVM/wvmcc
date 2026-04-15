@@ -2,6 +2,7 @@
 
 #include "TypeMap.hpp"
 #include "SymbolTable.hpp"
+#include "AddressTakenAnalyzer.hpp"
 #include "../parser/AST.hpp"
 #include "../parser/Semantic.hpp"
 #include <WasmVM.hpp>
@@ -21,11 +22,29 @@ public:
     // Allocate a local variable
     int allocLocal(const wvmcc::parser::TypeNodePtr& type, bool isAddressTaken = false);
     
+    // Get the set of address-taken variable names for this function
+    const std::unordered_set<std::string>& getAddressTakenNames() const {
+        return addressTakenNames_;
+    }
+    
+    // Check if function has any address-taken variables
+    bool hasAddressTakenVariables() const {
+        return !addressTakenNames_.empty();
+    }
+    
     // Emit an instruction
     void emit(const WasmVM::WasmInstr& instr);
     
     // Emit an expression
     void emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLValue = false);
+    
+    // Emit specific expression types
+    void emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr);
+    void emitCharLiteral(const wvmcc::parser::CharLiteral& expr);
+    void emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr);
+    void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
+    void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr);
+    void emitCastExpr(const wvmcc::parser::CastExpr& expr);
     
     // Emit a statement
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);

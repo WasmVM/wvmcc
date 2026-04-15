@@ -5,6 +5,8 @@
 
 namespace wvmcc::codegen {
 
+class LayoutEngine;
+
 class TypeMap {
 public:
     // Convert a C type node to Wasm type
@@ -34,6 +36,9 @@ private:
     
     // Helper to get alignment for a simple type
     size_t getSimpleTypeAlignment(const wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier& simpleType) const;
+    
+    // Layout engine for struct/union size and alignment calculation
+    mutable LayoutEngine layoutEngine_;
 };
 
 } // namespace wvmcc::codegen
