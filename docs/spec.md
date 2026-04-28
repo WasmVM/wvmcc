@@ -26,8 +26,7 @@
 
 ## Architecture
 - Frontend:
-  - Lexer: C17 tokens, tracks `typedef` names.
-  - Preprocessor: streams pp-tokens via `Tokenizer` (`next()`, `peek()`, range iteration).
+  - Preprocessor / Tokenizer: use the streaming `Tokenizer` and `Preprocessor` which emit `PPToken`s.
   - Parser: hand-written recursive descent with declarator grammar; recovery at `;`/`}`/`,`.
   - AST: typed nodes, source spans; casts inserted during semantic analysis.
   - Semantics: scope stacks (file/block/function/tag), type system (qualifiers, arrays, functions, pointers), conversions, constant folding, diagnostics.
@@ -48,6 +47,19 @@
 - Phase 3: Preprocessing tokenization + comments
   - Decompose into pp-tokens and whitespace; replace comments with a single space; retain newlines; error on partial pp-token/comment at EOF.
   - Implemented via streaming `Tokenizer` (lookahead supported) and `SourceBuffer`.
+- Phase 4: Directives + macro expansion
+  - Implement `#define/#undef/#include/#if/#ifdef/#ifndef/#elif/#else/#endif`, `_Pragma` later; expand object/function-like macros; delete directives; includes processed recursively (phases 1–4).
+  - Single-pass executor consumes streamed tokens; detects directives at line starts and executes inline.
+  - See `docs/preprocessor.md` for detailed directive architecture, data structures, phased plan, and testing strategy.
+- Phase 5: Char constants and strings
+  - Convert escapes to execution set (UTF-8 initially).
+- Phase 6: Adjacent string literal concatenation
+  - Concatenate with correct prefixes (`L`, `u8`, `u`, `U`).
+- Phase 7: Token conversion + compilation
+  - Convert pp-tokens to language tokens; parse/type-check; lower to IR → `WasmModule`.
+- Phase 8: Linkage
+  - Freestanding: produce a single `WasmModule`; external refs either imports or errors.
+
 ### Preprocessing Tokens (PPToken)
 
 Per C17 §6.4, Phase 3 decomposes the character stream into preprocessing-tokens and sequences of whitespace. We will represent both pp-tokens and whitespace as tokens, with explicit new-line tokens to preserve directive boundaries and macro spacing.
@@ -126,19 +138,6 @@ using PPTokenStream = std::vector<PPToken>;
   - `pp-number` retains raw bytes; semantic interpretation (e.g., UCNs in identifiers) is deferred until later phases.
   - Explicit `newline` tokens mark logical line boundaries; `whitespace` runs may be coalesced by later stages.
   - Extended characters are UTF-8; tokenization treats them as part of identifiers/literals where allowed.
-
-- Phase 4: Directives + macro expansion
-  - Implement `#define/#undef/#include/#if/#ifdef/#ifndef/#elif/#else/#endif`, `_Pragma` later; expand object/function-like macros; delete directives; includes processed recursively (phases 1–4).
-  - Single-pass executor consumes streamed tokens; detects directives at line starts and executes inline.
-  - See `docs/preprocessor.md` for detailed directive architecture, data structures, phased plan, and testing strategy.
-- Phase 5: Char constants and strings
-  - Convert escapes to execution set (UTF-8 initially).
-- Phase 6: Adjacent string literal concatenation
-  - Concatenate with correct prefixes (`L`, `u8`, `u`, `U`).
-- Phase 7: Token conversion + compilation
-  - Convert pp-tokens to language tokens; parse/type-check; lower to IR → `WasmModule`.
-- Phase 8: Linkage
-  - Freestanding: produce a single `WasmModule`; external refs either imports or errors.
 
 ## Developer Workflows
 - Build: `mkdir build && cd build && cmake .. && make -j4`

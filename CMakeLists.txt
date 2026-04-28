@@ -7,6 +7,17 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED 20)
 set(CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/cmake)
 
+# Optional: enable sanitizers (AddressSanitizer + UBSAN) for debugging
+option(ENABLE_SANITIZERS "Enable AddressSanitizer and UndefinedBehaviorSanitizer" OFF)
+if(ENABLE_SANITIZERS)
+    message(STATUS "Building with ASAN and UBSAN enabled")
+    if(NOT CMAKE_CXX_FLAGS MATCHES "-fsanitize")
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fsanitize=address,undefined -fno-omit-frame-pointer -g")
+        set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fsanitize=address,undefined -fno-omit-frame-pointer -g")
+        set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -fsanitize=address,undefined")
+    endif()
+endif()
+
 # Find WasmVM dependency
 find_package(WasmVM REQUIRED)
 
@@ -14,7 +25,9 @@ find_package(WasmVM REQUIRED)
 set(SRC_ROOT ${PROJECT_ROOT}/src)
 file(GLOB_RECURSE WVMCC_SOURCES
 	${SRC_ROOT}/exec/*.cpp
-	${SRC_ROOT}/pp/*.cpp
+    ${SRC_ROOT}/pp/*.cpp
+    ${SRC_ROOT}/parser/*.cpp
+    ${SRC_ROOT}/codegen/*.cpp
 )
 
 add_executable(wvmcc ${WVMCC_SOURCES})

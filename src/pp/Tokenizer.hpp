@@ -5,6 +5,7 @@
 #include <deque>
 #include <istream>
 #include <unordered_set>
+#include "../common.hpp"
 
 namespace wvmcc {
 
@@ -19,9 +20,6 @@ enum class PPTokenKind {
     Newline,
     Other
 };
-
-struct SourcePos { int fileId; int line; int column; std::size_t offset; };
-struct SourceSpan { SourcePos begin; SourcePos end; };
 
 struct PPToken {
     PPTokenKind kind;
@@ -45,6 +43,12 @@ struct PPToken {
             paintedMacros.insert(m);
         }
     }
+    // Decoded metadata filled by the preprocessor Phase-5 normalization.
+    // For character constants this holds the numeric value after decoding
+    // escape sequences and UCNs. For string literals this holds the inner
+    // decoded bytes (not including surrounding quotes or prefix).
+    std::optional<uint32_t> decodedCharValue;
+    std::optional<std::string> decodedString;
 };
 
 class SourceBuffer {

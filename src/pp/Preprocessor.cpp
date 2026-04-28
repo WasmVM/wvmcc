@@ -8,229 +8,494 @@
 #include <iostream>
 #include <sstream>
 #include <unordered_set>
+#include <cctype>
 #include "Tokenizer.hpp"
 
 namespace wvmcc {
 
+// Forward declarations for helpers used by methods defined earlier in this file
+static std::string extractLiteralPrefix(const std::string &lex);
+static bool extractLiteralInnerAndQuote(const std::string &lex, std::string &outInner, char &outQuote);
+
 // Helper function to stringify tokens (for # operator in macros)
 // Now a member method (forward reference removed)
 
-static bool file_ends_with_newline(const std::string& path) {
-    std::ifstream f(path, std::ios::binary);
-    if (!f) return true; // if unreadable, avoid noisy warnings here
-    f.seekg(0, std::ios::end);
-    std::streampos sz = f.tellg();
-    if (sz <= 0) return true; // empty file: treat as ok
-    f.seekg(-1, std::ios::end);
-    char last = '\n';
-    f.read(&last, 1);
-    return last == '\n';
+// (Removed unused helper `file_ends_with_newline`)
+
+// Minimal streaming API implementation (object-like macros, includes, simple conditionals)
+
+bool Preprocessor::open(const std::string& inputPath) {
+    return pushFile(inputPath);
 }
 
-bool Preprocessor::validateLiteralToken(const PPToken& t, std::string& errMsg) const {
+std::optional<PPToken> Preprocessor::peek() {
+    ensureBuffer();
+    if (outBuffer.empty()) return std::nullopt;
+    // Return a normalized copy so callers always see decoded literals
+    PPToken copy = outBuffer.front();
+    normalizeLiteralToken(copy);
+    return copy;
+}
+
+std::optional<PPToken> Preprocessor::next() {
+    ensureBuffer();
+    if (outBuffer.empty()) return std::nullopt;
+    auto t = outBuffer.front(); outBuffer.pop_front();
+
+    // If this is a string literal, perform Phase 6 adjacent literal concatenation
     if (t.kind == PPTokenKind::StringLiteral) {
-        if (t.lexeme.empty() || t.lexeme.back() != '"') {
-            std::ostringstream em;
-            em << "unterminated string literal at line " << t.span.begin.line
-               << ", column " << t.span.begin.column;
-            errMsg = em.str();
-            return false;
+        // Normalize left component
+        normalizeLiteralToken(t);
+        // Ensure we have buffered following tokens (read-ahead) before attempting to merge
+        ensureBuffer();
+        // Consume and merge following whitespace/newline + string-literal sequences
+        while (!outBuffer.empty()) {
+            // Skip whitespace/newline between adjacent literals
+            while (!outBuffer.empty() && (outBuffer.front().kind == PPTokenKind::Whitespace || outBuffer.front().kind == PPTokenKind::Newline)) {
+                outBuffer.pop_front();
+            }
+            if (outBuffer.empty()) break;
+            if (outBuffer.front().kind != PPTokenKind::StringLiteral) break;
+
+            PPToken right = outBuffer.front(); outBuffer.pop_front();
+            normalizeLiteralToken(right);
+
+            // Extract inners and prefixes
+            std::string lpre, rpre, lin, rin; char lq=0, rq=0;
+            lpre = extractLiteralPrefix(t.lexeme);
+            rpre = extractLiteralPrefix(right.lexeme);
+            if (!extractLiteralInnerAndQuote(t.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq)) {
+                // malformed: stop merging
+                break;
+            }
+            if (lq != rq) {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal quote types during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                break;
+            }
+
+            std::string combinedPrefix;
+            if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+            else if (lpre.empty()) combinedPrefix = rpre;
+            else if (rpre.empty()) combinedPrefix = lpre;
+            else if (lpre == rpre) combinedPrefix = lpre;
+            else {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                // Do not merge; put right back at front and stop
+                outBuffer.push_front(right);
+                break;
+            }
+
+            // Merge inners
+            std::string newInner = lin + rin;
+            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            t.lexeme = rebuilt;
+            t.span.end = right.span.end;
+            t.copyPaint(right);
         }
-    } else if (t.kind == PPTokenKind::CharConst) {
-        if (t.lexeme.empty() || t.lexeme.back() != '\'' ) {
-            std::ostringstream em;
-            em << "unterminated character constant at line " << t.span.begin.line
-               << ", column " << t.span.begin.column;
-            errMsg = em.str();
-            return false;
+        return t;
+    }
+
+    normalizeLiteralToken(t);
+    return t;
+}
+
+void Preprocessor::reset() {
+    outBuffer.clear();
+    fileStack.clear();
+    macroTable.clear();
+    atLineStart = true;
+}
+
+bool Preprocessor::empty() {
+    ensureBuffer();
+    return outBuffer.empty();
+}
+
+bool Preprocessor::pushFile(const std::string& path) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) return false;
+    std::ostringstream ss;
+    ss << f.rdbuf();
+    auto ssp = std::make_unique<std::istringstream>(ss.str());
+    auto tz = std::make_unique<Tokenizer>(*ssp);
+    FileCtx ctx;
+    ctx.path = path;
+    ctx.stream = std::move(ssp);
+    ctx.tokenizer = std::move(tz);
+    // Initialize tokenizer state for streaming use
+    ctx.tokenizer->reset();
+    ctx.dir = std::filesystem::path(path).parent_path().string();
+    // Track inclusion stack for streaming mode and define predefined macros
+    namespace fs = std::filesystem;
+    std::string canonicalPath = fs::weakly_canonical(fs::absolute(path)).string();
+    if (!pushInclusion(canonicalPath)) {
+        return false; // cycle detected
+    }
+    (void)canonicalPath;
+    fileStack.push_back(std::move(ctx));
+    atLineStart = true;
+
+    // If this is the first file in the inclusion stack, initialize predefined macros
+    if (inclusionStack.size() == 1) {
+        // __FILE__
+        std::vector<PPToken> replacement;
+        replacement.push_back(PPToken{ .kind = PPTokenKind::StringLiteral, .span = {}, .lexeme = "\"" + canonicalPath + "\"", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__FILE__", replacement);
+
+        // __DATE__
+        auto now = std::time(nullptr);
+        auto tm = *std::localtime(&now);
+        char dateStr[32];
+        std::strftime(dateStr, sizeof(dateStr), "%b %d %Y", &tm);
+        std::vector<PPToken> dateRepl;
+        dateRepl.push_back(PPToken{ .kind = PPTokenKind::StringLiteral, .span = {}, .lexeme = std::string("\"") + dateStr + "\"", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__DATE__", dateRepl);
+
+        // __TIME__
+        char timeStr[32];
+        std::strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &tm);
+        std::vector<PPToken> timeRepl;
+        timeRepl.push_back(PPToken{ .kind = PPTokenKind::StringLiteral, .span = {}, .lexeme = std::string("\"") + timeStr + "\"", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__TIME__", timeRepl);
+
+        // __STDC__ and related
+        std::vector<PPToken> p1; p1.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "1", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC__", p1);
+        std::vector<PPToken> ver; ver.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "201710L", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC_VERSION__", ver);
+        std::vector<PPToken> zero; zero.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "0", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC_HOSTED__", zero);
+        std::vector<PPToken> one; one.push_back(PPToken{ .kind = PPTokenKind::PPNumber, .span = {}, .lexeme = "1", .paintedMacros = {} });
+        macroTable.defineObjectMacro("__STDC_NO_ATOMICS__", one);
+        macroTable.defineObjectMacro("__STDC_NO_COMPLEX__", one);
+        macroTable.defineObjectMacro("__STDC_NO_THREADS__", one);
+    }
+
+    return true;
+}
+
+std::optional<PPToken> Preprocessor::readRawToken() {
+    while (!fileStack.empty()) {
+        auto &ctx = fileStack.back();
+    
+        auto tok = ctx.tokenizer->next();
+        if (!tok) {
+            // End of current file: pop file context and corresponding inclusion stack entry
+            fileStack.pop_back();
+            popInclusion();
+            // After returning from an included file, we are at the start of the next line
+            atLineStart = true;
+            continue;
         }
+        
+        (void)ctx; (void)tok;
+        return tok;
     }
-    return true;
+    return std::nullopt;
 }
 
-void Preprocessor::emitIfActive(const PPToken& t, std::vector<PPToken>& out) const {
-    if (conditionalStack.empty() || conditionalStack.back().currentlyActive) {
-        out.push_back(t);
+void Preprocessor::ensureBuffer() {
+    // Keep reading tokens until we have at least one token to return.
+    // Additionally, if the last token we produced is a string literal,
+    // continue reading to allow adjacent string-literal concatenation
+    // to occur before we return any token.
+    while (outBuffer.empty() || (!outBuffer.empty() && outBuffer.back().kind == PPTokenKind::StringLiteral)) {
+        auto opt = readRawToken();
+        if (!opt) return;
+        auto tok = *opt;
+
+        // Newline handling
+        if (handleNewlineToken(tok)) continue;
+
+        // Inside inactive conditional block: skip unless directive/newline
+        if (!conditionalStack.empty() && !conditionalStack.back().currentlyActive) {
+            if (handleInactiveConditionalToken(tok)) continue;
+        }
+
+        // Line-start directive
+        if (atLineStart && tok.kind == PPTokenKind::Punctuator && tok.lexeme == "#") {
+            handleDirective();
+            continue;
+        }
+
+        // Identifier/macro handling
+        if (tok.kind == PPTokenKind::Identifier) {
+            if (macroTable.isDefined(tok.lexeme)) {
+                if (handleIdentifierExpansionToken(tok)) continue;
+            }
+        }
+
+        // Default emit (including __LINE__ dynamic expansion)
+        emitTokenOrLineExpansion(tok);
     }
 }
 
-void Preprocessor::consumeToEndOfLine(Tokenizer& tokenizer) {
-    while (auto a = tokenizer.peek()) { if (a->kind == PPTokenKind::Newline) break; tokenizer.next(); }
-}
-
-bool Preprocessor::handleDirectiveIfdef(Tokenizer& tokenizer, bool& hasErrors) {
-    auto lineTokens = collectLineTokens(tokenizer);
-    if (lineTokens.empty()) {
-        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifdef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
+bool Preprocessor::handleNewlineToken(const PPToken& tok) {
+    if (tok.kind == PPTokenKind::Newline) {
+        outBuffer.push_back(tok);
+        atLineStart = true;
         return true;
     }
-    std::string macroName;
-    for (const auto& lt : lineTokens) { if (lt.kind == PPTokenKind::Identifier) { macroName = lt.lexeme; break; } }
-    if (macroName.empty()) {
-        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifdef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
-        return true;
-    }
-    if (!handleIfdefDirective(macroName)) hasErrors = true;
-    return true;
-}
-
-bool Preprocessor::handleDirectiveIfndef(Tokenizer& tokenizer, bool& hasErrors) {
-    auto lineTokens = collectLineTokens(tokenizer);
-    if (lineTokens.empty()) {
-        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifndef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
-        return true;
-    }
-    std::string macroName;
-    for (const auto& lt : lineTokens) { if (lt.kind == PPTokenKind::Identifier) { macroName = lt.lexeme; break; } }
-    if (macroName.empty()) {
-        diagnostics.push_back(Diagnostic{ .message = "expected macro name after #ifndef", .severity = Diagnostic::Severity::Error, .span = std::nullopt });
-        return true;
-    }
-    if (!handleIfndefDirective(macroName)) hasErrors = true;
-    return true;
-}
-
-bool Preprocessor::handleDirectiveConditional(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
-    auto lineTokens = collectLineTokens(tokenizer);
-    if (dirLexeme == "if") {
-        if (!handleIfDirective(tokenizer, lineTokens)) hasErrors = true;
-    } else if (dirLexeme == "elif") {
-        if (!handleElifDirective(tokenizer, lineTokens)) hasErrors = true;
-    }
-    return true;
-}
-
-bool Preprocessor::handleDirectiveMessage(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
-    auto lt = collectLineTokens(tokenizer);
-    if (dirLexeme == "error") {
-        if (!handleErrorDirective(lt)) hasErrors = true;
-    } else if (dirLexeme == "warning") {
-        if (!handleWarningDirective(lt)) hasErrors = true;
-    }
-    return true;
-}
-
-bool Preprocessor::handleDirectiveInclude(Tokenizer& tokenizer, const PPToken& hashTok, 
-                                          const PPToken& dirToken, std::vector<PPToken>& out,
-                                          const std::string& currentDir, bool& hasErrors) {
-    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-    bool executed = active && handleIncludeDirective(tokenizer, out, currentDir);
-    if (executed) return true;
-    if (active) { hasErrors = true; return true; }
-    bool hasErr = false;
-    for (const auto& d : diagnostics) { if (d.severity == Diagnostic::Severity::Error) { hasErr = true; break; } }
-    if (hasErr) { hasErrors = true; } else { out.push_back(hashTok); out.push_back(dirToken); }
-    return true;
-}
-
-bool Preprocessor::handleDirectiveDefineUndef(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
-    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-    if (dirLexeme == "define") {
-        if (active && !handleDefineDirective(tokenizer)) hasErrors = true;
-        if (!active) consumeToEndOfLine(tokenizer);
-    } else if (dirLexeme == "undef") {
-        if (active && !handleUndefDirective(tokenizer)) hasErrors = true;
-        if (!active) consumeToEndOfLine(tokenizer);
-    }
-    return true;
-}
-
-bool Preprocessor::handleDirectiveLine(Tokenizer& tokenizer, bool& hasErrors) {
-    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-    if (active) { auto lt = collectLineTokens(tokenizer); if (!handleLineDirective(lt)) hasErrors = true; }
-    else { consumeToEndOfLine(tokenizer); }
-    return true;
-}
-
-bool Preprocessor::handleDirectivePragma(Tokenizer& tokenizer, bool& hasErrors) {
-    bool active = conditionalStack.empty() || conditionalStack.back().currentlyActive;
-    if (active) { auto lt = collectLineTokens(tokenizer); if (!handlePragmaDirective(lt)) hasErrors = true; }
-    else { consumeToEndOfLine(tokenizer); }
-    return true;
-}
-
-bool Preprocessor::handleDirectiveConditionalsGroup(Tokenizer& tokenizer, const std::string& dirLexeme, bool& hasErrors) {
-    if (dirLexeme == "if" || dirLexeme == "elif") return handleDirectiveConditional(tokenizer, dirLexeme, hasErrors);
-    if (dirLexeme == "ifdef") return handleDirectiveIfdef(tokenizer, hasErrors);
-    if (dirLexeme == "ifndef") return handleDirectiveIfndef(tokenizer, hasErrors);
-    if (dirLexeme == "else") { if (!handleElseDirective()) hasErrors = true; return true; }
-    if (dirLexeme == "endif") { if (!handleEndifDirective()) hasErrors = true; return true; }
     return false;
 }
 
-void Preprocessor::skipDirectiveWhitespace(Tokenizer& tokenizer) {
-    while (auto p = tokenizer.peek()) {
-        if (p->kind != PPTokenKind::Whitespace) break;
-        tokenizer.next();
+bool Preprocessor::handleInactiveConditionalToken(const PPToken& tok) {
+    if (tok.kind == PPTokenKind::Newline) {
+        outBuffer.push_back(tok);
+        atLineStart = true;
+        return true;
+    }
+    if (atLineStart && tok.kind == PPTokenKind::Punctuator && tok.lexeme == "#") {
+        handleDirective();
+        return true;
+    }
+    // Otherwise skip silently
+    return true;
+}
+
+bool Preprocessor::handleIdentifierExpansionToken(const PPToken& tok) {
+    auto mOpt = macroTable.getMacro(tok.lexeme);
+    if (!mOpt) return false;
+    const Macro* m = *mOpt;
+    if (!m->isFunction) {
+        std::vector<PPToken> substituted;
+        for (auto repl : m->replacement) {
+            repl.paint(m->name);
+            if (repl.kind == PPTokenKind::Identifier && repl.lexeme == "__LINE__") {
+                repl.span = tok.span;
+            }
+            substituted.push_back(repl);
+        }
+        auto expanded = expandMacros(substituted);
+        for (auto it = expanded.rbegin(); it != expanded.rend(); ++it) {
+            pushTokenFrontWithConcat(*it);
+        }
+        return true;
+    } else {
+        return tryHandleFunctionLikeMacroInvocation(m, tok);
+    }
+    return false;
+}
+
+bool Preprocessor::tryHandleFunctionLikeMacroInvocation(const Macro* m, const PPToken& tok) {
+    if (fileStack.empty()) return false;
+    if (!consumeOptionalWhitespaceBeforeOpenParen()) return false;
+    // Collect invocation tokens and attempt expansion
+    std::vector<PPToken> invocation;
+    invocation.push_back(tok);
+    auto rest = collectInvocationTokens();
+    for (auto &pt : rest) invocation.push_back(pt);
+    size_t idx = 0;
+    std::vector<PPToken> expandedResult;
+    if (tryExpandFunctionLikeMacro(invocation, idx, m, tok, expandedResult)) {
+        for (const auto &et : expandedResult) pushTokenBackWithConcat(et);
+    } else {
+        for (const auto &itok : invocation) pushTokenBackWithConcat(itok);
+    }
+    return true;
+}
+
+bool Preprocessor::consumeOptionalWhitespaceBeforeOpenParen() {
+    if (fileStack.empty()) return false;
+    auto &ctx = *fileStack.back().tokenizer;
+    while (auto p = ctx.peek()) {
+        if (p->kind == PPTokenKind::Whitespace) { ctx.next(); continue; }
+        break;
+    }
+    auto nextTok = ctx.peek();
+    return nextTok && nextTok->kind == PPTokenKind::Punctuator && nextTok->lexeme == "(";
+}
+
+void Preprocessor::emitTokenOrLineExpansion(const PPToken& tok) {
+    if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "__LINE__") {
+    std::string lineStr = std::to_string(tok.span.begin.line);
+        PPToken numTok{
+            .kind = PPTokenKind::PPNumber,
+            .span = tok.span,
+            .lexeme = lineStr,
+            .paintedMacros = {}
+        };
+        pushTokenBackWithConcat(numTok);
+    } else {
+        pushTokenBackWithConcat(tok);
+    }
+    atLineStart = false;
+}
+
+// Note: directive routing/refactor helpers removed; `handleDirective` remains the active directive parser.
+
+void Preprocessor::skipLineFromToken(PPToken t) {
+    if (t.kind == PPTokenKind::Newline) return;
+    std::optional<PPToken> tn;
+    while ((tn = readRawToken())) { if (tn->kind == PPTokenKind::Newline) break; }
+}
+
+void Preprocessor::handleDirective() {
+    auto nameOpt = readDirectiveName();
+    if (!nameOpt.has_value()) return;
+    std::string dir = *nameOpt;
+
+    // Fast-path wrappers for simple directives handled by streaming layer
+    if (handleSimpleDirective(dir)) return;
+
+    // Compound directives that require parsing the rest of the line
+    if (dir == "if" || dir == "elif") {
+        if (handleIfOrElifDirective(dir)) return;
+        return;
+    }
+
+    if (dir == "else") {
+        skipRestOfDirectiveTokens();
+        handleElseDirective();
+        return;
+    }
+
+    if (dir == "error" || dir == "warning" || dir == "line" || dir == "pragma") {
+        if (handleUtilityDirective(dir)) return;
+        return;
+    }
+
+    if (dir == "endif") { handleEndifDirective(); return; }
+
+    // Unknown directive: consume rest of line
+    skipRestOfDirectiveTokens();
+}
+
+std::optional<std::string> Preprocessor::readDirectiveName() {
+    std::optional<PPToken> tok = readRawToken();
+    if (!tok) return std::nullopt;
+    while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
+    if (!tok) return std::nullopt;
+    if (tok->kind != PPTokenKind::Identifier) {
+        if (tok) skipLineFromToken(std::move(*tok));
+        return std::nullopt;
+    }
+    return tok->lexeme;
+}
+
+bool Preprocessor::handleSimpleDirective(const std::string& dir) {
+    if (dir == "define") { handleDefine(); return true; }
+    if (dir == "undef") { handleUndef(); return true; }
+    if (dir == "include") { handleInclude(); return true; }
+    if (dir == "ifdef") { handleIfdef(true); return true; }
+    if (dir == "ifndef") { handleIfdef(false); return true; }
+    return false;
+}
+
+std::vector<PPToken> Preprocessor::collectInvocationTokens() {
+    std::vector<PPToken> invocation;
+    int parenDepth = 0;
+    while (true) {
+        auto nt = readRawToken();
+        if (!nt) break;
+        invocation.push_back(*nt);
+        if (nt->kind == PPTokenKind::Punctuator) {
+            if (nt->lexeme == "(") parenDepth++;
+            else if (nt->lexeme == ")") {
+                parenDepth--;
+                if (parenDepth <= 0) break;
+            }
+        }
+    }
+    return invocation;
+}
+
+void Preprocessor::skipToMatchingEndif() {
+    int depth = 1;
+    while (auto t = readRawToken()) {
+        if (t->kind == PPTokenKind::Punctuator && t->lexeme == "#") {
+            auto nt = readRawToken();
+            while (nt && nt->kind == PPTokenKind::Whitespace) nt = readRawToken();
+            if (nt && nt->kind == PPTokenKind::Identifier) {
+                if (nt->lexeme == "ifdef" || nt->lexeme == "ifndef" || nt->lexeme == "if") depth++;
+                else if (nt->lexeme == "endif") { depth--; if (depth==0) break; }
+            }
+        }
+    }
+}
+
+bool Preprocessor::handleIfOrElifDirective(const std::string& dir) {
+    std::vector<PPToken> lineTokens;
+    while (true) {
+        auto t = readRawToken();
+        if (!t || t->kind == PPTokenKind::Newline) break;
+        lineTokens.push_back(*t);
+    }
+    if (fileStack.empty()) return false;
+    if (dir == "if") {
+        return handleIfDirective(*fileStack.back().tokenizer, lineTokens);
+    } else { // elif
+        return handleElifDirective(*fileStack.back().tokenizer, lineTokens);
+    }
+}
+
+bool Preprocessor::handleUtilityDirective(const std::string& dir) {
+    bool active = checkActiveState();
+    std::vector<PPToken> lineTokens;
+    while (true) {
+        auto t = readRawToken();
+        if (!t || t->kind == PPTokenKind::Newline) break;
+        lineTokens.push_back(*t);
+    }
+    if (!active) return true;
+    if (dir == "error") { handleErrorDirective(lineTokens); }
+    else if (dir == "warning") { handleWarningDirective(lineTokens); }
+    else if (dir == "line") { handleLineDirective(lineTokens); }
+    else if (dir == "pragma") { handlePragmaDirective(lineTokens); }
+    return true;
+}
+
+void Preprocessor::skipRestOfDirectiveTokens() {
+    std::optional<PPToken> t;
+    while ((t = readRawToken())) { if (t->kind == PPTokenKind::Newline) break; }
+}
+
+void Preprocessor::handleDefine() {
+    if (fileStack.empty()) return;
+    auto &tz = *fileStack.back().tokenizer;
+    (void)handleDefineDirective(tz);
+}
+
+void Preprocessor::handleUndef() {
+    if (fileStack.empty()) return;
+    auto &tz = *fileStack.back().tokenizer;
+    (void)handleUndefDirective(tz);
+}
+
+void Preprocessor::handleInclude() {
+    if (fileStack.empty()) return;
+    auto &tz = *fileStack.back().tokenizer;
+    std::vector<PPToken> temp;
+    std::string currentDir = fileStack.back().dir;
+    (void)handleIncludeDirective(tz, temp, currentDir);
+    for (const auto &tk : temp) pushTokenBackWithConcat(tk);
+}
+
+void Preprocessor::handleIfdef(bool wantDefined) {
+    auto tok = readRawToken();
+    while (tok && tok->kind == PPTokenKind::Whitespace) tok = readRawToken();
+    bool take = false;
+    if (tok && tok->kind == PPTokenKind::Identifier) {
+        bool def = macroTable.isDefined(tok->lexeme);
+        take = wantDefined ? def : !def;
+    }
+    if (!take) {
+        skipToMatchingEndif();
     }
 }
 
 bool Preprocessor::checkActiveState() {
-    return conditionalStack.empty() || conditionalStack.back().currentlyActive;
-}
-
-void Preprocessor::consumeUnknownDirective(Tokenizer& tokenizer, std::vector<PPToken>& out) {
-    while (auto a = tokenizer.peek()) {
-        if (a->kind == PPTokenKind::Newline) break;
-        out.push_back(*tokenizer.next());
+    for (const auto &f : conditionalStack) {
+        if (!f.currentlyActive) return false;
     }
-}
-
-bool Preprocessor::routeDirective(Tokenizer& tokenizer, const PPToken& hashTok, const PPToken& dir,
-                                  std::vector<PPToken>& out, const std::string& currentDir, bool& hasErrors) {
-    const std::string& dirName = dir.lexeme;
-    bool active = checkActiveState();
-
-    if (dirName == "include") return handleDirectiveInclude(tokenizer, hashTok, dir, out, currentDir, hasErrors);
-    if (dirName == "define" || dirName == "undef") return handleDirectiveDefineUndef(tokenizer, dirName, hasErrors);
-    if (handleDirectiveConditionalsGroup(tokenizer, dirName, hasErrors)) return true;
-    if (dirName == "error" || dirName == "warning") {
-        if (!active) { consumeToEndOfLine(tokenizer); return true; }
-        return handleDirectiveMessage(tokenizer, dirName, hasErrors);
-    }
-    if (dirName == "line") return handleDirectiveLine(tokenizer, hasErrors);
-    if (dirName == "pragma") return handleDirectivePragma(tokenizer, hasErrors);
-    return false;
-}
-
-bool Preprocessor::processDirective(Tokenizer& tokenizer,
-                                    const PPToken& hashTok,
-                                    std::vector<PPToken>& out,
-                                    const std::string& currentDir,
-                                    bool& hasErrors) {
-    skipDirectiveWhitespace(tokenizer);
-    auto dir = tokenizer.peek();
-    if (!dir || dir->kind != PPTokenKind::Identifier) return false;
-
-    tokenizer.next();
-    
-    if (routeDirective(tokenizer, hashTok, *dir, out, currentDir, hasErrors)) {
-        return true;
-    }
-    
-    consumeUnknownDirective(tokenizer, out);
     return true;
 }
 
-bool Preprocessor::processLineStartToken(Tokenizer& tokenizer,
-                                         const PPToken& t,
-                                         std::vector<PPToken>& out,
-                                         const std::string& currentDir,
-                                         bool& hasErrors,
-                                         bool& atLineStart) {
-    if (t.kind == PPTokenKind::Whitespace) {
-        out.push_back(t);
-        return true; // remain at line start until non-whitespace
-    }
-    if (t.kind == PPTokenKind::Punctuator && t.lexeme == "#") {
-        bool handled = processDirective(tokenizer, t, out, currentDir, hasErrors);
-        atLineStart = false;
-        return handled; // handled directive or unknown
-    }
-    emitIfActive(t, out);
-    atLineStart = false;
-    return true;
-}
+
+// Removed unused directive-routing helpers (processDirective, routeDirective, skipDirectiveWhitespace,
+// consumeUnknownDirective, handleDirectiveInclude) and literal/emit helpers (validateLiteralToken, emitIfActive).
+
+// `processLineStartToken` removed — unused after switching to streaming `ensureBuffer`.
 
 bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
                                    std::optional<SourceSpan> span,
@@ -245,23 +510,27 @@ bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
         child.includePaths = includePaths;
         child.inclusionStack = inclusionStack;
         child.pragmaOnceFiles = pragmaOnceFiles;
-        auto childRes = child.run(*resolved);
+        // Use streaming API on child to collect tokens from included file
+        if (!child.open(*resolved)) {
+            diagnostics.push_back(Diagnostic{
+                .message = std::string("failed to open include file '") + *resolved + "'",
+                .severity = Diagnostic::Severity::Error,
+                .span = span
+            });
+            return false;
+        }
+        std::vector<PPToken> childTokens;
+        while (auto t = child.next()) childTokens.push_back(*t);
         diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
+
         
+
         for (const auto& file : child.pragmaOnceFiles) {
             pragmaOnceFiles.insert(file);
         }
-        
-        if (childRes.success) {
-            for (const auto& tk : childRes.tokens) out.push_back(tk);
-            return true;
-        }
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("failed to read include file '") + *resolved + "'",
-            .severity = Diagnostic::Severity::Error,
-            .span = span
-        });
-        return false;
+
+        for (const auto& tk : childTokens) out.push_back(tk);
+        return true;
     }
     diagnostics.push_back(Diagnostic{
         .message = std::string("include file not found: ") + header,
@@ -451,225 +720,13 @@ bool Preprocessor::pushInclusion(const std::string& filePath) {
 }
 
 void Preprocessor::popInclusion() {
-    if (!inclusionStack.empty()) inclusionStack.pop_back();
+    if (!inclusionStack.empty()) {
+        (void)inclusionStack.back();
+        inclusionStack.pop_back();
+    }
 }
 
-PreprocessResult Preprocessor::run(const std::string& inputPath) {
-    std::ifstream ifs(inputPath);
-    if (!ifs) {
-        return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cannot open input: ") + inputPath};
-    }
-    
-    // Canonicalize path and check for cycles
-    namespace fs = std::filesystem;
-    std::string canonicalPath = fs::weakly_canonical(fs::absolute(inputPath)).string();
-    if (!pushInclusion(canonicalPath)) {
-        // Cycle detected
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("cyclic include detected: ") + canonicalPath,
-            .severity = Diagnostic::Severity::Error,
-            .span = std::nullopt
-        });
-        return PreprocessResult{std::vector<wvmcc::PPToken>{}, false, std::string("cyclic include: ") + canonicalPath};
-    }
-    
-    // Initialize predefined macros for this file (only once per run)
-    if (inclusionStack.size() == 1) {
-        // __FILE__ macro - current source file
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::StringLiteral,
-                .span = {},
-                .lexeme = "\"" + canonicalPath + "\"",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__FILE__", replacement);
-        }
-        
-        // __LINE__ macro is handled dynamically during expansion (not predefined)
-        
-        // __DATE__ macro - compilation date
-        {
-            auto now = std::time(nullptr);
-            auto tm = *std::localtime(&now);
-            char dateStr[32];
-            std::strftime(dateStr, sizeof(dateStr), "%b %d %Y", &tm);
-            
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::StringLiteral,
-                .span = {},
-                .lexeme = "\"" + std::string(dateStr) + "\"",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__DATE__", replacement);
-        }
-        
-        // __TIME__ macro - compilation time
-        {
-            auto now = std::time(nullptr);
-            auto tm = *std::localtime(&now);
-            char timeStr[32];
-            std::strftime(timeStr, sizeof(timeStr), "%H:%M:%S", &tm);
-            
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::StringLiteral,
-                .span = {},
-                .lexeme = "\"" + std::string(timeStr) + "\"",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__TIME__", replacement);
-        }
-        
-        // __STDC__ macro - ISO C compliance (set to 1)
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC__", replacement);
-        }
-        
-        // __STDC_VERSION__ macro - C standard version (C17 = 201710L)
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "201710L",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_VERSION__", replacement);
-        }
-        
-        // __STDC_HOSTED__ macro - freestanding implementation (0 = freestanding, 1 = hosted)
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "0",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_HOSTED__", replacement);
-        }
-        
-        // __STDC_NO_ATOMICS__ macro - no atomic support
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_NO_ATOMICS__", replacement);
-        }
-        
-        // __STDC_NO_COMPLEX__ macro - no complex number support
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_NO_COMPLEX__", replacement);
-        }
-        
-        // __STDC_NO_THREADS__ macro - no threading support
-        {
-            std::vector<PPToken> replacement;
-            replacement.push_back(PPToken{
-                .kind = PPTokenKind::PPNumber,
-                .span = {},
-                .lexeme = "1",
-                .paintedMacros = {}
-            });
-            macroTable.defineObjectMacro("__STDC_NO_THREADS__", replacement);
-        }
-    }
-    
-    // Cleanup: pop inclusion on exit
-    auto popGuard = [this]() { popInclusion(); };
-    // Simplified: use a lambda immediately after scope, or just call at the end
-    
-    const bool endsWithNewline = file_ends_with_newline(inputPath);
-    // Derive current file directory for quote-style includes
-    std::filesystem::path inputPathFs(inputPath);
-    std::string currentDir = inputPathFs.has_parent_path() ? inputPathFs.parent_path().string() : std::string();
-    // Single-pass streaming: consume tokens, parse directives and includes
-    Tokenizer tokenizer(ifs);
-    std::vector<PPToken> out;
-    out.reserve(256);
-    tokenizer.reset();
-    bool atLineStart = true; // start of file is line start
-    bool hasErrors = false;  // Track errors during preprocessing
-    while (auto tokOpt = tokenizer.next()) {
-        PPToken t = *tokOpt;
-        std::string errMsg;
-        if (!validateLiteralToken(t, errMsg)) {
-            popInclusion();
-            return PreprocessResult{std::vector<PPToken>{}, false, errMsg};
-        }
-
-        if (t.kind == PPTokenKind::Newline) {
-            out.push_back(t);
-            atLineStart = true;
-            continue;
-        }
-
-        if (!processLineStartToken(tokenizer, t, out, currentDir, hasErrors, atLineStart)) {
-            // If not handled as a line-start special case, emit normally if active
-            emitIfActive(t, out);
-            atLineStart = false;
-        }
-    }
-
-    if (!endsWithNewline) {
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("input file '") + inputPath + "' does not end with a newline",
-            .severity = Diagnostic::Severity::Warning,
-            .span = std::nullopt
-        });
-    }
-    
-    // Check for unclosed conditional directives
-    if (!conditionalStack.empty()) {
-        diagnostics.push_back(Diagnostic{
-            .message = "#if/#ifdef/#ifndef without matching #endif",
-            .severity = Diagnostic::Severity::Error,
-            .span = std::nullopt
-        });
-        hasErrors = true;
-    }
-    
-    // TODO: Include guard detection will be implemented properly
-    // For now, the optimization is disabled to avoid incorrect behavior
-    
-    popInclusion();
-    
-    // Return failure if any errors were encountered during preprocessing
-    if (hasErrors) {
-        return PreprocessResult{std::vector<PPToken>{}, false, std::string("preprocessing failed with errors")};
-    }
-
-    // Optional debug path: skip macro expansion when PP_DEBUG_NO_EXPAND is set.
-    if (std::getenv("PP_DEBUG_NO_EXPAND")) {
-        return PreprocessResult{out, true, std::string()};
-    }
-
-    // Expand macros in the token stream
-    std::vector<PPToken> expanded = expandMacros(out);
-
-    return PreprocessResult{std::move(expanded), true, std::string()};
-}
+// Non-streaming `run()` removed: use streaming interface (`open()` + `next()`) instead.
 
 std::vector<PPToken> Preprocessor::collectLineTokens(Tokenizer& tokenizer) {
     std::vector<PPToken> tokens;
@@ -851,13 +908,13 @@ void Preprocessor::handleOpenParen(std::vector<PPToken>& currentArg, const PPTok
 }
 
 bool Preprocessor::handleCloseParen(std::vector<PPToken>& currentArg, std::vector<std::vector<PPToken>>& args,
-                                    const PPToken& tok, int& parenDepth, size_t& endIdx, size_t k) {
-    parenDepth--;
-    if (parenDepth == 0) {
+                                    const PPToken& tok, CloseParenContext& ctx) {
+    ctx.parenDepth--;
+    if (ctx.parenDepth == 0) {
         if (!currentArg.empty() || args.empty()) {
             args.push_back(currentArg);
         }
-        endIdx = k;
+        ctx.endIdx = ctx.k;
         return true;
     }
     currentArg.push_back(tok);
@@ -902,7 +959,8 @@ std::vector<std::vector<PPToken>> Preprocessor::collectMacroArguments(
         if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "(") {
             handleOpenParen(currentArg, tok, parenDepth);
         } else if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == ")") {
-            if (handleCloseParen(currentArg, args, tok, parenDepth, endIdx, k)) {
+            Preprocessor::CloseParenContext ctx{parenDepth, endIdx, k};
+            if (handleCloseParen(currentArg, args, tok, ctx)) {
                 break;
             }
         } else if (tok.kind == PPTokenKind::Punctuator && tok.lexeme == "," && parenDepth == 1) {
@@ -917,13 +975,12 @@ std::vector<std::vector<PPToken>> Preprocessor::collectMacroArguments(
 }
 
 int Preprocessor::findParamIndex(const Macro* m, const PPToken& tok, bool& isVarargs) {
-    isVarargs = (m->variadic && tok.kind == PPTokenKind::Identifier && 
-                tok.lexeme == "__VA_ARGS__");
-    
+    // Allow matching of parameter tokens even if token kind varies (robustness)
+    isVarargs = (m->variadic && tok.lexeme == "__VA_ARGS__");
     if (isVarargs) return -1;
-    
+
     for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
-        if (tok.kind == PPTokenKind::Identifier && tok.lexeme == m->params[pIdx]) {
+        if (tok.lexeme == m->params[pIdx]) {
             return pIdx;
         }
     }
@@ -973,6 +1030,9 @@ bool Preprocessor::tryProcessStringification(const Macro* m, size_t& rIdx,
         .paintedMacros = {}
     };
     strToken.paint(m->name);
+    // Mark stringification-generated tokens so Phase-5 normalization does not
+    // decode their escape sequences (stringification supplies its own escaping).
+    strToken.paint("__STRINGIFIED__");
     substituted.push_back(strToken);
     rIdx = nextIdx;
     return true;
@@ -1106,7 +1166,7 @@ bool Preprocessor::tryExpandFunctionLikeMacro(
     if (m->variadic && args.size() < m->params.size()) {
         return false;
     }
-    
+
     // Substitute parameters
     auto substituted = substituteParameters(m, args, invocationToken);
     
@@ -1301,10 +1361,6 @@ bool Preprocessor::handleIfdefDirective(const std::string& macroName) {
 }
 
 bool Preprocessor::handleIfndefDirective(const std::string& macroName) {
-    if (std::getenv("PP_DEBUG_IFNDEF")) {
-        std::cerr << "[pp] #ifndef " << macroName << " defined=" << (macroTable.isDefined(macroName) ? "1" : "0")
-                  << " macros=" << macroTable.count() << "\n";
-    }
     bool isDefined = macroTable.isDefined(macroName);
     ConditionalFrame frame;
     frame.seenTrueBranch = !isDefined;
@@ -1514,6 +1570,7 @@ bool Preprocessor::isPragmaOnceDirective(const std::vector<PPToken>& tokens) {
     
     if (!inclusionStack.empty()) {
         pragmaOnceFiles.insert(inclusionStack.back());
+        (void)inclusionStack.back();
     }
     return true;
 }
@@ -1537,6 +1594,399 @@ void Preprocessor::trimTrailingWhitespace(std::string& content) {
         content.pop_back();
     }
 }
+
+// Normalize a literal token: decode escape sequences and UCNs inside string literal tokens.
+// Keeps prefix and surrounding quotes, but replaces inner content with decoded bytes
+// encoded as UTF-8 for execution character set. Emits diagnostics on malformed escapes.
+// Note: character constants are left unchanged here so the parser sees the original
+// source lexeme (tests and downstream code expect the raw char-constant form).
+void Preprocessor::normalizeLiteralToken(PPToken& tok) {
+    // Normalize both string literals and character constants. Skip tokens
+    // generated by the stringification operator (#), which already contain
+    // their escaped representation and must not be decoded.
+    if (!(tok.kind == PPTokenKind::StringLiteral || tok.kind == PPTokenKind::CharConst)) return;
+    if (tok.kind == PPTokenKind::StringLiteral && tok.isPainted("__STRINGIFIED__")) return;
+    const std::string &orig = tok.lexeme;
+    if (orig.empty()) return;
+
+    // Extract prefix (u8, u, U, L) if present
+    size_t i = 0;
+    std::string prefix;
+    if (orig.size() >= 2) {
+        // u8 prefix is two chars
+        if (orig.size() >= 3 && orig[0] == 'u' && orig[1] == '8') { prefix = "u8"; i = 2; }
+        else if (orig[0] == 'u' || orig[0] == 'U' || orig[0] == 'L') { prefix = std::string(1, orig[0]); i = 1; }
+    }
+
+    if (i >= orig.size()) return;
+    char quote = orig[i];
+    if (!(quote == '"' || quote == '\'')) return;
+    // find closing quote (last character expected to be same quote)
+    if (orig.size() < i + 2) return;
+    size_t end = orig.size() - 1;
+    if (orig[end] != quote) return;
+
+    std::string inner = orig.substr(i + 1, end - (i + 1));
+    std::string out;
+    out.reserve(inner.size());
+
+    auto push_codepoint_utf8 = [&](uint32_t cp) {
+        if (cp <= 0x7F) out.push_back(static_cast<char>(cp));
+        else if (cp <= 0x7FF) {
+            out.push_back(static_cast<char>(0xC0 | ((cp >> 6) & 0x1F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else if (cp <= 0xFFFF) {
+            out.push_back(static_cast<char>(0xE0 | ((cp >> 12) & 0x0F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        } else {
+            if (cp > 0x10FFFF) cp = 0xFFFD;
+            out.push_back(static_cast<char>(0xF0 | ((cp >> 18) & 0x07)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((cp >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (cp & 0x3F)));
+        }
+    };
+
+    for (size_t p = 0; p < inner.size();) {
+        char c = inner[p];
+        if (c != '\\') {
+            out.push_back(c);
+            ++p;
+            continue;
+        }
+        // backslash escape
+        ++p;
+        if (p >= inner.size()) {
+            diagnostics.push_back(Diagnostic{.message = "trailing backslash in literal", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            break;
+        }
+        char e = inner[p++];
+        if (e == 'n') { out.push_back('\n'); out.back() = '\n'; continue; }
+        if (e == 't') { out.push_back('\t'); out.back() = '\t'; continue; }
+        if (e == 'r') { out.push_back('\r'); out.back() = '\r'; continue; }
+        if (e == 'a') { out.push_back(static_cast<char>(0x07)); continue; }
+        if (e == 'b') { out.push_back(static_cast<char>(0x08)); continue; }
+        if (e == 'f') { out.push_back(static_cast<char>(0x0C)); continue; }
+        if (e == 'v') { out.push_back(static_cast<char>(0x0B)); continue; }
+        if (e == '\\') { out.push_back('\\'); out.back() = '\\'; continue; }
+        if (e == '"') { out.push_back('"'); continue; }
+        if (e == '\'') { out.push_back('\''); continue; }
+        if (e == '?') { out.push_back('?'); continue; }
+
+        if (e == 'x') {
+            // hex sequence: one or more hex digits
+            size_t start = p;
+            uint32_t val = 0;
+            while (p < inner.size() && isxdigit(static_cast<unsigned char>(inner[p]))) {
+                char ch = inner[p++];
+                val = (val << 4) + (uint32_t)( (ch>='0'&&ch<='9') ? ch - '0' : (ch>='a'&&ch<='f') ? 10 + ch - 'a' : 10 + ch - 'A');
+            }
+            if (p == start) {
+                diagnostics.push_back(Diagnostic{.message = "\'\\x\' escape with no hex digits", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            }
+            push_codepoint_utf8(val);
+            continue;
+        }
+
+        if (e == 'u' || e == 'U') {
+            int need = (e == 'u') ? 4 : 8;
+            uint32_t val = 0;
+            int consumed = 0;
+            while (consumed < need && p < inner.size() && isxdigit(static_cast<unsigned char>(inner[p]))) {
+                char ch = inner[p++]; ++consumed;
+                val = (val << 4) + (uint32_t)( (ch>='0'&&ch<='9') ? ch - '0' : (ch>='a'&&ch<='f') ? 10 + ch - 'a' : 10 + ch - 'A');
+            }
+            if (consumed != need) {
+                diagnostics.push_back(Diagnostic{.message = "truncated Unicode escape", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            }
+            // replace surrogates and out-of-range
+            if (val >= 0xD800 && val <= 0xDFFF) val = 0xFFFD;
+            if (val > 0x10FFFF) val = 0xFFFD;
+            push_codepoint_utf8(val);
+            continue;
+        }
+
+        // octal escape: up to 3 octal digits, including the digit we already saw if it was octal
+        if (e >= '0' && e <= '7') {
+            uint32_t val = (uint32_t)(e - '0');
+            int cnt = 1;
+            while (cnt < 3 && p < inner.size() && inner[p] >= '0' && inner[p] <= '7') {
+                val = (val << 3) + (uint32_t)(inner[p++] - '0');
+                ++cnt;
+            }
+            push_codepoint_utf8(val);
+            continue;
+        }
+
+        // default: unknown escape, emit the character itself
+        out.push_back(e);
+    }
+    // For string literals, rebuild lexeme and attach decoded metadata
+    if (tok.kind == PPTokenKind::StringLiteral) {
+        std::string rebuilt = prefix + std::string(1, quote) + out + std::string(1, quote);
+        tok.lexeme = rebuilt;
+        tok.decodedString = out;
+        return;
+    }
+
+    // For character constants, compute numeric value by packing decoded bytes.
+    if (tok.kind == PPTokenKind::CharConst) {
+        std::string rebuilt = prefix + std::string(1, quote) + out + std::string(1, quote);
+        tok.lexeme = rebuilt;
+        unsigned int acc = 0;
+        for (unsigned char uc : out) acc = (acc << 8) | static_cast<unsigned int>(uc);
+        tok.decodedCharValue = acc;
+        return;
+    }
+}
+
+// Helpers to push tokens into the output buffer while performing Phase 6
+// adjacent string literal concatenation when applicable.
+static std::string extractLiteralPrefix(const std::string &lex) {
+    size_t i = 0;
+    if (lex.size() >= 3 && lex[0] == 'u' && lex[1] == '8') return "u8";
+    if (lex.size() >= 2 && (lex[0] == 'u' || lex[0] == 'U' || lex[0] == 'L')) return std::string(1, lex[0]);
+    return std::string();
+}
+
+static bool extractLiteralInnerAndQuote(const std::string &lex, std::string &outInner, char &outQuote) {
+    outInner.clear(); outQuote = 0;
+    if (lex.empty()) return false;
+    size_t i = 0;
+    if (lex.size() >= 3 && lex[0] == 'u' && lex[1] == '8') i = 2;
+    else if (lex.size() >= 2 && (lex[0] == 'u' || lex[0] == 'U' || lex[0] == 'L')) i = 1;
+    if (i >= lex.size()) return false;
+    char q = lex[i];
+    if (!(q == '"' || q == '\'')) return false;
+    if (lex.size() < i + 2) return false;
+    if (lex.back() != q) return false;
+    outQuote = q;
+    outInner = lex.substr(i + 1, lex.size() - (i + 2));
+    return true;
+}
+
+// combine prefixes according to C rules (simplified):
+// - identical non-empty prefixes -> that prefix
+// - one empty and one non-empty -> the non-empty
+// - both empty -> empty
+// - different non-empty prefixes -> incompatible
+
+void Preprocessor::pushTokenBackWithConcat(const PPToken& tok) {
+    // Fast path: non-string literals just append
+    if (tok.kind != PPTokenKind::StringLiteral) {
+        outBuffer.push_back(tok);
+        return;
+    }
+
+    // Try to merge with a previous string literal if present.
+    int prevIdx = static_cast<int>(outBuffer.size()) - 1;
+    while (prevIdx >= 0 && (outBuffer[prevIdx].kind == PPTokenKind::Whitespace || outBuffer[prevIdx].kind == PPTokenKind::Newline)) {
+        --prevIdx;
+    }
+
+    if (prevIdx >= 0 && outBuffer[prevIdx].kind == PPTokenKind::StringLiteral) {
+        PPToken left = outBuffer[prevIdx];
+        PPToken right = tok;
+        normalizeLiteralToken(left);
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(left.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (extractLiteralInnerAndQuote(left.lexeme, lin, lq) && extractLiteralInnerAndQuote(right.lexeme, rin, rq) && lq == rq) {
+            std::string combinedPrefix;
+            if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+            else if (lpre.empty()) combinedPrefix = rpre;
+            else if (rpre.empty()) combinedPrefix = lpre;
+            else if (lpre == rpre) combinedPrefix = lpre;
+            else {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                outBuffer.push_back(tok);
+                return;
+            }
+
+            size_t keep = static_cast<size_t>(prevIdx) + 1;
+            while (outBuffer.size() > keep) outBuffer.pop_back();
+
+            std::string newInner = lin + rin;
+            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            outBuffer.back().lexeme = rebuilt;
+            outBuffer.back().span.end = tok.span.end;
+            outBuffer.back().copyPaint(tok);
+            return;
+        }
+        // fallthrough to lookahead
+    }
+
+    // No previous merge occurred; perform tokenizer lookahead to merge following adjacent literals.
+    PPToken merged = tok;
+    normalizeLiteralToken(merged);
+    std::vector<PPToken> saved; // whitespace/newline tokens between literals
+
+    while (true) {
+        auto ntOpt = readRawToken();
+        if (!ntOpt) break;
+        PPToken nt = *ntOpt;
+
+        if (nt.kind == PPTokenKind::Whitespace || nt.kind == PPTokenKind::Newline) {
+            saved.push_back(nt);
+            continue;
+        }
+
+        if (nt.kind != PPTokenKind::StringLiteral) {
+            outBuffer.push_back(merged);
+            for (const auto &s : saved) outBuffer.push_back(s);
+            outBuffer.push_back(nt);
+            return;
+        }
+
+        PPToken right = nt;
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(merged.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (!extractLiteralInnerAndQuote(merged.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq) || lq != rq) {
+            outBuffer.push_back(merged);
+            for (const auto &s : saved) outBuffer.push_back(s);
+            outBuffer.push_back(right);
+            return;
+        }
+
+        std::string combinedPrefix;
+        if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+        else if (lpre.empty()) combinedPrefix = rpre;
+        else if (rpre.empty()) combinedPrefix = lpre;
+        else if (lpre == rpre) combinedPrefix = lpre;
+        else {
+            diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+            outBuffer.push_back(merged);
+            for (const auto &s : saved) outBuffer.push_back(s);
+            outBuffer.push_back(right);
+            return;
+        }
+
+        std::string newInner = lin + rin;
+        std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+        merged.lexeme = rebuilt;
+        merged.span.end = right.span.end;
+        merged.copyPaint(right);
+        saved.clear();
+        // continue to merge more literals
+    }
+
+    // EOF reached: push merged token and any saved whitespace
+    outBuffer.push_back(merged);
+    for (const auto &s : saved) outBuffer.push_back(s);
+}
+
+void Preprocessor::pushTokenFrontWithConcat(const PPToken& tok) {
+    // Only attempt special Phase-6 behavior for string literals; otherwise push normally.
+    if (tok.kind != PPTokenKind::StringLiteral) { outBuffer.push_front(tok); return; }
+
+    // If there's an existing front literal (skipping whitespace), try to merge with it first.
+    size_t j = 0;
+    while (j < outBuffer.size() && (outBuffer[j].kind == PPTokenKind::Whitespace || outBuffer[j].kind == PPTokenKind::Newline)) ++j;
+    if (j < outBuffer.size() && outBuffer[j].kind == PPTokenKind::StringLiteral) {
+        PPToken left = tok;
+        PPToken right = outBuffer[j];
+        normalizeLiteralToken(left);
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(left.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (extractLiteralInnerAndQuote(left.lexeme, lin, lq) && extractLiteralInnerAndQuote(right.lexeme, rin, rq) && lq == rq) {
+            std::string combinedPrefix;
+            if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+            else if (lpre.empty()) combinedPrefix = rpre;
+            else if (rpre.empty()) combinedPrefix = lpre;
+            else if (lpre == rpre) combinedPrefix = lpre;
+            else {
+                diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+                outBuffer.push_front(tok);
+                return;
+            }
+
+            // Remove leading whitespace/newline tokens before the target
+            for (size_t k = 0; k < j; ++k) outBuffer.pop_front();
+
+            // Build combined lexeme and update front element
+            std::string newInner = lin + rin;
+            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            outBuffer.front().lexeme = rebuilt;
+            outBuffer.front().span.begin = tok.span.begin;
+            outBuffer.front().copyPaint(tok);
+            return;
+        }
+    }
+
+    // Otherwise, perform lookahead on the raw token stream to merge following literals
+    PPToken merged = tok;
+    normalizeLiteralToken(merged);
+    std::vector<PPToken> saved; // whitespace/newline tokens between literals
+
+    while (true) {
+        auto ntOpt = readRawToken();
+        if (!ntOpt) break;
+        PPToken nt = *ntOpt;
+
+        if (nt.kind == PPTokenKind::Whitespace || nt.kind == PPTokenKind::Newline) {
+            saved.push_back(nt);
+            continue;
+        }
+
+        if (nt.kind != PPTokenKind::StringLiteral) {
+            // Insert nt, saved, and merged at front so order becomes: merged, saved..., nt, previous...
+            outBuffer.push_front(nt);
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+            outBuffer.push_front(merged);
+            return;
+        }
+
+        PPToken right = nt;
+        normalizeLiteralToken(right);
+
+        std::string lpre = extractLiteralPrefix(merged.lexeme);
+        std::string rpre = extractLiteralPrefix(right.lexeme);
+        std::string lin, rin; char lq=0, rq=0;
+        if (!extractLiteralInnerAndQuote(merged.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq) || lq != rq) {
+            // cannot merge: push right then saved then merged
+            outBuffer.push_front(right);
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+            outBuffer.push_front(merged);
+            return;
+        }
+
+        std::string combinedPrefix;
+        if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
+        else if (lpre.empty()) combinedPrefix = rpre;
+        else if (rpre.empty()) combinedPrefix = lpre;
+        else if (lpre == rpre) combinedPrefix = lpre;
+        else {
+            diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
+            outBuffer.push_front(right);
+            for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+            outBuffer.push_front(merged);
+            return;
+        }
+
+        std::string newInner = lin + rin;
+        std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+        merged.lexeme = rebuilt;
+        merged.span.end = right.span.end;
+        merged.copyPaint(right);
+        saved.clear();
+        // continue to attempt merging more literals
+    }
+
+    // EOF: push merged and saved (merged first)
+    for (auto it = saved.rbegin(); it != saved.rend(); ++it) outBuffer.push_front(*it);
+    outBuffer.push_front(merged);
+}
+
+    
 
 bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
     bool isPragmaOnce = isPragmaOnceDirective(tokens);

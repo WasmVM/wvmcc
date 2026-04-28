@@ -9,9 +9,9 @@ A C compiler for [WasmVM](https://github.com/WasmVM/WasmVM)
 
 * CMake >= 3.16
 
-* 支援 C11 和 C++20 的 C/C++ 編譯器
+* 支援 C17 和 C++20 的 C/C++ 編譯器
  
-  C/C++ compiler supporting c11 and c++20 standard with Standard Library
+  C/C++ compiler supporting c17 and c++20 standard
 
 ## 注意事項 Notice
 
