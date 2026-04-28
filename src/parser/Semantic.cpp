@@ -1555,7 +1555,7 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
             diagnostics.push_back(std::move(diag));
         }
     }
-    if (d->declarator->id.name.empty()) {
+    if (declaratorName(d->declarator).empty()) {
         Diagnostic diag;
         diag.severity = Diagnostic::Severity::Error;
         diag.message = "unnamed declarator";
