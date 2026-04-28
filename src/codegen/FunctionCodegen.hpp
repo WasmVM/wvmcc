@@ -45,6 +45,7 @@ public:
     void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
     void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr);
     void emitCastExpr(const wvmcc::parser::CastExpr& expr);
+    void emitCallExpr(const wvmcc::parser::CallExpr& expr);
     void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr);
     void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr);
     void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);

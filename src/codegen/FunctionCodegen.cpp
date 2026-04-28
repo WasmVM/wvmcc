@@ -81,6 +81,9 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
     case K::String:
         emitStringLiteral(static_cast<const wvmcc::parser::StringLiteral&>(*expr));
         break;
+    case K::Call:
+        emitCallExpr(static_cast<const wvmcc::parser::CallExpr&>(*expr));
+        break;
     case K::Member:
         emitMemberAccessExpr(static_cast<const wvmcc::parser::MemberExpr&>(*expr));
         break;
@@ -290,6 +293,21 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
 }
 
 void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr) {
+    emit(WasmVM::Instr::Unreachable{});
+}
+
+void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
+    for (const auto& arg : expr.args) {
+        emitExpr(arg);
+    }
+    if (expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
+        const auto& calleeExpr = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
+        auto funcSym = symbolTable_.lookupFunction(calleeExpr.name);
+        if (funcSym) {
+            emit(WasmVM::Instr::Call{(WasmVM::index_t)funcSym->funcIndex});
+            return;
+        }
+    }
     emit(WasmVM::Instr::Unreachable{});
 }
 
