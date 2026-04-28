@@ -124,7 +124,7 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
         // Store field offset
         if (!member.declarators.empty() && member.declarators[0].declarator) {
             // Get the name of the field (if available)
-            layout.fieldOffsets.emplace_back(member.declarators[0].declarator->name, currentOffset);
+            layout.fieldOffsets.emplace_back(member.declarators[0].declarator->id.name, currentOffset);
         } else {
             // Anonymous field or unnamed member
             layout.fieldOffsets.emplace_back("", currentOffset);

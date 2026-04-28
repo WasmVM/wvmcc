@@ -108,7 +108,7 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
         const auto& unaryExpr = static_cast<const wvmcc::parser::UnaryExpr&>(*expr);
         if (unaryExpr.op == "&") {
             // This is an address-of operation - find the identifier being addressed
-            if (unaryExpr.rhs->kind == wvmcc::parser::Expr::Kind::Identifier) {
+            if (unaryExpr.rhs->kind == wvmcc::parser::Expr::Kind::Ident) {
                 const auto& identExpr = static_cast<const wvmcc::parser::IdentifierExpr&>(*unaryExpr.rhs);
                 addressTakenNames.insert(identExpr.name);
             }
@@ -125,10 +125,8 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
         walk(binaryExpr.lhs, addressTakenNames);
         walk(binaryExpr.rhs, addressTakenNames);
     }
-    // Handle identifier expressions (for tracking variables that are used)
-    else if (expr->kind == wvmcc::parser::Expr::Kind::Identifier) {
-        // We don't add identifiers to addressTakenNames here, as they're just used,
-        // not necessarily address-taken. The & operator is what matters.
+    else if (expr->kind == wvmcc::parser::Expr::Kind::Ident) {
+        // identifiers that are merely read are not address-taken
     }
     // Handle function call expressions
     else if (expr->kind == wvmcc::parser::Expr::Kind::Call) {
@@ -162,14 +160,8 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
         const auto& castExpr = static_cast<const wvmcc::parser::CastExpr&>(*expr);
         walk(castExpr.expr, addressTakenNames);
     }
-    // Handle compound literal expressions
     else if (expr->kind == wvmcc::parser::Expr::Kind::CompoundLiteral) {
-        const auto& compoundLit = static_cast<const wvmcc::parser::CompoundLiteral&>(*expr);
-        // Compound literals don't typically involve address-taking in the same way
-        // but we can walk their initializer if it exists
-        if (compoundLit.init) {
-            walk(compoundLit.init, addressTakenNames);
-        }
+        // compound literals don't introduce new address-taken variables
     }
 }
 
