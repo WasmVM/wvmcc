@@ -257,6 +257,7 @@ struct Expr : Node {
 struct IdentifierExpr : Expr { std::string name; };
 struct IntegerLiteral : Expr { std::int64_t value; std::string raw; };
 struct StringLiteral : Expr { std::string value; };
+struct CharLiteral : Expr { char value; };
 
 struct UnaryExpr : Expr {
     std::string op;

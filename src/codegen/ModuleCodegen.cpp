@@ -148,7 +148,15 @@ void ModuleCodegen::emitGlobalAggregate(const wvmcc::parser::DeclarationPtr& dec
 
 void ModuleCodegen::emitStringLiterals() {
     // Placeholder for emitting string literals as data segments
-    // In a real implementation, this would use dataAllocator_ to emit the segments
+    // In a real implementation, this would collect all string literals from the translation unit
+    // and emit them as data segments in the Wasm module
+    
+    // For now, this is a placeholder - in a real implementation:
+    // 1. Collect all string literals from the translation unit
+    // 2. Use dataAllocator_ to allocate space for each string literal
+    // 3. Create Wasm data segments with the string content
+    
+    // This will be implemented in later phases as we build out the full implementation
 }
 
 } // namespace wvmcc::codegen

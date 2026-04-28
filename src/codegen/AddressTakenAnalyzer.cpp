@@ -16,6 +16,88 @@ std::unordered_set<std::string> AddressTakenAnalyzer::analyze(const wvmcc::parse
     return addressTakenNames;
 }
 
+void AddressTakenAnalyzer::walk(const std::vector<wvmcc::parser::BlockItemPtr>& blockItems, std::unordered_set<std::string>& addressTakenNames) {
+    for (const auto& item : blockItems) {
+        walk(item, addressTakenNames);
+    }
+}
+
+void AddressTakenAnalyzer::walk(const wvmcc::parser::BlockItemPtr& item, std::unordered_set<std::string>& addressTakenNames) {
+    if (!item) {
+        return;
+    }
+    
+    // Handle declarations in block items
+    std::visit([&](const auto& variantItem) {
+        using T = std::decay_t<decltype(variantItem)>;
+        if constexpr (std::is_same_v<T, wvmcc::parser::DeclarationPtr>) {
+            // For now, we don't need to do anything special with declarations in this context
+            // The address-taking analysis is focused on expressions where & operator is used
+        } else if constexpr (std::is_same_v<T, wvmcc::parser::StmtPtr>) {
+            walk(variantItem, addressTakenNames);
+        } else {
+            // Static assert - ignore for now
+        }
+    }, item->item);
+}
+
+void AddressTakenAnalyzer::walk(const wvmcc::parser::StmtPtr& stmt, std::unordered_set<std::string>& addressTakenNames) {
+    if (!stmt) {
+        return;
+    }
+    
+    // Handle compound statements (blocks)
+    if (stmt->kind == wvmcc::parser::Stmt::Kind::Compound) {
+        const auto& compoundStmt = static_cast<const wvmcc::parser::CompoundStmt&>(*stmt);
+        walk(compoundStmt.items, addressTakenNames);
+    }
+    // Handle expression statements
+    else if (stmt->kind == wvmcc::parser::Stmt::Kind::Expr) {
+        const auto& exprStmt = static_cast<const wvmcc::parser::ExprStmt&>(*stmt);
+        walk(exprStmt.expr, addressTakenNames);
+    }
+    // Handle return statements
+    else if (stmt->kind == wvmcc::parser::Stmt::Kind::Return) {
+        const auto& returnStmt = static_cast<const wvmcc::parser::ReturnStmt&>(*stmt);
+        if (returnStmt.value) {
+            walk(returnStmt.value.value(), addressTakenNames);
+        }
+    }
+    // Handle if statements
+    else if (stmt->kind == wvmcc::parser::Stmt::Kind::If) {
+        const auto& ifStmt = static_cast<const wvmcc::parser::IfStmt&>(*stmt);
+        walk(ifStmt.cond, addressTakenNames);
+        walk(ifStmt.thenStmt, addressTakenNames);
+        if (ifStmt.elseStmt) {
+            walk(ifStmt.elseStmt.value(), addressTakenNames);
+        }
+    }
+    // Handle while statements
+    else if (stmt->kind == wvmcc::parser::Stmt::Kind::While) {
+        const auto& whileStmt = static_cast<const wvmcc::parser::WhileStmt&>(*stmt);
+        walk(whileStmt.cond, addressTakenNames);
+        walk(whileStmt.body, addressTakenNames);
+    }
+    // Handle for statements
+    else if (stmt->kind == wvmcc::parser::Stmt::Kind::For) {
+        const auto& forStmt = static_cast<const wvmcc::parser::ForStmt&>(*stmt);
+        if (forStmt.init) {
+            walk(forStmt.init.value(), addressTakenNames);
+        }
+        if (forStmt.cond) {
+            walk(forStmt.cond.value(), addressTakenNames);
+        }
+        if (forStmt.step) {
+            walk(forStmt.step.value(), addressTakenNames);
+        }
+        walk(forStmt.body, addressTakenNames);
+    }
+    // Handle other statement types that don't contain expressions we care about
+    else {
+        // For now, we don't need to handle other statement types for address-taking analysis
+    }
+}
+
 void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unordered_set<std::string>& addressTakenNames) {
     if (!expr) {
         return;
@@ -26,28 +108,22 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
         const auto& unaryExpr = static_cast<const wvmcc::parser::UnaryExpr&>(*expr);
         if (unaryExpr.op == "&") {
             // This is an address-of operation - find the identifier being addressed
-            if (unaryExpr.operand->kind == wvmcc::parser::Expr::Kind::Identifier) {
-                const auto& identExpr = static_cast<const wvmcc::parser::IdentifierExpr&>(*unaryExpr.operand);
+            if (unaryExpr.rhs->kind == wvmcc::parser::Expr::Kind::Identifier) {
+                const auto& identExpr = static_cast<const wvmcc::parser::IdentifierExpr&>(*unaryExpr.rhs);
                 addressTakenNames.insert(identExpr.name);
             }
             // For more complex expressions like &(*ptr), we need to recursively walk
-            walk(unaryExpr.operand, addressTakenNames);
+            walk(unaryExpr.rhs, addressTakenNames);
         } else {
             // For other unary operations, recursively walk the operand
-            walk(unaryExpr.operand, addressTakenNames);
+            walk(unaryExpr.rhs, addressTakenNames);
         }
     }
     // Handle binary expressions (for cases like a = &var)
     else if (expr->kind == wvmcc::parser::Expr::Kind::Binary) {
         const auto& binaryExpr = static_cast<const wvmcc::parser::BinaryExpr&>(*expr);
-        walk(binaryExpr.left, addressTakenNames);
-        walk(binaryExpr.right, addressTakenNames);
-    }
-    // Handle assignment expressions (like var = &someVar)
-    else if (expr->kind == wvmcc::parser::Expr::Kind::Assignment) {
-        const auto& assignExpr = static_cast<const wvmcc::parser::AssignmentExpr&>(*expr);
-        walk(assignExpr.left, addressTakenNames);
-        walk(assignExpr.right, addressTakenNames);
+        walk(binaryExpr.lhs, addressTakenNames);
+        walk(binaryExpr.rhs, addressTakenNames);
     }
     // Handle identifier expressions (for tracking variables that are used)
     else if (expr->kind == wvmcc::parser::Expr::Kind::Identifier) {
@@ -72,7 +148,7 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
     else if (expr->kind == wvmcc::parser::Expr::Kind::Unary) {
         const auto& unaryExpr = static_cast<const wvmcc::parser::UnaryExpr&>(*expr);
         if (unaryExpr.op == "*") {
-            walk(unaryExpr.operand, addressTakenNames);
+            walk(unaryExpr.rhs, addressTakenNames);
         }
     }
     // Handle array index expressions
@@ -88,99 +164,13 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
     }
     // Handle compound literal expressions
     else if (expr->kind == wvmcc::parser::Expr::Kind::CompoundLiteral) {
-        const auto& compoundLit = static_cast<const wvmcc::parser::CompoundLiteralExpr&>(*expr);
+        const auto& compoundLit = static_cast<const wvmcc::parser::CompoundLiteral&>(*expr);
         // Compound literals don't typically involve address-taking in the same way
         // but we can walk their initializer if it exists
-        if (compoundLit.initializer) {
-            walk(compoundLit.initializer, addressTakenNames);
+        if (compoundLit.init) {
+            walk(compoundLit.init, addressTakenNames);
         }
     }
-}
-
-void AddressTakenAnalyzer::walk(const wvmcc::parser::StmtPtr& stmt, std::unordered_set<std::string>& addressTakenNames) {
-    if (!stmt) {
-        return;
-    }
-    
-    // Handle compound statements (blocks)
-    if (stmt->kind == wvmcc::parser::Stmt::Kind::Compound) {
-        const auto& compoundStmt = static_cast<const wvmcc::parser::CompoundStmt&>(*stmt);
-        for (const auto& item : compoundStmt.items) {
-            walk(item, addressTakenNames);
-        }
-    }
-    // Handle expression statements
-    else if (stmt->kind == wvmcc::parser::Stmt::Kind::Expr) {
-        const auto& exprStmt = static_cast<const wvmcc::parser::ExprStmt&>(*stmt);
-        walk(exprStmt.expr, addressTakenNames);
-    }
-    // Handle return statements
-    else if (stmt->kind == wvmcc::parser::Stmt::Kind::Return) {
-        const auto& returnStmt = static_cast<const wvmcc::parser::ReturnStmt&>(*stmt);
-        if (returnStmt.expr) {
-            walk(returnStmt.expr, addressTakenNames);
-        }
-    }
-    // Handle if statements
-    else if (stmt->kind == wvmcc::parser::Stmt::Kind::If) {
-        const auto& ifStmt = static_cast<const wvmcc::parser::IfStmt&>(*stmt);
-        walk(ifStmt.cond, addressTakenNames);
-        walk(ifStmt.then, addressTakenNames);
-        if (ifStmt.else_) {
-            walk(ifStmt.else_, addressTakenNames);
-        }
-    }
-    // Handle while statements
-    else if (stmt->kind == wvmcc::parser::Stmt::Kind::While) {
-        const auto& whileStmt = static_cast<const wvmcc::parser::WhileStmt&>(*stmt);
-        walk(whileStmt.cond, addressTakenNames);
-        walk(whileStmt.body, addressTakenNames);
-    }
-    // Handle for statements
-    else if (stmt->kind == wvmcc::parser::Stmt::Kind::For) {
-        const auto& forStmt = static_cast<const wvmcc::parser::ForStmt&>(*stmt);
-        if (forStmt.init) {
-            walk(forStmt.init, addressTakenNames);
-        }
-        if (forStmt.cond) {
-            walk(forStmt.cond, addressTakenNames);
-        }
-        if (forStmt.iter) {
-            walk(forStmt.iter, addressTakenNames);
-        }
-        walk(forStmt.body, addressTakenNames);
-    }
-    // Handle declaration statements (this is where we might find variables being declared)
-    else if (stmt->kind == wvmcc::parser::Stmt::Kind::Declaration) {
-        const auto& declStmt = static_cast<const wvmcc::parser::DeclarationStmt&>(*stmt);
-        walk(declStmt.decl, addressTakenNames);
-    }
-}
-
-void AddressTakenAnalyzer::walk(const wvmcc::parser::BlockItemPtr& item, std::unordered_set<std::string>& addressTakenNames) {
-    if (!item) {
-        return;
-    }
-    
-    // Handle declarations in block items
-    if (item->kind == wvmcc::parser::BlockItem::Kind::Declaration) {
-        const auto& decl = static_cast<const wvmcc::parser::DeclarationPtr&>(*item);
-        walk(decl, addressTakenNames);
-    }
-    // Handle statements in block items
-    else if (item->kind == wvmcc::parser::BlockItem::Kind::Statement) {
-        const auto& stmt = static_cast<const wvmcc::parser::StmtPtr&>(*item);
-        walk(stmt, addressTakenNames);
-    }
-}
-
-void AddressTakenAnalyzer::walk(const wvmcc::parser::DeclarationPtr& decl, std::unordered_set<std::string>& addressTakenNames) {
-    if (!decl) {
-        return;
-    }
-    
-    // For now, we don't need to do anything special with declarations in this context
-    // The address-taking analysis is focused on expressions where & operator is used
 }
 
 } // namespace wvmcc::codegen

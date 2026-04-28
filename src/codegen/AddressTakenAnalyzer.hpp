@@ -2,6 +2,7 @@
 
 #include <unordered_set>
 #include <string>
+#include <vector>
 #include "../parser/AST.hpp"
 
 namespace wvmcc::codegen {
@@ -13,10 +14,10 @@ public:
 
 private:
     // Helper to walk the AST and find address-taken variables
-    void walk(const wvmcc::parser::ExprPtr& expr, std::unordered_set<std::string>& addressTakenNames);
-    void walk(const wvmcc::parser::StmtPtr& stmt, std::unordered_set<std::string>& addressTakenNames);
+    void walk(const std::vector<wvmcc::parser::BlockItemPtr>& blockItems, std::unordered_set<std::string>& addressTakenNames);
     void walk(const wvmcc::parser::BlockItemPtr& item, std::unordered_set<std::string>& addressTakenNames);
-    void walk(const wvmcc::parser::DeclarationPtr& decl, std::unordered_set<std::string>& addressTakenNames);
+    void walk(const wvmcc::parser::StmtPtr& stmt, std::unordered_set<std::string>& addressTakenNames);
+    void walk(const wvmcc::parser::ExprPtr& expr, std::unordered_set<std::string>& addressTakenNames);
 };
 
 } // namespace wvmcc::codegen

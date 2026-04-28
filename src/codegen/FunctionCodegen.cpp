@@ -99,6 +99,13 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
         if constexpr (std::is_same_v<T, ScalarLocal>) {
             // Local variable - emit Local_get
             emit(WasmVM::Instr::Local_get{info.localIndex});
+        } else if constexpr (std::is_same_v<T, MemoryLocal>) {
+            // Memory-resident local variable - emit load from frame offset
+            // This is a placeholder implementation - in a real system we would:
+            // 1. Load the frame pointer
+            // 2. Add the offset to get the address
+            // 3. Load from that address
+            emit(WasmVM::Instr::Unreachable{});
         } else if constexpr (std::is_same_v<T, GlobalScalar>) {
             // Global scalar - emit Global_get
             emit(WasmVM::Instr::Global_get{info.globalIndex});
@@ -275,6 +282,10 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         } else {
             emit(WasmVM::Instr::Unreachable{});
         }
+    } else if (expr.op == "+=" || expr.op == "-=") {
+        // Compound assignment - handle as special case for pointer arithmetic
+        // For pointer + offset or pointer - offset, we need to handle the type properly
+        emit(WasmVM::Instr::Unreachable{});
     } else {
         // For unhandled operators, emit unreachable
         emit(WasmVM::Instr::Unreachable{});
@@ -358,6 +369,62 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
     }
 }
 
+void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr) {
+    // For string literals, we need to:
+    // 1. Store the string in the data segment
+    // 2. Emit a reference to that data segment location
+    
+    // This is a placeholder - in a real implementation we would:
+    // 1. Store the string literal in the module's data section
+    // 2. Emit an i64 constant representing the address of that string
+    
+    emit(WasmVM::Instr::Unreachable{});
+}
+
+void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr) {
+    // For member access, we need to:
+    // 1. Emit the base expression (which should be a pointer or struct)
+    // 2. Calculate the offset of the member
+    // 3. Load from that address
+    
+    // This is a placeholder - in a real implementation we would:
+    // 1. Get the base address (from pointer or struct)
+    // 2. Calculate member offset using LayoutEngine
+    // 3. Load the member value from that address
+    
+    emit(WasmVM::Instr::Unreachable{});
+}
+
+void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr) {
+    // For array indexing, we need to:
+    // 1. Emit the base expression (array or pointer)
+    // 2. Emit the index expression
+    // 3. Calculate address: base + (index * element_size)
+    // 4. Load from that address
+    
+    // This is a placeholder - in a real implementation we would:
+    // 1. Get the base address (array or pointer)
+    // 2. Get the index value
+    // 3. Calculate element size from type information
+    // 4. Compute address and load the value
+    
+    emit(WasmVM::Instr::Unreachable{});
+}
+
+void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteralExpr& expr) {
+    // For compound literals (e.g., {1, 2, 3}), we need to:
+    // 1. Handle the initialization of aggregate types
+    // 2. Allocate space for the compound literal (either on stack or in data segment)
+    // 3. Initialize each member according to the initializer list
+    
+    // This is a placeholder - in a real implementation we would:
+    // 1. Determine the type of compound literal
+    // 2. Allocate appropriate space (stack or data segment)
+    // 3. Initialize each member according to the initializer list
+    
+    emit(WasmVM::Instr::Unreachable{});
+}
+
 void FunctionCodegen::emitStmt(const wvmcc::parser::StmtPtr& stmt) {
     // Placeholder implementation - this will be expanded in later phases
     if (!stmt) return;
@@ -407,6 +474,26 @@ void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
 WasmVM::ValueType FunctionCodegen::getExprType(const wvmcc::parser::ExprPtr& expr) const {
     // Placeholder implementation - return a default value
     return WasmVM::ValueType::i32;
+}
+
+// Helper method to generate prologue for functions with address-taken variables
+void FunctionCodegen::generatePrologue() {
+    // For now, this is a placeholder - in a real implementation:
+    // 1. We would set up stack frame if needed
+    // 2. We would allocate space for local variables that are address-taken
+    // 3. We would set up frame pointer if needed
+    
+    // Placeholder: emit a simple nop or just continue with existing instructions
+    // This will be expanded in later phases as we implement proper stack frame management
+}
+
+// Helper method to generate epilogue for functions with address-taken variables
+void FunctionCodegen::generateEpilogue() {
+    // For now, this is a placeholder - in a real implementation:
+    // 1. We would handle cleanup of local variables
+    // 2. We would ensure proper function exit
+    
+    // Placeholder: emit a simple nop or just continue with existing instructions
 }
 
 } // namespace wvmcc::codegen

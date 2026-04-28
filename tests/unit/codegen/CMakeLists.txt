@@ -1,19 +1,20 @@
 # CMake file for codegen unit tests
 
-# Find GTest
-find_package(GTest REQUIRED)
-
-# Create the test executable
-add_executable(basic_codegen_test 
+add_executable(basic_codegen_test
     basic_codegen_test.cpp
 )
 
-# Link with GTest and wvmcc
-target_link_libraries(basic_codegen_test 
-    GTest::gtest 
-    GTest::gtest_main
+add_executable(expression_emission_test
+    expression_emission_test.cpp
+)
+
+target_link_libraries(basic_codegen_test
     wvmcc
 )
 
-# Add the test to the test suite
+target_link_libraries(expression_emission_test
+    wvmcc
+)
+
 add_test(NAME basic_codegen_test COMMAND basic_codegen_test)
+add_test(NAME expression_emission_test COMMAND expression_emission_test)

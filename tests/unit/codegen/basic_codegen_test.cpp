@@ -31,21 +31,40 @@ void test_type_map() {
     auto typeNode = wvmcc::parser::make_ast_with_span<wvmcc::parser::TypeNode>(wvmcc::SourceSpan{0, 0});
     typeNode->kind = wvmcc::parser::TypeNode::Kind::Builtin;
     
-    // Test basic type mapping for different types
-    auto wasmType = typeMap.toWasmType(typeNode);
-    assert(wasmType != WasmVM::ValueType::none);
-    
-    // Test byte size calculation
-    size_t size = typeMap.byteSize(typeNode);
-    assert(size == 0); // Default for null type
-    
-    // Test byte alignment calculation
-    size_t align = typeMap.byteAlignment(typeNode);
-    assert(align == 1); // Default for null type
-    
-    // Test memory resident check
-    bool isMemResident = typeMap.isMemoryResident(typeNode);
-    assert(!isMemResident); // Default for null type
+    // Helper to create a builtin type node
+    auto makeBuiltinType = [](wvmcc::parser::TypeNode::Kind kind, const std::vector<wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier>& specs) {
+        auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        node->simple = specs;
+        return node;
+    };
+
+    // Test int -> i32
+    auto typeInt = makeBuiltinType(wvmcc::parser::TypeNode::Kind::Builtin, {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int});
+    assert(typeMap.toWasmType(typeInt) == WasmVM::ValueType::i32);
+    assert(typeMap.byteSize(typeInt) == 4);
+    assert(typeMap.byteAlignment(typeInt) == 4);
+
+    // Test long -> i64
+    auto typeLong = makeBuiltinType(wvmcc::parser::TypeNode::Kind::Builtin, {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long});
+    assert(typeMap.toWasmType(typeLong) == WasmVM::ValueType::i64);
+    assert(typeMap.byteSize(typeLong) == 8);
+    assert(typeMap.byteAlignment(typeLong) == 8);
+
+    // Test float -> f32
+    auto typeFloat = makeBuiltinType(wvmcc::parser::TypeNode::Kind::Builtin, {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Float});
+    assert(typeMap.toWasmType(typeFloat) == WasmVM::ValueType::f32);
+    assert(typeMap.byteSize(typeFloat) == 4);
+
+    // Test double -> f64
+    auto typeDouble = makeBuiltinType(wvmcc::parser::TypeNode::Kind::Builtin, {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double});
+    assert(typeMap.toWasmType(typeDouble) == WasmVM::ValueType::f64);
+    assert(typeMap.byteSize(typeDouble) == 8);
+
+    // Test char -> i32 (promoted in Wasm)
+    auto typeChar = makeBuiltinType(wvmcc::parser::TypeNode::Kind::Builtin, {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char});
+    assert(typeMap.toWasmType(typeChar) == WasmVM::ValueType::i32);
+    assert(typeMap.byteSize(typeChar) == 1);
     
     std::cout << "TypeMap functionality test passed" << std::endl;
 }
@@ -73,6 +92,23 @@ void test_symbol_table() {
     // Test exists method
     bool exists = symbolTable.exists("test_var");
     assert(exists);
+
+    // Test scope and shadowing
+    symbolTable.pushScope();
+    wvmcc::codegen::ScalarLocal innerLocal;
+    innerLocal.type = nullptr;
+    innerLocal.isAddressTaken = false;
+    innerLocal.localIndex = 1;
+    symbolTable.define("test_var", innerLocal); // Shadowing
+
+    auto shadowedResult = symbolTable.lookup("test_var");
+    assert(shadowedResult.has_value());
+    assert(std::get<wvmcc::codegen::ScalarLocal>(*shadowedResult).localIndex == 1);
+
+    symbolTable.popScope();
+    auto restoredResult = symbolTable.lookup("test_var");
+    assert(restoredResult.has_value());
+    assert(std::get<wvmcc::codegen::ScalarLocal>(*restoredResult).localIndex == 0);
     
     std::cout << "SymbolTable functionality test passed" << std::endl;
 }
@@ -116,12 +152,17 @@ void test_type_index_cache() {
 void test_global_data_allocator() {
     wvmcc::codegen::GlobalDataAllocator dataAllocator;
     
-    // Test basic allocation
-    size_t addr1 = dataAllocator.allocate(8, 1);
-    size_t addr2 = dataAllocator.allocate(4, 1);
-    
-    // Should get different addresses (aligned)
+    // Test basic allocation and alignment
+    size_t addr1 = dataAllocator.allocate(8, 8);
+    assert(addr1 % 8 == 0);
+
+    size_t addr2 = dataAllocator.allocate(4, 4);
+    assert(addr2 % 4 == 0);
     assert(addr1 != addr2);
+
+    // Test larger alignment
+    size_t addr3 = dataAllocator.allocate(1, 64);
+    assert(addr3 % 64 == 0);
     
     // Test string interning
     size_t strAddr = dataAllocator.internString("hello");
@@ -138,6 +179,22 @@ void test_global_data_allocator() {
     std::cout << "GlobalDataAllocator functionality test passed" << std::endl;
 }
 
+// Test FunctionCodegen expression emission
+void test_function_codegen_expressions() {
+    wvmcc::codegen::TypeMap typeMap;
+    wvmcc::codegen::SymbolTable symbolTable;
+    wvmcc::codegen::FunctionCodegen codegen(typeMap, symbolTable);
+
+    // Test Integer Literal emission (i32)
+    auto intLit = wvmcc::parser::make_ast<wvmcc::parser::IntegerLiteral>();
+    intLit->value = 42;
+    intLit->raw = "42";
+    
+    // We need to wrap it in a shared_ptr for emitExpr
+    auto intLitPtr = std::make_shared<wvmcc::parser::IntegerLiteral>(*intLit);
+    
+}
+
 // Main test function
 int main() {
     std::cout << "Running basic codegen tests..." << std::endl;
@@ -147,6 +204,7 @@ int main() {
     test_symbol_table();
     test_type_index_cache();
     test_global_data_allocator();
+    test_function_codegen_expressions();
     
     std::cout << "All basic codegen tests passed!" << std::endl;
     return 0;

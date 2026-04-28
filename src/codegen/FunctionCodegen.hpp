@@ -31,6 +31,11 @@ public:
     bool hasAddressTakenVariables() const {
         return !addressTakenNames_.empty();
     }
+
+    // Get the current instruction buffer (for testing)
+    const std::vector<WasmVM::WasmInstr>& getInstructions() const {
+        return instrBuffer_;
+    }
     
     // Emit an instruction
     void emit(const WasmVM::WasmInstr& instr);
@@ -45,6 +50,9 @@ public:
     void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
     void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr);
     void emitCastExpr(const wvmcc::parser::CastExpr& expr);
+    void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr);
+    void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr);
+    void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteralExpr& expr);
     
     // Emit a statement
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);

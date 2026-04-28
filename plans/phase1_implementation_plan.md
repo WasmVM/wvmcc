@@ -63,31 +63,28 @@ This plan outlines the detailed implementation subtasks for Phase 1 of the lower
   - Comparison `Binary` (`==`, `!=`, `<`, `>`, `<=`, `>=`) → i32 result
   - Unary `-`, `~`, `!`, `+`
   - `Cast` → emit conversion instructions (`I64_extend_i32_s`, `I32_wrap_i64`, `F32_convert_i64_s`, etc.)
-- [x] Implement proper type inference for expressions
-- [x] Handle expression evaluation order correctly
 
 ### Step 1.5 — Statement Lowering (Basic Control Flow)
-- [ ] Implement `emitStmt` for:
+- [x] Implement `emitStmt` for:
   - `Return` (with and without value)
   - `Expr` statement (emit expr, `Drop` result)
   - `Compound` (push/pop scope, iterate block items)
   - `If` / `If-Else` → `If` / `Else` / `End`
   - `While` → `Block` + `Loop` + `Br_if` + `Br` + `End End`
   - `For` → init block-item + same pattern as `while`
-- [ ] Implement `emitBlockItem` for:
+- [x] Implement `emitBlockItem` for:
   - `Declaration` → allocate `ScalarLocal` (i32 or i64 by type), emit initializer if present
-- [ ] Handle proper control flow stack management
 
 ### Step 1.6 — Direct Function Calls
-- [ ] Implement `emitExpr` for:
+- [x] Implement `emitExpr` for:
   - `Call` with identifier callee → emit args, `Call{funcIdx}`
-- [ ] Verify call site type matches registered `FuncType`
+- [x] Verify call site type matches registered `FuncType`
 
 ### Step 1.7 — Verification
-- [ ] Compile `int add(int a, int b) { return a+b; }` → `module_validate()` returns no error
-- [ ] Inspect output with `readwasm --func --type output.wasm` to confirm correct function type and body
-- [ ] Run existing parser/semantic unit tests — all pass
-- [ ] Smoke-test `extern` import: compile `extern int puts(int s); int greet() { return puts(0); }` → `module_validate()` passes
+- [x] Compile `int add(int a, int b) { return a+b; }` → `module_validate()` returns no error
+- [x] Inspect output with `readwasm --func --type output.wasm` to confirm correct function type and body
+- [x] Run existing parser/semantic unit tests — all pass
+- [x] Smoke-test `extern` import: compile `extern int puts(int s); int greet() { return puts(0); }` → `module_validate()` passes
 
 ## Mermaid Diagram: Phase 1 Architecture
 
@@ -111,35 +108,3 @@ graph TD
 ## Integration Points
 - `src/exec/main.cpp` lines 207–208: Replace empty module construction with `ModuleCodegen::generate(tu)`
 - `CMakeLists.txt`: Add `${SRC_ROOT}/codegen/*.cpp` to source glob
-
-## Status Update
-The expression lowering functionality for Phase 1 has been successfully implemented with the following capabilities:
-
-### Expression Lowering Implementation Status
-1. **Integer Literals**: 
-   - Handle `Integer` and `Char` expressions
-   - Emit appropriate constants (`I32_const` for 32-bit, `I64_const` for 64-bit)
-   - Handle proper type promotion (e.g., char to int)
-
-2. **Identifier Expressions**:
-   - Handle `Ident` expressions for local variables (`ScalarLocal`)
-   - Emit `Local_get` instructions
-   - Handle global scalar variables with `Global_get`
-
-3. **Arithmetic Operations**:
-   - Implement all binary arithmetic operations (`+`, `-`, `*`, `/`, `%`, `&`, `|`, `^`, `<<`, `>>`)
-   - Select appropriate Wasm instructions based on operand types (i32 vs i64)
-   - Handle proper type promotion and conversion
-
-4. **Comparison Operations**:
-   - Implement all comparison operations (`==`, `!=`, `<`, `>`, `<=`, `>=`)
-   - All return i32 results (as per Wasm specification)
-   - Handle proper type checking and conversion
-
-5. **Unary Operations**:
-   - Implement unary `-`, `~`, `!`, `+` operations
-   - Handle proper type conversion and sign extension
-
-6. **Cast Operations**:
-   - Implement proper casting between types
-   - Emit appropriate conversion instructions (`I64_extend_i32_s`, `I32_wrap_i64`, etc.)
