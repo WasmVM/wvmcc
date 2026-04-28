@@ -78,8 +78,9 @@ void test_symbol_table() {
     // Test scope management
     symbolTable.pushScope();
     symbolTable.popScope();
-    
-    // Test symbol definition and lookup
+
+    // Test symbol definition and lookup (requires an active scope)
+    symbolTable.pushScope();
     wvmcc::codegen::ScalarLocal localInfo;
     localInfo.type = nullptr;
     localInfo.isAddressTaken = false;

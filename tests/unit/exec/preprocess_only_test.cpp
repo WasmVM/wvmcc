@@ -8,7 +8,7 @@
 int main() {
     const std::string fname = "temp_preprocess_only.c";
     // Locate the built `wvmcc` executable in common relative locations
-    const std::vector<std::string> candidates = {"./wvmcc", "../wvmcc", "./tests/wvmcc", "../tests/wvmcc", "../../wvmcc"};
+    const std::vector<std::string> candidates = {"./wvmcc", "../wvmcc", "./tests/wvmcc", "../tests/wvmcc", "../../wvmcc", "../../../wvmcc"};
     std::string exePath;
     for (const auto &c : candidates) {
         if (std::FILE *f = std::fopen(c.c_str(), "r")) { std::fclose(f); exePath = c; break; }
