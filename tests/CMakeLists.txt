@@ -355,6 +355,29 @@ if(EXISTS ${PP_PRAGMA_ONCE_TEST})
     add_test(NAME pp-pragma-once COMMAND wvmcc-pp-pragma-once-test)
 endif()
 
+# Statement emission codegen tests
+set(CODEGEN_STMT_TEST ${TEST_ROOT}/unit/codegen/statement_emission_test.cpp)
+if(EXISTS ${CODEGEN_STMT_TEST})
+    set(CODEGEN_SRCS
+        ${SRC_ROOT}/codegen/FunctionCodegen.cpp
+        ${SRC_ROOT}/codegen/TypeMap.cpp
+        ${SRC_ROOT}/codegen/SymbolTable.cpp
+        ${SRC_ROOT}/codegen/LayoutEngine.cpp
+        ${SRC_ROOT}/codegen/AddressTakenAnalyzer.cpp
+        ${SRC_ROOT}/codegen/GlobalDataAllocator.cpp
+        ${SRC_ROOT}/codegen/TypeIndexCache.cpp
+        ${SRC_ROOT}/parser/ASTVisitor.cpp
+        ${SRC_ROOT}/parser/Semantic.cpp
+        ${SRC_ROOT}/parser/ConstExprEval.cpp
+        ${SRC_ROOT}/parser/ASTPrinter.cpp
+    )
+    add_executable(wvmcc-statement-emission-test ${CODEGEN_STMT_TEST} ${CODEGEN_SRCS})
+    target_include_directories(wvmcc-statement-emission-test PRIVATE ${WASMVM_INCLUDE_DIR})
+    target_link_directories(wvmcc-statement-emission-test PRIVATE ${WASMVM_LIBRARY_DIR})
+    target_link_libraries(wvmcc-statement-emission-test PRIVATE ${WASMVM_LIBRARY})
+    add_test(NAME statement-emission COMMAND wvmcc-statement-emission-test)
+endif()
+
 # Include guard optimization tests (deferred - complex pattern detection needed)
 # set(PP_INCLUDE_GUARD_TEST ${TEST_ROOT}/unit/pp_include_guard_test.cpp)
 # if(EXISTS ${PP_INCLUDE_GUARD_TEST})
