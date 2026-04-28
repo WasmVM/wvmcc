@@ -1,29 +1,33 @@
-# CMake file for codegen unit tests
+set(SRC ${PROJECT_SOURCE_DIR}/src)
 
-add_executable(basic_codegen_test
-    basic_codegen_test.cpp
+set(CODEGEN_SRCS
+    ${SRC}/codegen/FunctionCodegen.cpp
+    ${SRC}/codegen/TypeMap.cpp
+    ${SRC}/codegen/SymbolTable.cpp
+    ${SRC}/codegen/LayoutEngine.cpp
+    ${SRC}/codegen/AddressTakenAnalyzer.cpp
+    ${SRC}/codegen/GlobalDataAllocator.cpp
+    ${SRC}/codegen/TypeIndexCache.cpp
+    ${SRC}/parser/ASTVisitor.cpp
+    ${SRC}/parser/Semantic.cpp
+    ${SRC}/parser/ConstExprEval.cpp
+    ${SRC}/parser/ASTPrinter.cpp
 )
 
-add_executable(expression_emission_test
-    expression_emission_test.cpp
-)
+add_executable(wvmcc-basic-codegen-test basic_codegen_test.cpp ${CODEGEN_SRCS})
+target_include_directories(wvmcc-basic-codegen-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-basic-codegen-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-basic-codegen-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME basic-codegen COMMAND wvmcc-basic-codegen-test)
 
-add_executable(statement_emission_test
-    statement_emission_test.cpp
-)
+add_executable(wvmcc-expression-emission-test expression_emission_test.cpp ${CODEGEN_SRCS})
+target_include_directories(wvmcc-expression-emission-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-expression-emission-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-expression-emission-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME expression-emission COMMAND wvmcc-expression-emission-test)
 
-target_link_libraries(basic_codegen_test
-    wvmcc
-)
-
-target_link_libraries(expression_emission_test
-    wvmcc
-)
-
-target_link_libraries(statement_emission_test
-    wvmcc
-)
-
-add_test(NAME basic_codegen_test COMMAND basic_codegen_test)
-add_test(NAME expression_emission_test COMMAND expression_emission_test)
-add_test(NAME statement_emission_test COMMAND statement_emission_test)
+add_executable(wvmcc-statement-emission-test statement_emission_test.cpp ${CODEGEN_SRCS})
+target_include_directories(wvmcc-statement-emission-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-statement-emission-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-statement-emission-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME statement-emission COMMAND wvmcc-statement-emission-test)

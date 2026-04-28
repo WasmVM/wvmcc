@@ -1,10 +1,12 @@
 // Simple test file for codegen components - no GTest dependencies
 #include <iostream>
 #include <cassert>
+#include "../../../src/codegen/FunctionCodegen.hpp"
 #include "../../../src/codegen/TypeMap.hpp"
 #include "../../../src/codegen/SymbolTable.hpp"
 #include "../../../src/codegen/TypeIndexCache.hpp"
 #include "../../../src/codegen/GlobalDataAllocator.hpp"
+#include "../../../src/parser/AST.hpp"
 
 // Test that all codegen components can be instantiated and used
 void test_codegen_components() {
