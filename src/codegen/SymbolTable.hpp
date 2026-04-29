@@ -18,7 +18,7 @@ struct ScalarLocal {
 
 struct MemoryLocal {
     wvmcc::parser::TypeNodePtr type;
-    int frameOffset; // Offset from frame pointer
+    size_t frameOffset; // Offset from frame pointer
 };
 
 struct GlobalScalar {
