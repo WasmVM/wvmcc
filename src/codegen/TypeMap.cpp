@@ -255,35 +255,36 @@ bool TypeMap::isMemoryResident(const wvmcc::parser::TypeNodePtr& type) const {
 
 WasmVM::WasmInstr TypeMap::makeLoad(const wvmcc::parser::TypeNodePtr& type, uint8_t memidx) const {
     auto wasmType = toWasmType(type);
-    
+
+    // Alignment field is log2 of byte alignment per Wasm spec.
     switch (wasmType) {
         case WasmVM::ValueType::i32:
-            return WasmVM::Instr::I32_load{memidx, 0, 4};
+            return WasmVM::Instr::I32_load{memidx, 0, 2}; // log2(4) = 2
         case WasmVM::ValueType::i64:
-            return WasmVM::Instr::I64_load{memidx, 0, 8};
+            return WasmVM::Instr::I64_load{memidx, 0, 3}; // log2(8) = 3
         case WasmVM::ValueType::f32:
-            return WasmVM::Instr::F32_load{memidx, 0, 4};
+            return WasmVM::Instr::F32_load{memidx, 0, 2};
         case WasmVM::ValueType::f64:
-            return WasmVM::Instr::F64_load{memidx, 0, 8};
+            return WasmVM::Instr::F64_load{memidx, 0, 3};
         default:
-            return WasmVM::Instr::I32_load{memidx, 0, 4};
+            return WasmVM::Instr::I32_load{memidx, 0, 2};
     }
 }
 
 WasmVM::WasmInstr TypeMap::makeStore(const wvmcc::parser::TypeNodePtr& type, uint8_t memidx) const {
     auto wasmType = toWasmType(type);
-    
+
     switch (wasmType) {
         case WasmVM::ValueType::i32:
-            return WasmVM::Instr::I32_store{memidx, 0, 4};
+            return WasmVM::Instr::I32_store{memidx, 0, 2};
         case WasmVM::ValueType::i64:
-            return WasmVM::Instr::I64_store{memidx, 0, 8};
+            return WasmVM::Instr::I64_store{memidx, 0, 3};
         case WasmVM::ValueType::f32:
-            return WasmVM::Instr::F32_store{memidx, 0, 4};
+            return WasmVM::Instr::F32_store{memidx, 0, 2};
         case WasmVM::ValueType::f64:
-            return WasmVM::Instr::F64_store{memidx, 0, 8};
+            return WasmVM::Instr::F64_store{memidx, 0, 3};
         default:
-            return WasmVM::Instr::I32_store{memidx, 0, 4};
+            return WasmVM::Instr::I32_store{memidx, 0, 2};
     }
 }
 

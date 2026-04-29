@@ -16,9 +16,27 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     AddressTakenAnalyzer analyzer;
     addressTakenNames_ = analyzer.analyze(funcDef);
 
+    // Detect struct return: if so, param 0 is the hidden sret pointer.
+    for (const auto& ts : funcDef->specifiers.typeSpecifiers) {
+        if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+            && ts.su) {
+            auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                         ? wvmcc::parser::TypeNode::Kind::Struct
+                         : wvmcc::parser::TypeNode::Kind::Union;
+            node->su = ts.su;
+            returnTypeNode_ = node;
+            break;
+        }
+    }
+    bool isStructRet = returnTypeNode_ != nullptr;
+
     // Parameters occupy local indices 0..n-1 and are not in func.locals.
     symbolTable_.pushScope();
     int paramIdx = 0;
+    if (isStructRet) {
+        hiddenRetPtrLocal_ = paramIdx++; // param 0 is the hidden sret pointer
+    }
     for (const auto& param : funcDef->params) {
         if (param.declarator && !param.declarator->id.name.empty()) {
             ScalarLocal info;
@@ -473,14 +491,52 @@ void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr
 }
 
 void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
+    // Check if callee returns a struct (needs hidden sret buffer).
+    wvmcc::parser::TypeNodePtr calleeRetType;
+    int sretBufLocal = -1;
+
+    if (expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
+        const auto& calleeIdent = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
+        auto funcSym = symbolTable_.lookupFunction(calleeIdent.name);
+        if (funcSym && funcSym->type
+            && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union)) {
+            calleeRetType = funcSym->type;
+        }
+    }
+
+    if (calleeRetType) {
+        // Allocate a shadow-stack buffer for the returned struct.
+        if (framePointerLocal_ == -1) {
+            framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
+        }
+        size_t align = typeMap_.byteAlignment(calleeRetType);
+        size_t size  = typeMap_.byteSize(calleeRetType);
+        if (align > 1) frameSize_ = (frameSize_ + align - 1) & ~(align - 1);
+        size_t bufOff = frameSize_;
+        frameSize_ += size;
+
+        // Emit buffer address as hidden sret first argument.
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)bufOff});
+        emit(WasmVM::Instr::I64_add{});
+        sretBufLocal = allocRawLocal(WasmVM::ValueType::i64);
+        emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)sretBufLocal});
+    }
+
     for (const auto& arg : expr.args) {
         emitExpr(arg);
     }
+
     if (expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
         const auto& calleeExpr = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
         auto funcSym = symbolTable_.lookupFunction(calleeExpr.name);
         if (funcSym) {
             emit(WasmVM::Instr::Call{(WasmVM::index_t)funcSym->funcIndex});
+            // For struct return: leave the sret buffer address as the "value".
+            if (sretBufLocal != -1) {
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)sretBufLocal});
+            }
             return;
         }
     }
@@ -672,13 +728,58 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
 }
 
 void FunctionCodegen::emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt) {
-    if (stmt.value) {
+    if (hiddenRetPtrLocal_ != -1) {
+        // Struct return: copy value to hidden sret pointer, no Wasm result.
+        if (stmt.value) {
+            emitStructCopyToHiddenPtr(*stmt.value);
+        }
+    } else if (stmt.value) {
         emitExpr(*stmt.value);
     }
     if (framePointerLocal_ != -1 && frameSize_ > 0) {
         generateEpilogue();
     }
     emit(WasmVM::Instr::Return{});
+}
+
+void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr) {
+    if (!returnTypeNode_ || !returnTypeNode_->su) {
+        // No field info: emit unreachable placeholder.
+        emit(WasmVM::Instr::Unreachable{});
+        return;
+    }
+
+    // Get the source address (lvalue address on shadow stack).
+    emitExpr(srcExpr, true);
+    int srcAddrLocal = allocRawLocal(WasmVM::ValueType::i64);
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddrLocal});
+
+    // Field-by-field copy: load from mem[1] (shadow stack), store to mem[0] (via hidden ptr).
+    for (const auto& member : returnTypeNode_->su->members) {
+        for (const auto& sd : member.declarators) {
+            if (!sd.declarator || sd.declarator->id.name.empty()) continue;
+            const std::string& fieldName = sd.declarator->id.name;
+            auto fieldType = typeMap_.getFieldType(returnTypeNode_, fieldName);
+            if (!fieldType) continue;
+            size_t fieldOff = typeMap_.getFieldOffset(returnTypeNode_, fieldName);
+
+            // dst = hidden_ptr + fieldOff
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)hiddenRetPtrLocal_});
+            if (fieldOff > 0) {
+                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
+                emit(WasmVM::Instr::I64_add{});
+            }
+            // value = load field from src (shadow stack, mem[1])
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)srcAddrLocal});
+            if (fieldOff > 0) {
+                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
+                emit(WasmVM::Instr::I64_add{});
+            }
+            emit(typeMap_.makeLoad(fieldType, 1));
+            // store to hidden ptr (mem[0])
+            emit(typeMap_.makeStore(fieldType, 0));
+        }
+    }
 }
 
 void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {

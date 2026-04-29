@@ -67,21 +67,29 @@ std::string ModuleCodegen::getFuncName(const wvmcc::parser::DeclaratorPtr& decl)
 WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::FunctionDefPtr& funcDef) const {
     WasmVM::FuncType ft;
 
-    bool isVoid = false;
-    for (const auto& ts : funcDef->specifiers.typeSpecifiers) {
-        if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
-            && !ts.simple.empty()
-            && ts.simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void) {
-            isVoid = true;
-        }
-        break;
-    }
-    if (!isVoid) {
-        ft.results.push_back(WasmVM::ValueType::i32);
+    auto retType = semantic_.buildTypeFromDeclaration(funcDef->specifiers, nullptr);
+    bool isVoid = retType && retType->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                  && !retType->simple.empty()
+                  && retType->simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
+    bool isStructRet = retType && (retType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                                   || retType->kind == wvmcc::parser::TypeNode::Kind::Union);
+
+    if (isStructRet) {
+        ft.params.push_back(WasmVM::ValueType::i64); // hidden sret pointer
+    } else if (!isVoid) {
+        ft.results.push_back(retType ? typeMap_.toWasmType(retType) : WasmVM::ValueType::i32);
     }
 
-    for (size_t i = 0; i < funcDef->params.size(); ++i) {
-        ft.params.push_back(WasmVM::ValueType::i32);
+    for (const auto& param : funcDef->params) {
+        auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
+        if (!paramType) {
+            ft.params.push_back(WasmVM::ValueType::i32);
+        } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                   || paramType->kind == wvmcc::parser::TypeNode::Kind::Union) {
+            ft.params.push_back(WasmVM::ValueType::i64); // pointer to caller's struct copy
+        } else {
+            ft.params.push_back(typeMap_.toWasmType(paramType));
+        }
     }
 
     return ft;
@@ -90,22 +98,30 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::Functi
 WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDecl(const wvmcc::parser::DeclarationPtr& decl) const {
     WasmVM::FuncType ft;
 
-    bool isVoid = false;
-    for (const auto& ts : decl->specifiers.typeSpecifiers) {
-        if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
-            && !ts.simple.empty()
-            && ts.simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void) {
-            isVoid = true;
-        }
-        break;
-    }
-    if (!isVoid) {
-        ft.results.push_back(WasmVM::ValueType::i32);
+    auto retType = semantic_.buildTypeFromDeclaration(decl->specifiers, nullptr);
+    bool isVoid = retType && retType->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                  && !retType->simple.empty()
+                  && retType->simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
+    bool isStructRet = retType && (retType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                                   || retType->kind == wvmcc::parser::TypeNode::Kind::Union);
+
+    if (isStructRet) {
+        ft.params.push_back(WasmVM::ValueType::i64);
+    } else if (!isVoid) {
+        ft.results.push_back(retType ? typeMap_.toWasmType(retType) : WasmVM::ValueType::i32);
     }
 
     if (decl->declarator && decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) {
-        for (size_t i = 0; i < decl->declarator->function.params.size(); ++i) {
-            ft.params.push_back(WasmVM::ValueType::i32);
+        for (const auto& param : decl->declarator->function.params) {
+            auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
+            if (!paramType) {
+                ft.params.push_back(WasmVM::ValueType::i32);
+            } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                       || paramType->kind == wvmcc::parser::TypeNode::Kind::Union) {
+                ft.params.push_back(WasmVM::ValueType::i64);
+            } else {
+                ft.params.push_back(typeMap_.toWasmType(paramType));
+            }
         }
     }
 
@@ -146,7 +162,7 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
 
     std::string name = getFuncName(funcDef->declarator);
     FuncSymbol sym;
-    sym.type = nullptr;
+    sym.type = semantic_.buildTypeFromDeclaration(funcDef->specifiers, nullptr);
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = false;
     symbolTable_.defineFunction(name, sym);

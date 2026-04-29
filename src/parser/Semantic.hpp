@@ -48,6 +48,9 @@ private:
     void onExitFunction(const FunctionDefPtr &f) override;
     // internal (static) definitions tracking: name -> (span, definitive)
     std::unordered_map<std::string, std::pair<wvmcc::SourceSpan, bool>> internalDefs{};
+    // pointers to StructOrUnionSpecifier objects already recorded as definitions
+    // (prevents forward references via shared pointers from being flagged as duplicates)
+    std::unordered_set<const void*> seenSuDefs_{};
     // recorded tag definitions: tag name -> span (for struct/union and enum definitions)
     std::unordered_map<std::string, wvmcc::SourceSpan> structUnionTagDefs{};
     std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};

@@ -74,6 +74,11 @@ private:
     int framePointerLocal_ = -1;
     size_t frameSize_ = 0;
 
+    // ABI: hidden first parameter for struct-returning functions (-1 if not struct return)
+    int hiddenRetPtrLocal_ = -1;
+    // C return type when function returns a struct (used by emitReturnStmt)
+    wvmcc::parser::TypeNodePtr returnTypeNode_;
+
     std::unordered_set<std::string> addressTakenNames_;
 
     int allocRawLocal(WasmVM::ValueType valType);
@@ -81,6 +86,7 @@ private:
     void generateEpilogue();
 
     void emitStringLiteral(const wvmcc::parser::StringLiteral& expr);
+    void emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr);
 
     void emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt);
     void emitExprStmt(const wvmcc::parser::ExprStmt& stmt);

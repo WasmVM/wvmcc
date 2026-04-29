@@ -1421,30 +1421,34 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
 }
 
 // forward declare helper
-static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics);
+static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics, std::unordered_set<const void*> &seenSuDefs);
 
 void Semantic::checkExternal(const ExternalDeclPtr &e, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!e) return;
     if (std::holds_alternative<FunctionDefPtr>(e->decl)) {
         auto f = std::get<FunctionDefPtr>(e->decl);
         // record any struct/union/enum definitions appearing in function specifiers
-        processTypeSpecifiersForTags(f->specifiers, structUnionTagDefs, enumTagDefs, f->span, diagnostics);
+        processTypeSpecifiersForTags(f->specifiers, structUnionTagDefs, enumTagDefs, f->span, diagnostics, seenSuDefs_);
         checkFunction(f, diagnostics);
     } else if (std::holds_alternative<DeclarationPtr>(e->decl)) {
         auto d = std::get<DeclarationPtr>(e->decl);
         // inspect declaration specifiers for tag definitions
-        processTypeSpecifiersForTags(d->specifiers, structUnionTagDefs, enumTagDefs, d->span, diagnostics);
+        processTypeSpecifiersForTags(d->specifiers, structUnionTagDefs, enumTagDefs, d->span, diagnostics, seenSuDefs_);
         checkDeclaration(d, diagnostics);
     }
 }
 
 // Helper to inspect type-specifiers in a declaration or function specifiers to
 // record or detect duplicate struct/union and enum tag definitions.
-static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics) {
+static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics, std::unordered_set<const void*> &seenSuDefs) {
     for (const auto &ts : specs.typeSpecifiers) {
         if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
             if (ts.su && ts.su->name) {
                 if (ts.su->hasBody) {
+                    // Skip if this is a forward reference sharing the same su pointer as
+                    // a previously-registered definition (parser reuses the registered pointer).
+                    if (seenSuDefs.count(ts.su.get()) > 0) continue;
+                    seenSuDefs.insert(ts.su.get());
                     const std::string &tag = *ts.su->name;
                     auto it = structDefs.find(tag);
                     if (it != structDefs.end()) {
@@ -1469,7 +1473,7 @@ static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std
         } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Atomic) {
             // If this is `_Atomic(inner)`, recurse into inner specs to find any tag definitions
             if (ts.atomicInner) {
-                processTypeSpecifiersForTags(*ts.atomicInner, structDefs, enumDefs, span, diagnostics);
+                processTypeSpecifiersForTags(*ts.atomicInner, structDefs, enumDefs, span, diagnostics, seenSuDefs);
             }
         }
             // If this enum has a body, validate enumerators: duplicate names and constant inits
