@@ -890,6 +890,15 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     auto f = make_ast<FunctionDef>();
     f->specifiers = specs;
     f->declarator = decl;
+
+    // Extract params from the function-kind declarator in the chain
+    for (auto cur = decl; cur; cur = cur->inner.has_value() ? *cur->inner : nullptr) {
+        if (cur->kind == Declarator::Kind::Function) {
+            f->params = cur->function.params;
+            break;
+        }
+    }
+
     // initialize per-function parsing state
     labels_in_current_function.clear();
     gotos_in_current_function.clear();

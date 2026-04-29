@@ -540,6 +540,53 @@ static int test_acceptance_add_function() {
     return 0;
 }
 
+// return add(1, 2);  where add is FuncSymbol at index 0
+// →  [I32_const{1}, I32_const{2}, Call{0}, Return]
+static int test_return_call() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+
+    symbolTable.pushScope();
+    FuncSymbol sym; sym.type = nullptr; sym.funcIndex = 0; sym.isImport = false;
+    symbolTable.defineFunction("add", sym);
+
+    auto callee = make_ast<IdentifierExpr>();
+    callee->kind = Expr::Kind::Ident;
+    callee->name = "add";
+
+    auto arg1 = make_ast<IntegerLiteral>();
+    arg1->kind = Expr::Kind::Integer;
+    arg1->value = 1;
+
+    auto arg2 = make_ast<IntegerLiteral>();
+    arg2->kind = Expr::Kind::Integer;
+    arg2->value = 2;
+
+    auto callExpr = make_ast<CallExpr>();
+    callExpr->kind = Expr::Kind::Call;
+    callExpr->callee = callee;
+    callExpr->args.push_back(arg1);
+    callExpr->args.push_back(arg2);
+
+    codegen.emitStmt(makeReturnStmt(callExpr));
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    if (instrs.size() != 4) {
+        std::cerr << "test_return_call: expected 4 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    auto* c1 = std::get_if<WasmVM::Instr::I32_const>(&instrs[0]);
+    if (!c1 || c1->value != 1) { std::cerr << "test_return_call: [0] expected I32_const{1}\n"; return 2; }
+    auto* c2 = std::get_if<WasmVM::Instr::I32_const>(&instrs[1]);
+    if (!c2 || c2->value != 2) { std::cerr << "test_return_call: [1] expected I32_const{2}\n"; return 3; }
+    auto* call = std::get_if<WasmVM::Instr::Call>(&instrs[2]);
+    if (!call || call->index != 0) { std::cerr << "test_return_call: [2] expected Call{0}\n"; return 4; }
+    if (!std::get_if<WasmVM::Instr::Return>(&instrs[3])) { std::cerr << "test_return_call: [3] expected Return\n"; return 5; }
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Main
 // ---------------------------------------------------------------------------
@@ -568,6 +615,7 @@ int main() {
     RUN(test_local_decl_then_read);
     RUN(test_for_with_decl_init);
     RUN(test_acceptance_add_function);
+    RUN(test_return_call);
     std::cout << "All statement emission tests passed!\n";
     return 0;
 }

@@ -27,8 +27,12 @@ static int run_case(const std::string &src, const std::string &expect_substr) {
     bool sem_ok = sem.run(parser.getDiagnosticsRef()); (void)sem_ok;
     const auto &diags = parser.getDiagnostics();
     bool found = false;
-    for (const auto &d : diags) {
-        if (d.message.find(expect_substr) != std::string::npos) { found = true; break; }
+    if (expect_substr.empty()) {
+        found = diags.empty(); // empty expected string means: no diagnostics expected
+    } else {
+        for (const auto &d : diags) {
+            if (d.message.find(expect_substr) != std::string::npos) { found = true; break; }
+        }
     }
     if (!found) {
         std::cerr << "--- diagnostics for case (source):\n" << src << "\n---\n";
