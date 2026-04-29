@@ -2,6 +2,7 @@
 
 #include "TypeMap.hpp"
 #include "SymbolTable.hpp"
+#include "GlobalDataAllocator.hpp"
 #include "AddressTakenAnalyzer.hpp"
 #include "../parser/AST.hpp"
 #include "../parser/Semantic.hpp"
@@ -14,13 +15,14 @@ namespace wvmcc::codegen {
 
 class FunctionCodegen {
 public:
-    FunctionCodegen(const TypeMap& typeMap, SymbolTable& symbolTable);
+    FunctionCodegen(const TypeMap& typeMap, SymbolTable& symbolTable,
+                    GlobalDataAllocator* dataAllocator = nullptr);
 
     // Generate code for a function definition
     WasmVM::WasmFunc generate(const wvmcc::parser::FunctionDefPtr& funcDef,
                               const wvmcc::parser::Semantic& semantic);
 
-    // Allocate a local variable (returns Wasm local index)
+    // Allocate a local variable (returns Wasm local index or shadow-stack frame offset)
     int allocLocal(const wvmcc::parser::TypeNodePtr& type, bool isAddressTaken = false);
 
     const std::unordered_set<std::string>& getAddressTakenNames() const {
@@ -37,25 +39,32 @@ public:
 
     void emit(const WasmVM::WasmInstr& instr);
 
+    // needLValue=true: leave the address (i64) on the stack rather than the value.
     void emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLValue = false);
 
     void emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr);
     void emitCharLiteral(const wvmcc::parser::CharLiteral& expr);
-    void emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr);
+    void emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue = false);
     void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
-    void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr);
+    void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue = false);
     void emitCastExpr(const wvmcc::parser::CastExpr& expr);
     void emitCallExpr(const wvmcc::parser::CallExpr& expr);
-    void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr);
-    void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr);
+    void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue = false);
+    void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, bool needLValue = false);
     void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);
 
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);
     void emitBlockItem(const wvmcc::parser::BlockItemPtr& item);
 
+    // For testing: force the frame-pointer local to a specific index.
+    // In production, generate() sets this automatically when address-taken vars exist.
+    void forceFramePointerLocal(int idx) { framePointerLocal_ = idx; }
+    int getFramePointerLocal() const { return framePointerLocal_; }
+
 private:
     const TypeMap& typeMap_;
     SymbolTable& symbolTable_;
+    GlobalDataAllocator* dataAllocator_;
 
     std::vector<WasmVM::WasmInstr> instrBuffer_;
     std::vector<WasmVM::ValueType> localTypes_;
@@ -81,6 +90,9 @@ private:
     void emitForStmt(const wvmcc::parser::ForStmt& stmt);
 
     WasmVM::ValueType getExprType(const wvmcc::parser::ExprPtr& expr) const;
+
+    // Return the C TypeNode for an expression (best-effort; may return nullptr).
+    wvmcc::parser::TypeNodePtr getExprTypeNode(const wvmcc::parser::ExprPtr& expr) const;
 };
 
 } // namespace wvmcc::codegen

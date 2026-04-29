@@ -287,6 +287,45 @@ WasmVM::WasmInstr TypeMap::makeStore(const wvmcc::parser::TypeNodePtr& type, uin
     }
 }
 
+size_t TypeMap::getFieldOffset(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const {
+    if (!type || !type->su) return 0;
+    auto layout = layoutEngine_.computeLayout(*type->su);
+    for (const auto& [name, offset] : layout.fieldOffsets) {
+        if (name == fieldName) return offset;
+    }
+    return 0;
+}
+
+wvmcc::parser::TypeNodePtr TypeMap::getFieldType(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const {
+    if (!type || !type->su) return nullptr;
+    for (const auto& member : type->su->members) {
+        for (const auto& sd : member.declarators) {
+            if (!sd.declarator) continue;
+            std::string name = sd.declarator->id.name;
+            if (name != fieldName) continue;
+            for (const auto& ts : member.specifiers.typeSpecifiers) {
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                    && !ts.simple.empty()) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                    node->simple = ts.simple;
+                    return node;
+                }
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                    && ts.su) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                                 ? wvmcc::parser::TypeNode::Kind::Struct
+                                 : wvmcc::parser::TypeNode::Kind::Union;
+                    node->su = ts.su;
+                    return node;
+                }
+            }
+        }
+    }
+    return nullptr;
+}
+
 WasmVM::ValueType TypeMap::getBaseType(const wvmcc::parser::TypeNodePtr& type) const {
     if (!type) {
         return WasmVM::ValueType::i32;

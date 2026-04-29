@@ -25,6 +25,12 @@ public:
     
     // Create a store instruction for a type with specified memory index
     WasmVM::WasmInstr makeStore(const wvmcc::parser::TypeNodePtr& type, uint8_t memidx) const;
+
+    // Get the byte offset of a named field in a struct/union type
+    size_t getFieldOffset(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const;
+
+    // Get the TypeNode of a named field in a struct/union type (nullptr if not found)
+    wvmcc::parser::TypeNodePtr getFieldType(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const;
     
 private:
     // Helper to get the base type for a node

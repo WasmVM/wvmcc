@@ -193,7 +193,7 @@ void ModuleCodegen::secondPass(const wvmcc::parser::TranslationUnitPtr& tu) {
 void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef) {
     if (!funcDef) return;
 
-    FunctionCodegen funcCodegen(typeMap_, symbolTable_);
+    FunctionCodegen funcCodegen(typeMap_, symbolTable_, &dataAllocator_);
     auto wasmFunc = funcCodegen.generate(funcDef, semantic_);
 
     auto ft = buildFuncTypeFromDef(funcDef);

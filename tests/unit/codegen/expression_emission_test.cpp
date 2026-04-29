@@ -2,6 +2,7 @@
 #include "../../../src/codegen/FunctionCodegen.hpp"
 #include "../../../src/codegen/TypeMap.hpp"
 #include "../../../src/codegen/SymbolTable.hpp"
+#include "../../../src/codegen/GlobalDataAllocator.hpp"
 #include "../../../src/parser/AST.hpp"
 #include "instr_check.hpp"
 
@@ -282,6 +283,365 @@ static int test_call_import() {
     return 0;
 }
 
+// Helper: build an int TypeNode
+static wvmcc::parser::TypeNodePtr makeIntType() {
+    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+    node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+    node->simple = {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int};
+    return node;
+}
+
+// Helper: build a pointer-to-int TypeNode
+static wvmcc::parser::TypeNodePtr makeIntPtrType() {
+    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+    node->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+    node->pointee = makeIntType();
+    return node;
+}
+
+// MemoryLocal identifier read (need_value):
+//   forceFramePointerLocal(fp=0); define x at frameOffset=8
+//   emitExpr(x) →
+//     Local_get{0}, I64_const{8}, I64_add, I32_load{mem[1],0,4}
+static int test_memory_local_read() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+    codegen.forceFramePointerLocal(0);  // fp is local 0
+
+    symbolTable.pushScope();
+    MemoryLocal ml;
+    ml.type = makeIntType();
+    ml.frameOffset = 8;
+    symbolTable.define("x", ml);
+
+    auto xExpr = make_ast<IdentifierExpr>();
+    xExpr->kind = Expr::Kind::Ident;
+    xExpr->name = "x";
+
+    codegen.emitExpr(xExpr, false);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    // Expect: Local_get{0}, I64_const{8}, I64_add, I32_load{1,0,4}
+    if (instrs.size() != 4) {
+        std::cerr << "test_memory_local_read: expected 4 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    auto lg = asOneIdx(instrs[0], WasmVM::Opcode::Local_get);
+    if (!lg || lg->index != 0) { std::cerr << "test_memory_local_read: [0] expected Local_get{0}\n"; return 2; }
+    auto ic = asI64Const(instrs[1]);
+    if (!ic || ic->value != 8) { std::cerr << "test_memory_local_read: [1] expected I64_const{8}\n"; return 3; }
+    if (!is(instrs[2], WasmVM::Opcode::I64_add)) { std::cerr << "test_memory_local_read: [2] expected I64_add\n"; return 4; }
+    if (!is(instrs[3], WasmVM::Opcode::I32_load)) { std::cerr << "test_memory_local_read: [3] expected I32_load\n"; return 5; }
+    return 0;
+}
+
+// MemoryLocal identifier lvalue (need_lvalue):
+//   emitExpr(x, needLValue=true) → Local_get{0}, I64_const{8}, I64_add (no load)
+static int test_memory_local_lvalue() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+    codegen.forceFramePointerLocal(0);
+
+    symbolTable.pushScope();
+    MemoryLocal ml;
+    ml.type = makeIntType();
+    ml.frameOffset = 8;
+    symbolTable.define("x", ml);
+
+    auto xExpr = make_ast<IdentifierExpr>();
+    xExpr->kind = Expr::Kind::Ident;
+    xExpr->name = "x";
+
+    codegen.emitExpr(xExpr, true);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    if (instrs.size() != 3) {
+        std::cerr << "test_memory_local_lvalue: expected 3 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    auto lg = asOneIdx(instrs[0], WasmVM::Opcode::Local_get);
+    if (!lg || lg->index != 0) { std::cerr << "test_memory_local_lvalue: [0] expected Local_get{0}\n"; return 2; }
+    auto ic = asI64Const(instrs[1]);
+    if (!ic || ic->value != 8) { std::cerr << "test_memory_local_lvalue: [1] expected I64_const{8}\n"; return 3; }
+    if (!is(instrs[2], WasmVM::Opcode::I64_add)) { std::cerr << "test_memory_local_lvalue: [2] expected I64_add\n"; return 4; }
+    return 0;
+}
+
+// &x where x is MemoryLocal → same as lvalue: Local_get{fp}, I64_const{off}, I64_add
+static int test_addressof_memory_local() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+    codegen.forceFramePointerLocal(0);
+
+    symbolTable.pushScope();
+    MemoryLocal ml;
+    ml.type = makeIntType();
+    ml.frameOffset = 0;
+    symbolTable.define("x", ml);
+
+    auto xExpr = make_ast<IdentifierExpr>();
+    xExpr->kind = Expr::Kind::Ident;
+    xExpr->name = "x";
+
+    auto addrOf = make_ast<UnaryExpr>();
+    addrOf->kind = Expr::Kind::Unary;
+    addrOf->op = "&";
+    addrOf->rhs = xExpr;
+
+    codegen.emitExpr(addrOf, false);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    // &x = emitExpr(x, needLValue=true) → Local_get{0}, I64_const{0}, I64_add
+    if (instrs.size() != 3) {
+        std::cerr << "test_addressof_memory_local: expected 3 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    if (!is(instrs[2], WasmVM::Opcode::I64_add)) { std::cerr << "test_addressof_memory_local: [2] expected I64_add\n"; return 2; }
+    return 0;
+}
+
+// *p where p is ScalarLocal (int* type), needLValue=false:
+//   Local_get{p}, I32_load{mem[0], 0, 4}
+static int test_deref_pointer() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+
+    symbolTable.pushScope();
+    ScalarLocal sl;
+    sl.type = makeIntPtrType();
+    sl.isAddressTaken = false;
+    sl.localIndex = 2;
+    symbolTable.define("p", sl);
+
+    auto pExpr = make_ast<IdentifierExpr>();
+    pExpr->kind = Expr::Kind::Ident;
+    pExpr->name = "p";
+
+    auto deref = make_ast<UnaryExpr>();
+    deref->kind = Expr::Kind::Unary;
+    deref->op = "*";
+    deref->rhs = pExpr;
+
+    codegen.emitExpr(deref, false);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    // Local_get{2}, I32_load{0, 0, 4}
+    if (instrs.size() != 2) {
+        std::cerr << "test_deref_pointer: expected 2 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    auto lg = asOneIdx(instrs[0], WasmVM::Opcode::Local_get);
+    if (!lg || lg->index != 2) { std::cerr << "test_deref_pointer: [0] expected Local_get{2}\n"; return 2; }
+    if (!is(instrs[1], WasmVM::Opcode::I32_load)) { std::cerr << "test_deref_pointer: [1] expected I32_load\n"; return 3; }
+    return 0;
+}
+
+// Pointer arithmetic: p + 1 where p is int* ScalarLocal
+// → Local_get{p}, I32_const{1}, I64_extend_i32_s, I64_const{4}, I64_mul, I64_add
+static int test_pointer_arithmetic() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+
+    symbolTable.pushScope();
+    ScalarLocal sl;
+    sl.type = makeIntPtrType();
+    sl.isAddressTaken = false;
+    sl.localIndex = 0;
+    symbolTable.define("p", sl);
+
+    auto pExpr = make_ast<IdentifierExpr>();
+    pExpr->kind = Expr::Kind::Ident;
+    pExpr->name = "p";
+
+    auto one = make_ast<IntegerLiteral>();
+    one->kind = Expr::Kind::Integer;
+    one->value = 1;
+
+    auto addExpr = make_ast<BinaryExpr>();
+    addExpr->kind = Expr::Kind::Binary;
+    addExpr->op = "+";
+    addExpr->lhs = pExpr;
+    addExpr->rhs = one;
+
+    codegen.emitExpr(addExpr, false);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    // Local_get{0}, I32_const{1}, I64_extend_i32_s, I64_const{4}, I64_mul, I64_add
+    if (instrs.size() != 6) {
+        std::cerr << "test_pointer_arithmetic: expected 6 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    if (!is(instrs[0], WasmVM::Opcode::Local_get))       { std::cerr << "test_pointer_arithmetic: [0] expected Local_get\n"; return 2; }
+    if (!is(instrs[1], WasmVM::Opcode::I32_const))       { std::cerr << "test_pointer_arithmetic: [1] expected I32_const\n"; return 3; }
+    if (!is(instrs[2], WasmVM::Opcode::I64_extend_i32_s)){ std::cerr << "test_pointer_arithmetic: [2] expected I64_extend_i32_s\n"; return 4; }
+    auto scale = asI64Const(instrs[3]);
+    if (!scale || scale->value != 4) { std::cerr << "test_pointer_arithmetic: [3] expected I64_const{4}\n"; return 5; }
+    if (!is(instrs[4], WasmVM::Opcode::I64_mul))  { std::cerr << "test_pointer_arithmetic: [4] expected I64_mul\n"; return 6; }
+    if (!is(instrs[5], WasmVM::Opcode::I64_add))  { std::cerr << "test_pointer_arithmetic: [5] expected I64_add\n"; return 7; }
+    return 0;
+}
+
+// ScalarLocal assignment: x = 5 → I32_const{5}, Local_tee{x_local}
+static int test_assignment_scalar_local() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+
+    symbolTable.pushScope();
+    ScalarLocal sl;
+    sl.type = makeIntType();
+    sl.isAddressTaken = false;
+    sl.localIndex = 3;
+    symbolTable.define("x", sl);
+
+    auto xExpr = make_ast<IdentifierExpr>();
+    xExpr->kind = Expr::Kind::Ident;
+    xExpr->name = "x";
+
+    auto five = make_ast<IntegerLiteral>();
+    five->kind = Expr::Kind::Integer;
+    five->value = 5;
+
+    auto assign = make_ast<BinaryExpr>();
+    assign->kind = Expr::Kind::Binary;
+    assign->op = "=";
+    assign->lhs = xExpr;
+    assign->rhs = five;
+
+    codegen.emitExpr(assign, false);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    // I32_const{5}, Local_tee{3}
+    if (instrs.size() != 2) {
+        std::cerr << "test_assignment_scalar_local: expected 2 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    auto c = asI32Const(instrs[0]);
+    if (!c || c->value != 5) { std::cerr << "test_assignment_scalar_local: [0] expected I32_const{5}\n"; return 2; }
+    auto tee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
+    if (!tee || tee->index != 3) { std::cerr << "test_assignment_scalar_local: [1] expected Local_tee{3}\n"; return 3; }
+    return 0;
+}
+
+// String literal with allocator: emits I64_const{addr}
+static int test_string_literal() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    wvmcc::codegen::GlobalDataAllocator alloc;
+    FunctionCodegen codegen(typeMap, symbolTable, &alloc);
+
+    auto strExpr = make_ast<StringLiteral>();
+    strExpr->kind = Expr::Kind::String;
+    strExpr->value = "hello";
+
+    codegen.emitExpr(strExpr, false);
+
+    const auto& instrs = codegen.getInstructions();
+    if (instrs.size() != 1) {
+        std::cerr << "test_string_literal: expected 1 instr, got " << instrs.size() << "\n";
+        return 1;
+    }
+    auto c = asI64Const(instrs[0]);
+    if (!c) { std::cerr << "test_string_literal: expected I64_const\n"; return 2; }
+    if (c->value == 0) { std::cerr << "test_string_literal: address should be non-zero\n"; return 3; }
+    return 0;
+}
+
+// Member access s.b where s is MemoryLocal struct with field b at offset 4
+// (need_value=false): fp+0 address, I64_const{4}, I64_add, I32_load{mem[1],0,4}
+static int test_member_access_dot() {
+    TypeMap typeMap;
+    SymbolTable symbolTable;
+    FunctionCodegen codegen(typeMap, symbolTable);
+    codegen.forceFramePointerLocal(0);
+
+    // Build struct type: struct S { int a; int b; }
+    auto su = std::make_shared<wvmcc::parser::StructOrUnionSpecifier>();
+    su->kind = wvmcc::parser::StructOrUnionSpecifier::Kind::Struct;
+    su->hasBody = true;
+    su->name = "S";
+
+    // field a: int
+    {
+        wvmcc::parser::StructMember m;
+        wvmcc::parser::DeclarationSpecifiers::TypeSpecifier ts;
+        ts.kind = wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+        ts.simple = {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int};
+        m.specifiers.typeSpecifiers.push_back(ts);
+        wvmcc::parser::StructDeclarator sd;
+        sd.declarator = wvmcc::parser::make_ast<wvmcc::parser::Declarator>();
+        sd.declarator->kind = wvmcc::parser::Declarator::Kind::Identifier;
+        sd.declarator->id.name = "a";
+        m.declarators.push_back(sd);
+        su->members.push_back(m);
+    }
+    // field b: int
+    {
+        wvmcc::parser::StructMember m;
+        wvmcc::parser::DeclarationSpecifiers::TypeSpecifier ts;
+        ts.kind = wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+        ts.simple = {wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int};
+        m.specifiers.typeSpecifiers.push_back(ts);
+        wvmcc::parser::StructDeclarator sd;
+        sd.declarator = wvmcc::parser::make_ast<wvmcc::parser::Declarator>();
+        sd.declarator->kind = wvmcc::parser::Declarator::Kind::Identifier;
+        sd.declarator->id.name = "b";
+        m.declarators.push_back(sd);
+        su->members.push_back(m);
+    }
+
+    auto structType = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+    structType->kind = wvmcc::parser::TypeNode::Kind::Struct;
+    structType->su = su;
+
+    symbolTable.pushScope();
+    MemoryLocal ml;
+    ml.type = structType;
+    ml.frameOffset = 0;
+    symbolTable.define("s", ml);
+
+    auto sExpr = make_ast<IdentifierExpr>();
+    sExpr->kind = Expr::Kind::Ident;
+    sExpr->name = "s";
+
+    auto memberExpr = make_ast<wvmcc::parser::MemberExpr>();
+    memberExpr->kind = Expr::Kind::Member;
+    memberExpr->base = sExpr;
+    memberExpr->member = "b";
+    memberExpr->isArrow = false;
+
+    codegen.emitExpr(memberExpr, false);
+    symbolTable.popScope();
+
+    const auto& instrs = codegen.getInstructions();
+    // Expect: Local_get{0}, I64_const{0}, I64_add (base address),
+    //         I64_const{4}, I64_add (field offset),
+    //         I32_load{1,0,4}
+    if (instrs.size() != 6) {
+        std::cerr << "test_member_access_dot: expected 6 instrs, got " << instrs.size() << "\n";
+        return 1;
+    }
+    if (!is(instrs[0], WasmVM::Opcode::Local_get)) { std::cerr << "test_member_access_dot: [0] expected Local_get\n"; return 2; }
+    // instrs[1] = I64_const{0}, instrs[2] = I64_add  (base lvalue)
+    if (!is(instrs[2], WasmVM::Opcode::I64_add)) { std::cerr << "test_member_access_dot: [2] expected I64_add\n"; return 3; }
+    auto fieldOff = asI64Const(instrs[3]);
+    if (!fieldOff || fieldOff->value != 4) { std::cerr << "test_member_access_dot: [3] expected I64_const{4}\n"; return 4; }
+    if (!is(instrs[4], WasmVM::Opcode::I64_add)) { std::cerr << "test_member_access_dot: [4] expected I64_add\n"; return 5; }
+    if (!is(instrs[5], WasmVM::Opcode::I32_load)) { std::cerr << "test_member_access_dot: [5] expected I32_load\n"; return 6; }
+    return 0;
+}
+
 int main() {
     int result;
 
@@ -308,6 +668,30 @@ int main() {
 
     result = test_call_import();
     if (result != 0) { std::cerr << "test_call_import failed with code " << result << "\n"; return result; }
+
+    result = test_memory_local_read();
+    if (result != 0) { std::cerr << "test_memory_local_read failed with code " << result << "\n"; return result; }
+
+    result = test_memory_local_lvalue();
+    if (result != 0) { std::cerr << "test_memory_local_lvalue failed with code " << result << "\n"; return result; }
+
+    result = test_addressof_memory_local();
+    if (result != 0) { std::cerr << "test_addressof_memory_local failed with code " << result << "\n"; return result; }
+
+    result = test_deref_pointer();
+    if (result != 0) { std::cerr << "test_deref_pointer failed with code " << result << "\n"; return result; }
+
+    result = test_pointer_arithmetic();
+    if (result != 0) { std::cerr << "test_pointer_arithmetic failed with code " << result << "\n"; return result; }
+
+    result = test_assignment_scalar_local();
+    if (result != 0) { std::cerr << "test_assignment_scalar_local failed with code " << result << "\n"; return result; }
+
+    result = test_string_literal();
+    if (result != 0) { std::cerr << "test_string_literal failed with code " << result << "\n"; return result; }
+
+    result = test_member_access_dot();
+    if (result != 0) { std::cerr << "test_member_access_dot failed with code " << result << "\n"; return result; }
 
     std::cout << "All expression emission tests passed!" << std::endl;
     return 0;

@@ -31,8 +31,13 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::BlockItemPtr& item, std::un
     std::visit([&](const auto& variantItem) {
         using T = std::decay_t<decltype(variantItem)>;
         if constexpr (std::is_same_v<T, wvmcc::parser::DeclarationPtr>) {
-            // For now, we don't need to do anything special with declarations in this context
-            // The address-taking analysis is focused on expressions where & operator is used
+            // Walk the initializer expression so that &var inside it is detected
+            if (variantItem && variantItem->initializer) {
+                const auto& init = *variantItem->initializer;
+                if (init && init->kind == wvmcc::parser::Initializer::Kind::Expr && init->expr) {
+                    walk(init->expr, addressTakenNames);
+                }
+            }
         } else if constexpr (std::is_same_v<T, wvmcc::parser::StmtPtr>) {
             walk(variantItem, addressTakenNames);
         } else {
