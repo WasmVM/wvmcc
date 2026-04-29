@@ -30,18 +30,49 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     }
     localIndexCounter_ = paramIdx; // locals start after params
 
+    // Allocate frame-pointer local early so its index is fixed; frameSize_ is
+    // computed lazily as address-taken variables are encountered.
+    if (!addressTakenNames_.empty()) {
+        framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
+    }
+
     for (const auto& item : funcDef->body) {
         emitBlockItem(item);
     }
 
     symbolTable_.popScope();
 
+    // Wrap body with shadow-stack prologue/epilogue when needed.
+    if (framePointerLocal_ != -1 && frameSize_ > 0) {
+        auto prologue = generatePrologue();
+        // Append epilogue at end for void/fallthrough paths.
+        generateEpilogue();
+        prologue.insert(prologue.end(), instrBuffer_.begin(), instrBuffer_.end());
+        instrBuffer_ = std::move(prologue);
+    }
+
     func.locals = localTypes_;
     func.body = instrBuffer_;
     return func;
 }
 
+int FunctionCodegen::allocRawLocal(WasmVM::ValueType valType) {
+    int idx = localIndexCounter_++;
+    localTypes_.push_back(valType);
+    return idx;
+}
+
 int FunctionCodegen::allocLocal(const wvmcc::parser::TypeNodePtr& type, bool isAddressTaken) {
+    if (isAddressTaken) {
+        size_t align = type ? typeMap_.byteAlignment(type) : 1;
+        size_t size  = type ? typeMap_.byteSize(type)      : 4;
+        if (align > 1) {
+            frameSize_ = (frameSize_ + align - 1) & ~(align - 1);
+        }
+        int offset = (int)frameSize_;
+        frameSize_ += size;
+        return offset;
+    }
     int idx = localIndexCounter_++;
     if (type) {
         localTypes_.push_back(typeMap_.toWasmType(type));
@@ -53,6 +84,32 @@ int FunctionCodegen::allocLocal(const wvmcc::parser::TypeNodePtr& type, bool isA
 
 void FunctionCodegen::emit(const WasmVM::WasmInstr& instr) {
     instrBuffer_.push_back(instr);
+}
+
+std::vector<WasmVM::WasmInstr> FunctionCodegen::generatePrologue() {
+    // shadow-stack frame setup:
+    //   global.get __stack_pointer   ; push current SP
+    //   local.tee  fp_local          ; save as frame pointer, keep on stack
+    //   i64.const  frameSize         ; push frame size
+    //   i64.sub                      ; new SP = old SP - frameSize
+    //   global.set __stack_pointer   ; update SP
+    constexpr WasmVM::index_t kStackPtrIdx = 0;
+    std::vector<WasmVM::WasmInstr> p;
+    p.push_back(WasmVM::Instr::Global_get{kStackPtrIdx});
+    p.push_back(WasmVM::Instr::Local_tee{(WasmVM::index_t)framePointerLocal_});
+    p.push_back(WasmVM::Instr::I64_const{(WasmVM::i64_t)frameSize_});
+    p.push_back(WasmVM::Instr::I64_sub{});
+    p.push_back(WasmVM::Instr::Global_set{kStackPtrIdx});
+    return p;
+}
+
+void FunctionCodegen::generateEpilogue() {
+    // shadow-stack frame teardown:
+    //   local.get  fp_local          ; restore saved SP
+    //   global.set __stack_pointer   ; update SP
+    constexpr WasmVM::index_t kStackPtrIdx = 0;
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+    emit(WasmVM::Instr::Global_set{kStackPtrIdx});
 }
 
 void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLValue) {
@@ -377,20 +434,28 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
             }
 
             bool isAddrTaken = addressTakenNames_.count(name) > 0;
-            int localIdx = allocLocal(typeNode, isAddrTaken);
+            int slotOrOffset = allocLocal(typeNode, isAddrTaken);
 
-            ScalarLocal info;
-            info.type = typeNode;
-            info.isAddressTaken = isAddrTaken;
-            info.localIndex = localIdx;
-            symbolTable_.define(name, info);
+            if (isAddrTaken) {
+                MemoryLocal info;
+                info.type = typeNode;
+                info.frameOffset = (size_t)slotOrOffset;
+                symbolTable_.define(name, info);
+                // Initializer for MemoryLocal handled in issue #11 (memory store emission)
+            } else {
+                ScalarLocal info;
+                info.type = typeNode;
+                info.isAddressTaken = false;
+                info.localIndex = slotOrOffset;
+                symbolTable_.define(name, info);
 
-            // Emit initializer if it is a simple expression
-            if (v->initializer
-                && (*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
-                && (*v->initializer)->expr) {
-                emitExpr((*v->initializer)->expr);
-                emit(WasmVM::Instr::Local_set{(WasmVM::index_t)localIdx});
+                // Emit initializer if it is a simple expression
+                if (v->initializer
+                    && (*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
+                    && (*v->initializer)->expr) {
+                    emitExpr((*v->initializer)->expr);
+                    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)slotOrOffset});
+                }
             }
         } else if constexpr (std::is_same_v<T, wvmcc::parser::StmtPtr>) {
             emitStmt(v);
@@ -402,6 +467,9 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
 void FunctionCodegen::emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt) {
     if (stmt.value) {
         emitExpr(*stmt.value);
+    }
+    if (framePointerLocal_ != -1 && frameSize_ > 0) {
+        generateEpilogue();
     }
     emit(WasmVM::Instr::Return{});
 }

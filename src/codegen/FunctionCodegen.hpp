@@ -63,8 +63,13 @@ private:
     int localIndexCounter_ = 0;
     std::stack<int> controlFlowStack_;
     int framePointerLocal_ = -1;
+    size_t frameSize_ = 0;
 
     std::unordered_set<std::string> addressTakenNames_;
+
+    int allocRawLocal(WasmVM::ValueType valType);
+    std::vector<WasmVM::WasmInstr> generatePrologue();
+    void generateEpilogue();
 
     void emitStringLiteral(const wvmcc::parser::StringLiteral& expr);
 

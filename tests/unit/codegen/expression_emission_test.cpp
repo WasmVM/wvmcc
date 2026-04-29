@@ -3,9 +3,11 @@
 #include "../../../src/codegen/TypeMap.hpp"
 #include "../../../src/codegen/SymbolTable.hpp"
 #include "../../../src/parser/AST.hpp"
+#include "instr_check.hpp"
 
 using namespace wvmcc::codegen;
 using namespace wvmcc::parser;
+using namespace instrcheck;
 
 static int test_emit_integer_literal_i32() {
     TypeMap typeMap;
@@ -24,13 +26,13 @@ static int test_emit_integer_literal_i32() {
         std::cerr << "test_emit_integer_literal_i32: expected 1 instruction, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* instr = std::get_if<WasmVM::Instr::I32_const>(&instrs[0]);
-    if (!instr) {
+    auto c = asI32Const(instrs[0]);
+    if (!c) {
         std::cerr << "test_emit_integer_literal_i32: expected I32_const\n";
         return 2;
     }
-    if (instr->value != 42) {
-        std::cerr << "test_emit_integer_literal_i32: expected value 42, got " << instr->value << "\n";
+    if (c->value != 42) {
+        std::cerr << "test_emit_integer_literal_i32: expected value 42, got " << c->value << "\n";
         return 3;
     }
     return 0;
@@ -53,12 +55,12 @@ static int test_emit_integer_literal_i64() {
         std::cerr << "test_emit_integer_literal_i64: expected 1 instruction, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* instr = std::get_if<WasmVM::Instr::I64_const>(&instrs[0]);
-    if (!instr) {
+    auto c = asI64Const(instrs[0]);
+    if (!c) {
         std::cerr << "test_emit_integer_literal_i64: expected I64_const\n";
         return 2;
     }
-    if (instr->value != 1LL << 33) {
+    if (c->value != 1LL << 33) {
         std::cerr << "test_emit_integer_literal_i64: unexpected value\n";
         return 3;
     }
@@ -81,13 +83,13 @@ static int test_emit_char_literal() {
         std::cerr << "test_emit_char_literal: expected 1 instruction, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* instr = std::get_if<WasmVM::Instr::I32_const>(&instrs[0]);
-    if (!instr) {
+    auto c = asI32Const(instrs[0]);
+    if (!c) {
         std::cerr << "test_emit_char_literal: expected I32_const\n";
         return 2;
     }
-    if (instr->value != (int)'A') {
-        std::cerr << "test_emit_char_literal: expected value " << (int)'A' << ", got " << instr->value << "\n";
+    if (c->value != (int)'A') {
+        std::cerr << "test_emit_char_literal: expected value " << (int)'A' << ", got " << c->value << "\n";
         return 3;
     }
     return 0;
@@ -119,9 +121,8 @@ static int test_emit_binary_add_i32() {
         std::cerr << "test_emit_binary_add_i32: expected 3 instructions, got " << instrs.size() << "\n";
         return 1;
     }
-    if (!std::get_if<WasmVM::Instr::I32_const>(&instrs[0]) ||
-        !std::get_if<WasmVM::Instr::I32_const>(&instrs[1]) ||
-        !std::get_if<WasmVM::Instr::I32_add>(&instrs[2])) {
+    if (!asI32Const(instrs[0]) || !asI32Const(instrs[1]) ||
+        !is(instrs[2], WasmVM::Opcode::I32_add)) {
         std::cerr << "test_emit_binary_add_i32: unexpected instruction sequence\n";
         return 2;
     }
@@ -129,7 +130,6 @@ static int test_emit_binary_add_i32() {
 }
 
 // -5  →  [I32_const{5}, I32_const{-1}, I32_xor, I32_const{1}, I32_add]
-// (two's complement negation: ~x + 1)
 static int test_emit_unary_negate() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -151,14 +151,14 @@ static int test_emit_unary_negate() {
         std::cerr << "test_emit_unary_negate: expected 5 instructions, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* i0 = std::get_if<WasmVM::Instr::I32_const>(&instrs[0]);
-    if (!i0 || i0->value != 5) { std::cerr << "test_emit_unary_negate: [0] expected I32_const{5}\n"; return 2; }
-    auto* i1 = std::get_if<WasmVM::Instr::I32_const>(&instrs[1]);
+    auto i0 = asI32Const(instrs[0]);
+    if (!i0 || i0->value != 5)  { std::cerr << "test_emit_unary_negate: [0] expected I32_const{5}\n"; return 2; }
+    auto i1 = asI32Const(instrs[1]);
     if (!i1 || i1->value != -1) { std::cerr << "test_emit_unary_negate: [1] expected I32_const{-1}\n"; return 3; }
-    if (!std::get_if<WasmVM::Instr::I32_xor>(&instrs[2])) { std::cerr << "test_emit_unary_negate: [2] expected I32_xor\n"; return 4; }
-    auto* i3 = std::get_if<WasmVM::Instr::I32_const>(&instrs[3]);
-    if (!i3 || i3->value != 1) { std::cerr << "test_emit_unary_negate: [3] expected I32_const{1}\n"; return 5; }
-    if (!std::get_if<WasmVM::Instr::I32_add>(&instrs[4])) { std::cerr << "test_emit_unary_negate: [4] expected I32_add\n"; return 6; }
+    if (!is(instrs[2], WasmVM::Opcode::I32_xor)) { std::cerr << "test_emit_unary_negate: [2] expected I32_xor\n"; return 4; }
+    auto i3 = asI32Const(instrs[3]);
+    if (!i3 || i3->value != 1)  { std::cerr << "test_emit_unary_negate: [3] expected I32_const{1}\n"; return 5; }
+    if (!is(instrs[4], WasmVM::Opcode::I32_add)) { std::cerr << "test_emit_unary_negate: [4] expected I32_add\n"; return 6; }
     return 0;
 }
 
@@ -189,7 +189,7 @@ static int test_call_no_args() {
         std::cerr << "test_call_no_args: expected 1 instr, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* c = std::get_if<WasmVM::Instr::Call>(&instrs[0]);
+    auto c = asOneIdx(instrs[0], WasmVM::Opcode::Call);
     if (!c || c->index != 2) {
         std::cerr << "test_call_no_args: expected Call{2}\n";
         return 2;
@@ -234,11 +234,11 @@ static int test_call_with_args() {
         std::cerr << "test_call_with_args: expected 3 instrs, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* c1 = std::get_if<WasmVM::Instr::I32_const>(&instrs[0]);
+    auto c1 = asI32Const(instrs[0]);
     if (!c1 || c1->value != 1) { std::cerr << "test_call_with_args: [0] expected I32_const{1}\n"; return 2; }
-    auto* c2 = std::get_if<WasmVM::Instr::I32_const>(&instrs[1]);
+    auto c2 = asI32Const(instrs[1]);
     if (!c2 || c2->value != 2) { std::cerr << "test_call_with_args: [1] expected I32_const{2}\n"; return 3; }
-    auto* call = std::get_if<WasmVM::Instr::Call>(&instrs[2]);
+    auto call = asOneIdx(instrs[2], WasmVM::Opcode::Call);
     if (!call || call->index != 0) { std::cerr << "test_call_with_args: [2] expected Call{0}\n"; return 4; }
     return 0;
 }
@@ -275,9 +275,9 @@ static int test_call_import() {
         std::cerr << "test_call_import: expected 2 instrs, got " << instrs.size() << "\n";
         return 1;
     }
-    auto* c = std::get_if<WasmVM::Instr::I32_const>(&instrs[0]);
+    auto c = asI32Const(instrs[0]);
     if (!c || c->value != 0) { std::cerr << "test_call_import: [0] expected I32_const{0}\n"; return 2; }
-    auto* call = std::get_if<WasmVM::Instr::Call>(&instrs[1]);
+    auto call = asOneIdx(instrs[1], WasmVM::Opcode::Call);
     if (!call || call->index != 0) { std::cerr << "test_call_import: [1] expected Call{0}\n"; return 3; }
     return 0;
 }
@@ -286,52 +286,28 @@ int main() {
     int result;
 
     result = test_emit_integer_literal_i32();
-    if (result != 0) {
-        std::cerr << "test_emit_integer_literal_i32 failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_emit_integer_literal_i32 failed with code " << result << "\n"; return result; }
 
     result = test_emit_integer_literal_i64();
-    if (result != 0) {
-        std::cerr << "test_emit_integer_literal_i64 failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_emit_integer_literal_i64 failed with code " << result << "\n"; return result; }
 
     result = test_emit_char_literal();
-    if (result != 0) {
-        std::cerr << "test_emit_char_literal failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_emit_char_literal failed with code " << result << "\n"; return result; }
 
     result = test_emit_binary_add_i32();
-    if (result != 0) {
-        std::cerr << "test_emit_binary_add_i32 failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_emit_binary_add_i32 failed with code " << result << "\n"; return result; }
 
     result = test_emit_unary_negate();
-    if (result != 0) {
-        std::cerr << "test_emit_unary_negate failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_emit_unary_negate failed with code " << result << "\n"; return result; }
 
     result = test_call_no_args();
-    if (result != 0) {
-        std::cerr << "test_call_no_args failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_call_no_args failed with code " << result << "\n"; return result; }
 
     result = test_call_with_args();
-    if (result != 0) {
-        std::cerr << "test_call_with_args failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_call_with_args failed with code " << result << "\n"; return result; }
 
     result = test_call_import();
-    if (result != 0) {
-        std::cerr << "test_call_import failed with code " << result << "\n";
-        return result;
-    }
+    if (result != 0) { std::cerr << "test_call_import failed with code " << result << "\n"; return result; }
 
     std::cout << "All expression emission tests passed!" << std::endl;
     return 0;
