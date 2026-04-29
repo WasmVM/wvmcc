@@ -188,6 +188,7 @@ void ModuleCodegen::secondPass(const wvmcc::parser::TranslationUnitPtr& tu) {
             }
         }, external->decl);
     }
+    emitStringLiterals();
 }
 
 void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef) {
@@ -213,6 +214,9 @@ void ModuleCodegen::emitGlobalAggregate(const wvmcc::parser::DeclarationPtr& dec
 }
 
 void ModuleCodegen::emitStringLiterals() {
+    for (auto& seg : dataAllocator_.getDataSegments()) {
+        module_.datas.push_back(std::move(seg));
+    }
 }
 
 } // namespace wvmcc::codegen
