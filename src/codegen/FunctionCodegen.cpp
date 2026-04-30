@@ -5,8 +5,9 @@
 
 namespace wvmcc::codegen {
 
-FunctionCodegen::FunctionCodegen(const TypeMap& typeMap, SymbolTable& symbolTable)
-    : typeMap_(typeMap), symbolTable_(symbolTable) {}
+FunctionCodegen::FunctionCodegen(const TypeMap& typeMap, SymbolTable& symbolTable,
+                                 GlobalDataAllocator* dataAllocator)
+    : typeMap_(typeMap), symbolTable_(symbolTable), dataAllocator_(dataAllocator) {}
 
 WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& funcDef,
                                              const wvmcc::parser::Semantic& semantic) {
@@ -15,9 +16,27 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     AddressTakenAnalyzer analyzer;
     addressTakenNames_ = analyzer.analyze(funcDef);
 
+    // Detect struct return: if so, param 0 is the hidden sret pointer.
+    for (const auto& ts : funcDef->specifiers.typeSpecifiers) {
+        if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+            && ts.su) {
+            auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                         ? wvmcc::parser::TypeNode::Kind::Struct
+                         : wvmcc::parser::TypeNode::Kind::Union;
+            node->su = ts.su;
+            returnTypeNode_ = node;
+            break;
+        }
+    }
+    bool isStructRet = returnTypeNode_ != nullptr;
+
     // Parameters occupy local indices 0..n-1 and are not in func.locals.
     symbolTable_.pushScope();
     int paramIdx = 0;
+    if (isStructRet) {
+        hiddenRetPtrLocal_ = paramIdx++; // param 0 is the hidden sret pointer
+    }
     for (const auto& param : funcDef->params) {
         if (param.declarator && !param.declarator->id.name.empty()) {
             ScalarLocal info;
@@ -64,6 +83,12 @@ int FunctionCodegen::allocRawLocal(WasmVM::ValueType valType) {
 
 int FunctionCodegen::allocLocal(const wvmcc::parser::TypeNodePtr& type, bool isAddressTaken) {
     if (isAddressTaken) {
+        // Lazily allocate the frame-pointer local the first time a shadow-stack slot is needed.
+        // (generate() pre-allocates it when address-taken vars are known, but struct variables
+        //  that are always memory-resident may require it even without explicit address-of.)
+        if (framePointerLocal_ == -1) {
+            framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
+        }
         size_t align = type ? typeMap_.byteAlignment(type) : 1;
         size_t size  = type ? typeMap_.byteSize(type)      : 4;
         if (align > 1) {
@@ -124,13 +149,13 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         emitCharLiteral(static_cast<const wvmcc::parser::CharLiteral&>(*expr));
         break;
     case K::Ident:
-        emitIdentifierExpr(static_cast<const wvmcc::parser::IdentifierExpr&>(*expr));
+        emitIdentifierExpr(static_cast<const wvmcc::parser::IdentifierExpr&>(*expr), needLValue);
         break;
     case K::Binary:
         emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*expr));
         break;
     case K::Unary:
-        emitUnaryExpr(static_cast<const wvmcc::parser::UnaryExpr&>(*expr));
+        emitUnaryExpr(static_cast<const wvmcc::parser::UnaryExpr&>(*expr), needLValue);
         break;
     case K::Cast:
         emitCastExpr(static_cast<const wvmcc::parser::CastExpr&>(*expr));
@@ -142,10 +167,10 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         emitCallExpr(static_cast<const wvmcc::parser::CallExpr&>(*expr));
         break;
     case K::Member:
-        emitMemberAccessExpr(static_cast<const wvmcc::parser::MemberExpr&>(*expr));
+        emitMemberAccessExpr(static_cast<const wvmcc::parser::MemberExpr&>(*expr), needLValue);
         break;
     case K::Index:
-        emitArrayIndexExpr(static_cast<const wvmcc::parser::IndexExpr&>(*expr));
+        emitArrayIndexExpr(static_cast<const wvmcc::parser::IndexExpr&>(*expr), needLValue);
         break;
     case K::CompoundLiteral:
         emitCompoundLiteralExpr(static_cast<const wvmcc::parser::CompoundLiteral&>(*expr));
@@ -168,17 +193,26 @@ void FunctionCodegen::emitCharLiteral(const wvmcc::parser::CharLiteral& expr) {
     emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)expr.value});
 }
 
-void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr) {
+void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue) {
     auto symbolInfo = symbolTable_.lookup(expr.name);
     if (!symbolInfo) {
         emit(WasmVM::Instr::Unreachable{});
         return;
     }
 
-    std::visit([this](const auto& info) {
+    std::visit([this, needLValue](const auto& info) {
         using T = std::decay_t<decltype(info)>;
         if constexpr (std::is_same_v<T, ScalarLocal>) {
             emit(WasmVM::Instr::Local_get{(WasmVM::index_t)info.localIndex});
+        } else if constexpr (std::is_same_v<T, MemoryLocal>) {
+            // Compute shadow-stack address: fp + frameOffset
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
+            emit(WasmVM::Instr::I64_add{});
+            if (!needLValue) {
+                // Load value from shadow-stack memory (mem[1])
+                emit(typeMap_.makeLoad(info.type, 1));
+            }
         } else if constexpr (std::is_same_v<T, GlobalScalar>) {
             emit(WasmVM::Instr::Global_get{(WasmVM::index_t)info.globalIndex});
         } else {
@@ -188,6 +222,85 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
 }
 
 void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
+    using K = wvmcc::parser::Expr::Kind;
+
+    // --- Assignment ---
+    if (expr.op == "=") {
+        // ScalarLocal: value → local.tee (sets local, leaves value on stack)
+        if (expr.lhs && expr.lhs->kind == K::Ident) {
+            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.lhs);
+            auto sym = symbolTable_.lookup(id.name);
+            if (sym) {
+                if (auto* sl = std::get_if<ScalarLocal>(&*sym)) {
+                    emitExpr(expr.rhs, false);
+                    emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)sl->localIndex});
+                    return;
+                }
+                if (auto* ml = std::get_if<MemoryLocal>(&*sym)) {
+                    auto rhsWasmType = getExprType(expr.rhs);
+                    int tempIdx = allocRawLocal(rhsWasmType);
+                    emitExpr(expr.rhs, false);
+                    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tempIdx});
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)ml->frameOffset});
+                    emit(WasmVM::Instr::I64_add{});
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
+                    emit(typeMap_.makeStore(ml->type, 1));
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
+                    return;
+                }
+            }
+        }
+
+        // General lvalue assignment (pointer dereference, member access, array index)
+        auto rhsWasmType = getExprType(expr.rhs);
+        int tempIdx = allocRawLocal(rhsWasmType);
+        emitExpr(expr.rhs, false);
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tempIdx});
+
+        emitExpr(expr.lhs, true);  // push lhs address
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
+
+        bool useHeap = false;
+        if (expr.lhs) {
+            if (expr.lhs->kind == K::Unary) {
+                const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*expr.lhs);
+                useHeap = (u.op == "*");
+            } else if (expr.lhs->kind == K::Member) {
+                const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*expr.lhs);
+                useHeap = m.isArrow;
+            } else if (expr.lhs->kind == K::Index) {
+                useHeap = true;
+            }
+        }
+        auto lhsTypeNode = getExprTypeNode(expr.lhs);
+        emit(typeMap_.makeStore(lhsTypeNode, useHeap ? 0 : 1));
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
+        return;
+    }
+
+    // --- Pointer arithmetic (+/-) ---
+    auto lhsTypeNode = getExprTypeNode(expr.lhs);
+    bool lhsIsPointer = lhsTypeNode && lhsTypeNode->kind == wvmcc::parser::TypeNode::Kind::Pointer;
+
+    if (lhsIsPointer && (expr.op == "+" || expr.op == "-")) {
+        emitExpr(expr.lhs, false);
+        emitExpr(expr.rhs, false);
+        auto rhsWasmType = getExprType(expr.rhs);
+        if (rhsWasmType == WasmVM::ValueType::i32) {
+            emit(WasmVM::Instr::I64_extend_i32_s{});
+        }
+        size_t pointeeSize = lhsTypeNode->pointee ? typeMap_.byteSize(lhsTypeNode->pointee) : 1;
+        if (pointeeSize > 1) {
+            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)pointeeSize});
+            emit(WasmVM::Instr::I64_mul{});
+        }
+        if (expr.op == "+") emit(WasmVM::Instr::I64_add{});
+        else                 emit(WasmVM::Instr::I64_sub{});
+        return;
+    }
+
+    // --- Normal binary ops ---
     emitExpr(expr.lhs, false);
     emitExpr(expr.rhs, false);
 
@@ -262,7 +375,26 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
     }
 }
 
-void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr) {
+void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue) {
+    // Address-of: emit the inner expression as an lvalue (leaves i64 address on stack)
+    if (expr.op == "&") {
+        emitExpr(expr.rhs, true);
+        return;
+    }
+
+    // Dereference: emit the pointer value; load pointee from mem[0] if need_value
+    if (expr.op == "*") {
+        emitExpr(expr.rhs, false);
+        if (!needLValue) {
+            auto rhsTypeNode = getExprTypeNode(expr.rhs);
+            wvmcc::parser::TypeNodePtr pointeeType;
+            if (rhsTypeNode && rhsTypeNode->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+                pointeeType = rhsTypeNode->pointee;
+            emit(typeMap_.makeLoad(pointeeType, 0));
+        }
+        return;
+    }
+
     emitExpr(expr.rhs, false);
 
     auto exprType = getExprType(expr.rhs);
@@ -350,30 +482,130 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
 }
 
 void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr) {
-    emit(WasmVM::Instr::Unreachable{});
+    if (!dataAllocator_) {
+        emit(WasmVM::Instr::Unreachable{});
+        return;
+    }
+    size_t addr = dataAllocator_->internString(expr.value);
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)addr});
 }
 
 void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
+    // Check if callee returns a struct (needs hidden sret buffer).
+    wvmcc::parser::TypeNodePtr calleeRetType;
+    int sretBufLocal = -1;
+
+    if (expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
+        const auto& calleeIdent = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
+        auto funcSym = symbolTable_.lookupFunction(calleeIdent.name);
+        if (funcSym && funcSym->type
+            && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union)) {
+            calleeRetType = funcSym->type;
+        }
+    }
+
+    if (calleeRetType) {
+        // Allocate a shadow-stack buffer for the returned struct.
+        if (framePointerLocal_ == -1) {
+            framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
+        }
+        size_t align = typeMap_.byteAlignment(calleeRetType);
+        size_t size  = typeMap_.byteSize(calleeRetType);
+        if (align > 1) frameSize_ = (frameSize_ + align - 1) & ~(align - 1);
+        size_t bufOff = frameSize_;
+        frameSize_ += size;
+
+        // Emit buffer address as hidden sret first argument.
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)bufOff});
+        emit(WasmVM::Instr::I64_add{});
+        sretBufLocal = allocRawLocal(WasmVM::ValueType::i64);
+        emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)sretBufLocal});
+    }
+
     for (const auto& arg : expr.args) {
         emitExpr(arg);
     }
+
     if (expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
         const auto& calleeExpr = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
         auto funcSym = symbolTable_.lookupFunction(calleeExpr.name);
         if (funcSym) {
             emit(WasmVM::Instr::Call{(WasmVM::index_t)funcSym->funcIndex});
+            // For struct return: leave the sret buffer address as the "value".
+            if (sretBufLocal != -1) {
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)sretBufLocal});
+            }
             return;
         }
     }
     emit(WasmVM::Instr::Unreachable{});
 }
 
-void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr) {
-    emit(WasmVM::Instr::Unreachable{});
+void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue) {
+    // Determine base struct type for field-offset lookup
+    auto baseType = getExprTypeNode(expr.base);
+    if (expr.isArrow && baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Pointer) {
+        baseType = baseType->pointee;
+    }
+
+    size_t fieldOffset = baseType ? typeMap_.getFieldOffset(baseType, expr.member) : 0;
+    auto fieldType     = baseType ? typeMap_.getFieldType(baseType, expr.member)   : nullptr;
+    // . accesses shadow-stack locals (mem[1]); -> accesses heap objects (mem[0])
+    uint8_t memidx = expr.isArrow ? 0 : 1;
+
+    if (expr.isArrow) {
+        emitExpr(expr.base, false);  // pointer value is the base address
+    } else {
+        emitExpr(expr.base, true);   // lvalue address of the struct
+    }
+
+    if (fieldOffset > 0) {
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOffset});
+        emit(WasmVM::Instr::I64_add{});
+    }
+
+    if (!needLValue) {
+        emit(typeMap_.makeLoad(fieldType, memidx));
+    }
 }
 
-void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr) {
-    emit(WasmVM::Instr::Unreachable{});
+void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, bool needLValue) {
+    // Equivalent to *(base + index * sizeof(*base))
+    auto baseType = getExprTypeNode(expr.base);
+
+    wvmcc::parser::TypeNodePtr elemType;
+    bool baseIsPointer = false;
+    if (baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Pointer) {
+        elemType = baseType->pointee;
+        baseIsPointer = true;
+    } else if (baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Array) {
+        elemType = baseType->element;
+    }
+
+    size_t elemSize = elemType ? typeMap_.byteSize(elemType) : 4;
+    // Heap pointers use mem[0]; shadow-stack arrays use mem[1]
+    uint8_t memidx = baseIsPointer ? 0 : 1;
+
+    emitExpr(expr.base, false);    // base address (i64)
+    emitExpr(expr.index, false);   // index
+
+    auto idxWasmType = getExprType(expr.index);
+    if (idxWasmType == WasmVM::ValueType::i32) {
+        emit(WasmVM::Instr::I64_extend_i32_s{});
+    }
+
+    if (elemSize > 1) {
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)elemSize});
+        emit(WasmVM::Instr::I64_mul{});
+    }
+
+    emit(WasmVM::Instr::I64_add{});
+
+    if (!needLValue) {
+        emit(typeMap_.makeLoad(elemType, memidx));
+    }
 }
 
 void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr) {
@@ -420,7 +652,7 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
             if (!v || !v->declarator) return;
             const std::string& name = v->declarator->id.name;
 
-            // Build TypeNode from specifiers (pick the first simple type specifier)
+            // Build TypeNode from specifiers
             wvmcc::parser::TypeNodePtr typeNode;
             for (const auto& ts : v->specifiers.typeSpecifiers) {
                 if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
@@ -430,18 +662,50 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                     node->simple = ts.simple;
                     typeNode = node;
                     break;
+                } else if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                           && ts.su) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                                 ? wvmcc::parser::TypeNode::Kind::Struct
+                                 : wvmcc::parser::TypeNode::Kind::Union;
+                    node->su = ts.su;
+                    typeNode = node;
+                    break;
                 }
             }
 
-            bool isAddrTaken = addressTakenNames_.count(name) > 0;
-            int slotOrOffset = allocLocal(typeNode, isAddrTaken);
+            // Wrap with pointer kind if the declarator is a pointer declarator
+            if (typeNode && v->declarator->inner.has_value()
+                && *v->declarator->inner
+                && (*v->declarator->inner)->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+                auto ptrNode = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                ptrNode->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                ptrNode->pointee = typeNode;
+                typeNode = ptrNode;
+            }
 
-            if (isAddrTaken) {
+            bool isAddrTaken = addressTakenNames_.count(name) > 0;
+            // Struct/union variables are always memory-resident
+            bool isStructType = typeNode && (typeNode->kind == wvmcc::parser::TypeNode::Kind::Struct
+                                           || typeNode->kind == wvmcc::parser::TypeNode::Kind::Union);
+            int slotOrOffset = allocLocal(typeNode, isAddrTaken || isStructType);
+
+            if (isAddrTaken || isStructType) {
                 MemoryLocal info;
                 info.type = typeNode;
                 info.frameOffset = (size_t)slotOrOffset;
                 symbolTable_.define(name, info);
-                // Initializer for MemoryLocal handled in issue #11 (memory store emission)
+
+                // Emit simple expression initializer for MemoryLocal
+                if (v->initializer
+                    && (*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
+                    && (*v->initializer)->expr) {
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
+                    emit(WasmVM::Instr::I64_add{});
+                    emitExpr((*v->initializer)->expr);
+                    emit(typeMap_.makeStore(typeNode, 1));
+                }
             } else {
                 ScalarLocal info;
                 info.type = typeNode;
@@ -449,7 +713,6 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 info.localIndex = slotOrOffset;
                 symbolTable_.define(name, info);
 
-                // Emit initializer if it is a simple expression
                 if (v->initializer
                     && (*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
                     && (*v->initializer)->expr) {
@@ -465,13 +728,58 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
 }
 
 void FunctionCodegen::emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt) {
-    if (stmt.value) {
+    if (hiddenRetPtrLocal_ != -1) {
+        // Struct return: copy value to hidden sret pointer, no Wasm result.
+        if (stmt.value) {
+            emitStructCopyToHiddenPtr(*stmt.value);
+        }
+    } else if (stmt.value) {
         emitExpr(*stmt.value);
     }
     if (framePointerLocal_ != -1 && frameSize_ > 0) {
         generateEpilogue();
     }
     emit(WasmVM::Instr::Return{});
+}
+
+void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr) {
+    if (!returnTypeNode_ || !returnTypeNode_->su) {
+        // No field info: emit unreachable placeholder.
+        emit(WasmVM::Instr::Unreachable{});
+        return;
+    }
+
+    // Get the source address (lvalue address on shadow stack).
+    emitExpr(srcExpr, true);
+    int srcAddrLocal = allocRawLocal(WasmVM::ValueType::i64);
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddrLocal});
+
+    // Field-by-field copy: load from mem[1] (shadow stack), store to mem[0] (via hidden ptr).
+    for (const auto& member : returnTypeNode_->su->members) {
+        for (const auto& sd : member.declarators) {
+            if (!sd.declarator || sd.declarator->id.name.empty()) continue;
+            const std::string& fieldName = sd.declarator->id.name;
+            auto fieldType = typeMap_.getFieldType(returnTypeNode_, fieldName);
+            if (!fieldType) continue;
+            size_t fieldOff = typeMap_.getFieldOffset(returnTypeNode_, fieldName);
+
+            // dst = hidden_ptr + fieldOff
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)hiddenRetPtrLocal_});
+            if (fieldOff > 0) {
+                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
+                emit(WasmVM::Instr::I64_add{});
+            }
+            // value = load field from src (shadow stack, mem[1])
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)srcAddrLocal});
+            if (fieldOff > 0) {
+                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
+                emit(WasmVM::Instr::I64_add{});
+            }
+            emit(typeMap_.makeLoad(fieldType, 1));
+            // store to hidden ptr (mem[0])
+            emit(typeMap_.makeStore(fieldType, 0));
+        }
+    }
 }
 
 void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
@@ -546,6 +854,59 @@ void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
 WasmVM::ValueType FunctionCodegen::getExprType(const wvmcc::parser::ExprPtr& expr) const {
     // Placeholder — defaults to i32 until a full type-inference pass exists.
     return WasmVM::ValueType::i32;
+}
+
+wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser::ExprPtr& expr) const {
+    if (!expr) return nullptr;
+    using K = wvmcc::parser::Expr::Kind;
+
+    switch (expr->kind) {
+    case K::Ident: {
+        const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr);
+        auto sym = symbolTable_.lookup(id.name);
+        if (!sym) return nullptr;
+        return std::visit([](const auto& info) -> wvmcc::parser::TypeNodePtr {
+            return info.type;
+        }, *sym);
+    }
+    case K::Unary: {
+        const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*expr);
+        if (u.op == "*") {
+            auto rhsType = getExprTypeNode(u.rhs);
+            if (rhsType && rhsType->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+                return rhsType->pointee;
+        }
+        if (u.op == "&") {
+            auto rhsType = getExprTypeNode(u.rhs);
+            if (rhsType) {
+                auto ptrNode = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                ptrNode->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                ptrNode->pointee = rhsType;
+                return ptrNode;
+            }
+        }
+        return nullptr;
+    }
+    case K::Member: {
+        const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*expr);
+        auto baseType = getExprTypeNode(m.base);
+        if (m.isArrow && baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+            baseType = baseType->pointee;
+        if (baseType) return typeMap_.getFieldType(baseType, m.member);
+        return nullptr;
+    }
+    case K::Index: {
+        const auto& idx = static_cast<const wvmcc::parser::IndexExpr&>(*expr);
+        auto baseType = getExprTypeNode(idx.base);
+        if (baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+            return baseType->pointee;
+        if (baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Array)
+            return baseType->element;
+        return nullptr;
+    }
+    default:
+        return nullptr;
+    }
 }
 
 } // namespace wvmcc::codegen

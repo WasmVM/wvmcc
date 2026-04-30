@@ -154,7 +154,7 @@ void test_type_index_cache() {
 // Test GlobalDataAllocator functionality
 void test_global_data_allocator() {
     wvmcc::codegen::GlobalDataAllocator dataAllocator;
-    
+
     // Test basic allocation and alignment
     size_t addr1 = dataAllocator.allocate(8, 8);
     assert(addr1 % 8 == 0);
@@ -166,20 +166,59 @@ void test_global_data_allocator() {
     // Test larger alignment
     size_t addr3 = dataAllocator.allocate(1, 64);
     assert(addr3 % 64 == 0);
-    
+
     // Test string interning
     size_t strAddr = dataAllocator.internString("hello");
     assert(strAddr != 0);
-    
+
     // Test that same string returns same address
     size_t strAddr2 = dataAllocator.internString("hello");
     assert(strAddr == strAddr2);
-    
+
     // Test that different string returns different address
     size_t strAddr3 = dataAllocator.internString("world");
     assert(strAddr != strAddr3);
-    
+
     std::cout << "GlobalDataAllocator functionality test passed" << std::endl;
+}
+
+void test_get_data_segments() {
+    wvmcc::codegen::GlobalDataAllocator dataAllocator;
+
+    size_t helloAddr = dataAllocator.internString("hello");
+
+    auto segments = dataAllocator.getDataSegments();
+    assert(segments.size() == 1);
+
+    const auto& seg = segments[0];
+    assert(seg.mode.type == WasmVM::WasmData::DataMode::Mode::active);
+    assert(seg.mode.memidx.has_value() && *seg.mode.memidx == 0);
+    assert(seg.mode.offset.has_value());
+
+    auto* offset = std::get_if<WasmVM::Instr::I64_const>(&*seg.mode.offset);
+    assert(offset != nullptr);
+    assert((size_t)offset->value == helloAddr);
+
+    // "hello\0" = 68 65 6c 6c 6f 00
+    assert(seg.init.size() == 6);
+    assert(seg.init[0] == std::byte(0x68));
+    assert(seg.init[1] == std::byte(0x65));
+    assert(seg.init[2] == std::byte(0x6c));
+    assert(seg.init[3] == std::byte(0x6c));
+    assert(seg.init[4] == std::byte(0x6f));
+    assert(seg.init[5] == std::byte(0x00));
+
+    // Deduplication: same address, still one segment
+    dataAllocator.internString("hello");
+    auto segments2 = dataAllocator.getDataSegments();
+    assert(segments2.size() == 1);
+
+    // Second distinct string produces a second segment
+    dataAllocator.internString("world");
+    auto segments3 = dataAllocator.getDataSegments();
+    assert(segments3.size() == 2);
+
+    std::cout << "getDataSegments test passed" << std::endl;
 }
 
 // Test FunctionCodegen expression emission
@@ -207,6 +246,7 @@ int main() {
     test_symbol_table();
     test_type_index_cache();
     test_global_data_allocator();
+    test_get_data_segments();
     test_function_codegen_expressions();
     
     std::cout << "All basic codegen tests passed!" << std::endl;

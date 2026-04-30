@@ -668,30 +668,34 @@ static int test_memory_local_prologue_epilogue() {
         std::cerr << "test_memory_local_prologue_epilogue: [4] expected Global_set\n"; return 6;
     }
 
-    if (instrs.size() != 14) {
-        std::cerr << "test_memory_local_prologue_epilogue: expected 14 instrs, got " << instrs.size() << "\n";
+    // (&x) now correctly emits: Local_get{fp}, I64_const{0}, I64_add, Drop  (4 instrs)
+    // return 0: I32_const{0}, Local_get{fp}, Global_set, Return              (4 instrs)
+    // epilogue at end: Local_get{fp}, Global_set                             (2 instrs)
+    // Total: 5 prologue + 4 body + 4 return + 2 epilogue = 15
+    if (instrs.size() != 15) {
+        std::cerr << "test_memory_local_prologue_epilogue: expected 15 instrs, got " << instrs.size() << "\n";
         return 7;
     }
 
-    // epilogue before Return: instrs[9]=Local_get{fp}, [10]=Global_set, [11]=Return
-    auto fpGet = asOneIdx(instrs[9], WasmVM::Opcode::Local_get);
+    // epilogue before Return: instrs[10]=Local_get{fp}, [11]=Global_set, [12]=Return
+    auto fpGet = asOneIdx(instrs[10], WasmVM::Opcode::Local_get);
     if (!fpGet || fpGet->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [9] expected Local_get{fp}\n"; return 8;
+        std::cerr << "test_memory_local_prologue_epilogue: [10] expected Local_get{fp}\n"; return 8;
     }
-    if (!is(instrs[10], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [10] expected Global_set\n"; return 9;
+    if (!is(instrs[11], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [11] expected Global_set\n"; return 9;
     }
-    if (!is(instrs[11], WasmVM::Opcode::Return)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [11] expected Return\n"; return 10;
+    if (!is(instrs[12], WasmVM::Opcode::Return)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [12] expected Return\n"; return 10;
     }
 
-    // epilogue at end: instrs[12]=Local_get{fp}, [13]=Global_set
-    auto fpGet2 = asOneIdx(instrs[12], WasmVM::Opcode::Local_get);
+    // epilogue at end: instrs[13]=Local_get{fp}, [14]=Global_set
+    auto fpGet2 = asOneIdx(instrs[13], WasmVM::Opcode::Local_get);
     if (!fpGet2 || fpGet2->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [12] expected Local_get{fp}\n"; return 11;
+        std::cerr << "test_memory_local_prologue_epilogue: [13] expected Local_get{fp}\n"; return 11;
     }
-    if (!is(instrs[13], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [13] expected Global_set\n"; return 12;
+    if (!is(instrs[14], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [14] expected Global_set\n"; return 12;
     }
     return 0;
 }
@@ -739,6 +743,197 @@ static int test_no_prologue_without_address_taken() {
         std::cout << #fn " passed\n"; \
     } while (0)
 
+// Helper: build int* declaration with initializer
+static DeclarationPtr makeIntPtrDecl(const std::string& name, ExprPtr initExpr = nullptr) {
+    auto decl = make_ast<Declaration>();
+    decl->declarator = make_ast<Declarator>();
+    decl->declarator->kind = Declarator::Kind::Identifier;
+    decl->declarator->id.name = name;
+    // inner pointer declarator
+    auto inner = make_ast<Declarator>();
+    inner->kind = Declarator::Kind::Pointer;
+    decl->declarator->inner = inner;
+
+    DeclarationSpecifiers::TypeSpecifier ts;
+    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+    ts.simple = {DeclarationSpecifiers::SimpleTypeSpecifier::Int};
+    decl->specifiers.typeSpecifiers.push_back(ts);
+
+    if (initExpr) {
+        auto init = make_ast<Initializer>();
+        init->kind = Initializer::Kind::Expr;
+        init->expr = initExpr;
+        decl->initializer = init;
+    }
+    return decl;
+}
+
+// Helper: make a unary expression
+static ExprPtr makeUnary(const std::string& op, ExprPtr rhs) {
+    auto e = make_ast<UnaryExpr>(); e->kind = Expr::Kind::Unary; e->op = op; e->rhs = rhs; return e;
+}
+
+// Helper: make a binary expression
+static ExprPtr makeBinary(const std::string& op, ExprPtr lhs, ExprPtr rhs) {
+    auto e = make_ast<BinaryExpr>(); e->kind = Expr::Kind::Binary; e->op = op; e->lhs = lhs; e->rhs = rhs; return e;
+}
+
+// Helper: make an identifier expression
+static ExprPtr makeIdent(const std::string& name) {
+    auto e = make_ast<IdentifierExpr>(); e->kind = Expr::Kind::Ident; e->name = name; return e;
+}
+
+// Helper: build a minimal void FunctionDef
+static FunctionDefPtr makeVoidFuncDef(const std::string& name, std::vector<BlockItemPtr> body) {
+    auto f = make_ast<FunctionDef>();
+    DeclarationSpecifiers::TypeSpecifier voidTs;
+    voidTs.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+    voidTs.simple = {DeclarationSpecifiers::SimpleTypeSpecifier::Void};
+    f->specifiers.typeSpecifiers.push_back(voidTs);
+    f->declarator = make_ast<Declarator>();
+    f->declarator->id.name = name;
+    f->body = std::move(body);
+    return f;
+}
+
+// AC1: int x; int* p = &x; *p = 5;
+// Verifies:
+//   (a) shadow-stack prologue is emitted (x is address-taken)
+//   (b) &x emits Local_get{fp}, I64_const{0}, I64_add (correct shadow-stack address)
+//   (c) *p = 5 emits pointer load + store through mem[0]
+static int test_ac1_shadow_stack_address_sequence() {
+    // int x;
+    auto xDecl = makeIntDecl("x");
+    // int* p = &x;
+    auto pDecl = makeIntPtrDecl("p", makeUnary("&", makeIdent("x")));
+    // *p = 5;
+    auto assignStmt = makeExprStmt(makeBinary("=", makeUnary("*", makeIdent("p")), makeI32(5)));
+
+    auto funcDef = makeVoidFuncDef("test_ac1", {wrapDecl(xDecl), wrapDecl(pDecl), wrapStmt(assignStmt)});
+
+    auto tu = make_ast<TranslationUnit>();
+    Semantic semantic(tu);
+    TypeMap typeMap; SymbolTable symtab;
+    FunctionCodegen cg(typeMap, symtab);
+    symtab.pushScope();
+    auto wf = cg.generate(funcDef, semantic);
+    symtab.popScope();
+
+    const auto& instrs = wf.body;
+
+    // Prologue (x is address-taken → shadow stack): Global_get, Local_tee{fp}, I64_const{4}, I64_sub, Global_set
+    if (instrs.size() < 5) { std::cerr << "AC1: too few instrs (" << instrs.size() << ")\n"; return 1; }
+    if (!is(instrs[0], WasmVM::Opcode::Global_get)) { std::cerr << "AC1: [0] expected Global_get (prologue)\n"; return 2; }
+    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
+    if (!ltee) { std::cerr << "AC1: [1] expected Local_tee{fp} (prologue)\n"; return 3; }
+    auto fsize = asI64Const(instrs[2]);
+    if (!fsize || fsize->value != 4) { std::cerr << "AC1: [2] expected I64_const{4} (frame size=4 for int x)\n"; return 4; }
+    if (!is(instrs[3], WasmVM::Opcode::I64_sub)) { std::cerr << "AC1: [3] expected I64_sub (prologue)\n"; return 5; }
+    if (!is(instrs[4], WasmVM::Opcode::Global_set)) { std::cerr << "AC1: [4] expected Global_set (prologue)\n"; return 6; }
+
+    // &x → shadow-stack address of x at offset 0: Local_get{fp}, I64_const{0}, I64_add
+    // followed by Local_set{p}
+    auto lgFp = asOneIdx(instrs[5], WasmVM::Opcode::Local_get);
+    if (!lgFp || lgFp->index != ltee->index) { std::cerr << "AC1: [5] expected Local_get{fp} (&x part 1)\n"; return 7; }
+    auto xOff = asI64Const(instrs[6]);
+    if (!xOff || xOff->value != 0) { std::cerr << "AC1: [6] expected I64_const{0} (x at frame offset 0)\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::I64_add)) { std::cerr << "AC1: [7] expected I64_add (shadow-stack address of x)\n"; return 9; }
+    if (!is(instrs[8], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [8] expected Local_set (p = &x)\n"; return 10; }
+
+    // *p = 5: rhs eval, address via p, store through pointer
+    auto five = asI32Const(instrs[9]);
+    if (!five || five->value != 5) { std::cerr << "AC1: [9] expected I32_const{5}\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [10] expected Local_set{temp}\n"; return 12; }
+    if (!is(instrs[11], WasmVM::Opcode::Local_get)) { std::cerr << "AC1: [11] expected Local_get{p} (pointer value)\n"; return 13; }
+    if (!is(instrs[12], WasmVM::Opcode::Local_get)) { std::cerr << "AC1: [12] expected Local_get{temp} (value 5)\n"; return 14; }
+    if (!is(instrs[13], WasmVM::Opcode::I32_store)) { std::cerr << "AC1: [13] expected I32_store (write through *p)\n"; return 15; }
+
+    return 0;
+}
+
+// AC2: struct S { int a; int b; }; S s; s.b
+// Verifies: s.b emits the correct field offset (4 bytes past start of struct)
+static int test_ac2_struct_field_offset() {
+    // Build struct type: struct S { int a; int b; }
+    auto su = std::make_shared<StructOrUnionSpecifier>();
+    su->kind = StructOrUnionSpecifier::Kind::Struct;
+    su->hasBody = true;
+    su->name = "S";
+    auto addField = [&](const std::string& fieldName) {
+        StructMember m;
+        DeclarationSpecifiers::TypeSpecifier ts;
+        ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+        ts.simple = {DeclarationSpecifiers::SimpleTypeSpecifier::Int};
+        m.specifiers.typeSpecifiers.push_back(ts);
+        StructDeclarator sd;
+        sd.declarator = make_ast<Declarator>();
+        sd.declarator->kind = Declarator::Kind::Identifier;
+        sd.declarator->id.name = fieldName;
+        m.declarators.push_back(sd);
+        su->members.push_back(m);
+    };
+    addField("a");
+    addField("b");
+
+    // struct S s;
+    auto sDecl = make_ast<Declaration>();
+    sDecl->declarator = make_ast<Declarator>();
+    sDecl->declarator->kind = Declarator::Kind::Identifier;
+    sDecl->declarator->id.name = "s";
+    DeclarationSpecifiers::TypeSpecifier suTs;
+    suTs.kind = DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion;
+    suTs.su = su;
+    sDecl->specifiers.typeSpecifiers.push_back(suTs);
+
+    // s.b;
+    auto sbExpr = make_ast<MemberExpr>();
+    sbExpr->kind = Expr::Kind::Member;
+    sbExpr->base = makeIdent("s");
+    sbExpr->member = "b";
+    sbExpr->isArrow = false;
+
+    auto funcDef = makeVoidFuncDef("test_ac2", {wrapDecl(sDecl), wrapStmt(makeExprStmt(sbExpr))});
+
+    auto tu = make_ast<TranslationUnit>();
+    Semantic semantic(tu);
+    TypeMap typeMap; SymbolTable symtab;
+    FunctionCodegen cg(typeMap, symtab);
+    symtab.pushScope();
+    auto wf = cg.generate(funcDef, semantic);
+    symtab.popScope();
+
+    const auto& instrs = wf.body;
+
+    // Prologue: 5 instrs (struct forces shadow stack even without explicit address-of)
+    if (instrs.size() < 5) { std::cerr << "AC2: too few instrs\n"; return 1; }
+    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
+    if (!ltee) { std::cerr << "AC2: [1] expected Local_tee{fp}\n"; return 2; }
+
+    // s.b body (starts at [5]):
+    //   [5] Local_get{fp}   — base of s (lvalue)
+    //   [6] I64_const{0}    — frame offset of s
+    //   [7] I64_add         — address of s
+    //   [8] I64_const{4}    — field offset of b (after 4-byte 'a')
+    //   [9] I64_add         — address of s.b
+    //   [10] I32_load{1}    — load field from shadow-stack memory
+    //   [11] Drop           — ExprStmt
+    auto lgFp = asOneIdx(instrs[5], WasmVM::Opcode::Local_get);
+    if (!lgFp || lgFp->index != ltee->index) { std::cerr << "AC2: [5] expected Local_get{fp}\n"; return 3; }
+    auto sOff = asI64Const(instrs[6]);
+    if (!sOff || sOff->value != 0) { std::cerr << "AC2: [6] expected I64_const{0} (s at frame offset 0)\n"; return 4; }
+    if (!is(instrs[7], WasmVM::Opcode::I64_add)) { std::cerr << "AC2: [7] expected I64_add (address of s)\n"; return 5; }
+    auto fieldOff = asI64Const(instrs[8]);
+    if (!fieldOff || fieldOff->value != 4) {
+        std::cerr << "AC2: [8] expected I64_const{4} (field 'b' at offset 4), got "
+                  << (fieldOff ? std::to_string(fieldOff->value) : "?") << "\n"; return 6;
+    }
+    if (!is(instrs[9],  WasmVM::Opcode::I64_add))   { std::cerr << "AC2: [9] expected I64_add (address of s.b)\n"; return 7; }
+    if (!is(instrs[10], WasmVM::Opcode::I32_load))   { std::cerr << "AC2: [10] expected I32_load (load s.b from mem[1])\n"; return 8; }
+    if (!is(instrs[11], WasmVM::Opcode::Drop))        { std::cerr << "AC2: [11] expected Drop (ExprStmt)\n"; return 9; }
+
+    return 0;
+}
+
 int main() {
     RUN(test_return_void);
     RUN(test_return_value);
@@ -759,6 +954,8 @@ int main() {
     RUN(test_return_call);
     RUN(test_memory_local_prologue_epilogue);
     RUN(test_no_prologue_without_address_taken);
+    RUN(test_ac1_shadow_stack_address_sequence);
+    RUN(test_ac2_struct_field_offset);
     std::cout << "All statement emission tests passed!\n";
     return 0;
 }

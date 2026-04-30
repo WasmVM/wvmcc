@@ -229,7 +229,8 @@ struct Declarator : Node {
 };
 
 struct Parameter {
-    std::optional<std::string> typeSpec; // e.g., "int", "struct foo"
+    DeclarationSpecifiers specifiers;          // full type specifiers for this param
+    std::optional<std::string> typeSpec;       // legacy string hint (may be empty)
     DeclaratorPtr declarator;
     std::optional<ExprPtr> defaultValue;
 };

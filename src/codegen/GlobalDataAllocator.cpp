@@ -31,30 +31,22 @@ size_t GlobalDataAllocator::internString(const std::string& str) {
 
 std::vector<WasmVM::WasmData> GlobalDataAllocator::getDataSegments() const {
     std::vector<WasmVM::WasmData> segments;
-    
-    // Create data segments for each string literal
-    size_t currentOffset = 8; // Start after reserved null pointer sentinel
-    
+
     for (const auto& str : stringLiterals_) {
-        // Align to 1-byte boundary (no alignment needed for strings)
-        size_t alignedOffset = currentOffset;
-        
-        // Create a data segment for this string
+        size_t addr = stringAddresses_.at(str);
+
         WasmVM::WasmData data;
         data.mode.type = WasmVM::WasmData::DataMode::Mode::active;
         data.mode.memidx = 0;
-        data.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)alignedOffset};
+        data.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
         for (char c : str) {
             data.init.push_back(std::byte(c));
         }
-        data.init.push_back(std::byte(0)); // Null terminator
+        data.init.push_back(std::byte(0));
 
-        segments.push_back(data);
-
-        // Update offset for next string
-        currentOffset += data.init.size();
+        segments.push_back(std::move(data));
     }
-    
+
     return segments;
 }
 

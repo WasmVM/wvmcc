@@ -517,6 +517,7 @@ DeclaratorPtr Parser::parseDeclarator() {
                     while (true) {
                         auto pspecs = parseDeclarationSpecifiers();
                         Parameter param;
+                        param.specifiers = pspecs;
                         if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || (lex.peek()->kind() == TokenKind::Punctuator && (lex.peek()->lexeme() == "(" || lex.peek()->lexeme() == "*")) )) {
                             param.declarator = parseDeclarator();
                         } else {

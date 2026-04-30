@@ -255,36 +255,76 @@ bool TypeMap::isMemoryResident(const wvmcc::parser::TypeNodePtr& type) const {
 
 WasmVM::WasmInstr TypeMap::makeLoad(const wvmcc::parser::TypeNodePtr& type, uint8_t memidx) const {
     auto wasmType = toWasmType(type);
-    
+
+    // Alignment field is log2 of byte alignment per Wasm spec.
     switch (wasmType) {
         case WasmVM::ValueType::i32:
-            return WasmVM::Instr::I32_load{memidx, 0, 4};
+            return WasmVM::Instr::I32_load{memidx, 0, 2}; // log2(4) = 2
         case WasmVM::ValueType::i64:
-            return WasmVM::Instr::I64_load{memidx, 0, 8};
+            return WasmVM::Instr::I64_load{memidx, 0, 3}; // log2(8) = 3
         case WasmVM::ValueType::f32:
-            return WasmVM::Instr::F32_load{memidx, 0, 4};
+            return WasmVM::Instr::F32_load{memidx, 0, 2};
         case WasmVM::ValueType::f64:
-            return WasmVM::Instr::F64_load{memidx, 0, 8};
+            return WasmVM::Instr::F64_load{memidx, 0, 3};
         default:
-            return WasmVM::Instr::I32_load{memidx, 0, 4};
+            return WasmVM::Instr::I32_load{memidx, 0, 2};
     }
 }
 
 WasmVM::WasmInstr TypeMap::makeStore(const wvmcc::parser::TypeNodePtr& type, uint8_t memidx) const {
     auto wasmType = toWasmType(type);
-    
+
     switch (wasmType) {
         case WasmVM::ValueType::i32:
-            return WasmVM::Instr::I32_store{memidx, 0, 4};
+            return WasmVM::Instr::I32_store{memidx, 0, 2};
         case WasmVM::ValueType::i64:
-            return WasmVM::Instr::I64_store{memidx, 0, 8};
+            return WasmVM::Instr::I64_store{memidx, 0, 3};
         case WasmVM::ValueType::f32:
-            return WasmVM::Instr::F32_store{memidx, 0, 4};
+            return WasmVM::Instr::F32_store{memidx, 0, 2};
         case WasmVM::ValueType::f64:
-            return WasmVM::Instr::F64_store{memidx, 0, 8};
+            return WasmVM::Instr::F64_store{memidx, 0, 3};
         default:
-            return WasmVM::Instr::I32_store{memidx, 0, 4};
+            return WasmVM::Instr::I32_store{memidx, 0, 2};
     }
+}
+
+size_t TypeMap::getFieldOffset(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const {
+    if (!type || !type->su) return 0;
+    auto layout = layoutEngine_.computeLayout(*type->su);
+    for (const auto& [name, offset] : layout.fieldOffsets) {
+        if (name == fieldName) return offset;
+    }
+    return 0;
+}
+
+wvmcc::parser::TypeNodePtr TypeMap::getFieldType(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const {
+    if (!type || !type->su) return nullptr;
+    for (const auto& member : type->su->members) {
+        for (const auto& sd : member.declarators) {
+            if (!sd.declarator) continue;
+            std::string name = sd.declarator->id.name;
+            if (name != fieldName) continue;
+            for (const auto& ts : member.specifiers.typeSpecifiers) {
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                    && !ts.simple.empty()) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                    node->simple = ts.simple;
+                    return node;
+                }
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                    && ts.su) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                                 ? wvmcc::parser::TypeNode::Kind::Struct
+                                 : wvmcc::parser::TypeNode::Kind::Union;
+                    node->su = ts.su;
+                    return node;
+                }
+            }
+        }
+    }
+    return nullptr;
 }
 
 WasmVM::ValueType TypeMap::getBaseType(const wvmcc::parser::TypeNodePtr& type) const {
