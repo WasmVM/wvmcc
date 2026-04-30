@@ -1207,9 +1207,36 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 idexpr->span = idtok.span;
                 idexpr->name = idtok.lexeme();
                 idexpr->kind = Expr::Kind::Ident;
-                // parse the rest of expression using parseExpression (which will parse starting at current lexer position), then if null, use idexpr
-                ExprPtr rest = parseExpression();
-                ExprPtr finalExpr = rest ? rest : idexpr;
+                // Continue parsing as a full expression with idexpr as the already-parsed LHS.
+                // applyPostfixSuffix handles calls, indexing, member access; then we continue
+                // through the assignment/binary hierarchy via parseAssignmentExpression-like logic.
+                // We approximate by applying postfix then checking for assignment operators.
+                ExprPtr lhs = applyPostfixSuffix(idexpr);
+                // Handle assignment: lhs = rhs
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator) {
+                    std::string op = lex.peek()->lexeme();
+                    if (op == "=" || op == "+=" || op == "-=" || op == "*=" || op == "/=" ||
+                        op == "%=" || op == "<<=" || op == ">>=" || op == "&=" || op == "|=" || op == "^=") {
+                        lex.next();
+                        ExprPtr rhs = parseAssignmentExpression();
+                        auto be = make_ast<BinaryExpr>();
+                        be->op = op; be->lhs = lhs; be->rhs = rhs;
+                        be->kind = Expr::Kind::Binary; be->span = lhs->span;
+                        lhs = be;
+                    } else if (op == "+" || op == "-" || op == "*" || op == "/" || op == "%" ||
+                               op == "==" || op == "!=" || op == "<" || op == ">" || op == "<=" || op == ">=" ||
+                               op == "&&" || op == "||" || op == "&" || op == "|" || op == "^" ||
+                               op == "<<" || op == ">>" || op == ",") {
+                        // binary op: parse rhs as assignment-expression then build binary node
+                        lex.next();
+                        ExprPtr rhs = parseAssignmentExpression();
+                        auto be = make_ast<BinaryExpr>();
+                        be->op = op; be->lhs = lhs; be->rhs = rhs;
+                        be->kind = Expr::Kind::Binary; be->span = lhs->span;
+                        lhs = be;
+                    }
+                }
+                ExprPtr finalExpr = lhs;
                 if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
                 auto es = make_ast<ExprStmt>();
                 es->expr = finalExpr;
@@ -1624,6 +1651,7 @@ ExprPtr Parser::parsePrimary() {
                 if (!specs.typeSpecifiers.empty()) {
                     auto &ts = specs.typeSpecifiers.front();
                     if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su) { tn->kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? TypeNode::Kind::Struct : TypeNode::Kind::Union; tn->su = ts.su; }
                     else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
                     else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                 } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
@@ -1861,32 +1889,21 @@ ExprPtr Parser::parseUnaryExpression() {
 }
 
 // Parse postfix-expression including indexing, calls, member access, postfix ++/--
-ExprPtr Parser::parsePostfixExpression() {
-    // start with a primary expression
-    ExprPtr lhs = parsePrimary();
-    if (!lhs) return nullptr;
-
+ExprPtr Parser::applyPostfixSuffix(ExprPtr lhs) {
     while (true) {
         if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator)) break;
         std::string p = lex.peek()->lexeme();
 
         if (p == "[") {
-            // array subscript
             lex.next();
             ExprPtr idx = parseAssignmentExpression();
             if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "]") lex.next();
             auto ie = make_ast<IndexExpr>();
-            ie->base = lhs;
-            ie->index = idx;
-            ie->kind = Expr::Kind::Index;
-            ie->span = lhs->span;
+            ie->base = lhs; ie->index = idx; ie->kind = Expr::Kind::Index; ie->span = lhs->span;
             if (idx) ie->span.end = idx->span.end;
-            lhs = ie;
-            continue;
+            lhs = ie; continue;
         }
-
         if (p == "(") {
-            // function call
             lex.next();
             std::vector<ExprPtr> args;
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
@@ -1899,51 +1916,36 @@ ExprPtr Parser::parsePostfixExpression() {
             }
             if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
             auto ce = make_ast<CallExpr>();
-            ce->callee = lhs;
-            ce->args = std::move(args);
-            ce->kind = Expr::Kind::Call;
-            ce->span = lhs->span;
-            lhs = ce;
-            continue;
+            ce->callee = lhs; ce->args = std::move(args); ce->kind = Expr::Kind::Call; ce->span = lhs->span;
+            lhs = ce; continue;
         }
-
         if (p == "." || p == "->") {
-            bool isArrow = (p == "->");
-            lex.next();
+            bool isArrow = (p == "->"); lex.next();
             std::string member;
-            if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
-                member = lex.peek()->lexeme();
-                lex.next();
-            } else {
-                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected identifier after member access"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
-            }
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) { member = lex.peek()->lexeme(); lex.next(); }
             auto me = make_ast<MemberExpr>();
-            me->base = lhs;
-            me->member = member;
-            me->isArrow = isArrow;
-            me->kind = Expr::Kind::Member;
-            me->span = lhs->span;
-            lhs = me;
-            continue;
+            me->base = lhs; me->member = member; me->isArrow = isArrow; me->kind = Expr::Kind::Member; me->span = lhs->span;
+            lhs = me; continue;
         }
-
         if (p == "++" || p == "--") {
             lex.next();
             auto pe = make_ast<PostfixUnaryExpr>();
-            if (p == "++") pe->op = PostfixUnaryExpr::Op::Inc;
-            else pe->op = PostfixUnaryExpr::Op::Dec;
-            pe->base = lhs;
-            pe->kind = Expr::Kind::PostfixUnary;
-            pe->span = lhs->span;
-            lhs = pe;
-            continue;
+            pe->op = (p == "++") ? PostfixUnaryExpr::Op::Inc : PostfixUnaryExpr::Op::Dec;
+            pe->base = lhs; pe->kind = Expr::Kind::PostfixUnary; pe->span = lhs->span;
+            lhs = pe; continue;
         }
-
         break;
     }
-
     return lhs;
 }
+
+ExprPtr Parser::parsePostfixExpression() {
+    // start with a primary expression
+    ExprPtr lhs = parsePrimary();
+    if (!lhs) return nullptr;
+    return applyPostfixSuffix(lhs);
+}
+
 
 // Parse conditional-expression: logical-or or '?:' ternary form
 ExprPtr Parser::parseConditionalExpression() {
@@ -2152,6 +2154,7 @@ ExprPtr Parser::parseCastExpression() {
                 if (!specs.typeSpecifiers.empty()) {
                     auto &ts = specs.typeSpecifiers.front();
                     if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su) { tn->kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? TypeNode::Kind::Struct : TypeNode::Kind::Union; tn->su = ts.su; }
                     else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
                     else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                 } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
@@ -2371,3 +2374,4 @@ Designator Parser::parseDesignator() {
 }
 
 } // namespace wvmcc::parser
+
