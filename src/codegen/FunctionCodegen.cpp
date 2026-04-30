@@ -49,8 +49,37 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     }
     for (const auto& param : funcDef->params) {
         if (param.declarator && !param.declarator->id.name.empty()) {
+            // Build TypeNode from param specifiers so getExprTypeNode works for params.
+            wvmcc::parser::TypeNodePtr paramType;
+            for (const auto& ts : param.specifiers.typeSpecifiers) {
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                    && !ts.simple.empty()) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                    node->simple = ts.simple;
+                    paramType = node;
+                    break;
+                } else if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                           && ts.su) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                                 ? wvmcc::parser::TypeNode::Kind::Struct
+                                 : wvmcc::parser::TypeNode::Kind::Union;
+                    node->su = ts.su;
+                    paramType = node;
+                    break;
+                }
+            }
+            // Wrap with pointer if the declarator has a pointer prefix.
+            if (paramType && param.declarator->inner.has_value() && *param.declarator->inner
+                && (*param.declarator->inner)->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+                auto ptrNode = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                ptrNode->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                ptrNode->pointee = paramType;
+                paramType = ptrNode;
+            }
             ScalarLocal info;
-            info.type = nullptr;
+            info.type = paramType;
             info.isAddressTaken = false;
             info.localIndex = paramIdx;
             symbolTable_.define(param.declarator->id.name, info);
