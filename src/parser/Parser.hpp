@@ -72,6 +72,8 @@ private:
     ExprPtr parseAdditiveExpression();
     ExprPtr parseCastExpression();
     ExprPtr parsePostfixExpression();
+    // Apply postfix operators to an already-parsed LHS (for label-vs-expr disambiguation).
+    ExprPtr applyPostfixSuffix(ExprPtr lhs);
     
 private:
     std::vector<wvmcc::Diagnostic> diagnostics{};

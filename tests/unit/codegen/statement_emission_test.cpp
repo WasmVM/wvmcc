@@ -671,9 +671,10 @@ static int test_memory_local_prologue_epilogue() {
     // (&x) now correctly emits: Local_get{fp}, I64_const{0}, I64_add, Drop  (4 instrs)
     // return 0: I32_const{0}, Local_get{fp}, Global_set, Return              (4 instrs)
     // epilogue at end: Local_get{fp}, Global_set                             (2 instrs)
-    // Total: 5 prologue + 4 body + 4 return + 2 epilogue = 15
-    if (instrs.size() != 15) {
-        std::cerr << "test_memory_local_prologue_epilogue: expected 15 instrs, got " << instrs.size() << "\n";
+    // End{}                                                                  (1 instr)
+    // Total: 5 prologue + 4 body + 4 return + 2 epilogue + 1 end = 16
+    if (instrs.size() != 16) {
+        std::cerr << "test_memory_local_prologue_epilogue: expected 16 instrs, got " << instrs.size() << "\n";
         return 7;
     }
 
@@ -689,13 +690,16 @@ static int test_memory_local_prologue_epilogue() {
         std::cerr << "test_memory_local_prologue_epilogue: [12] expected Return\n"; return 10;
     }
 
-    // epilogue at end: instrs[13]=Local_get{fp}, [14]=Global_set
+    // epilogue at end: instrs[13]=Local_get{fp}, [14]=Global_set, [15]=End
     auto fpGet2 = asOneIdx(instrs[13], WasmVM::Opcode::Local_get);
     if (!fpGet2 || fpGet2->index != ltee->index) {
         std::cerr << "test_memory_local_prologue_epilogue: [13] expected Local_get{fp}\n"; return 11;
     }
     if (!is(instrs[14], WasmVM::Opcode::Global_set)) {
         std::cerr << "test_memory_local_prologue_epilogue: [14] expected Global_set\n"; return 12;
+    }
+    if (!is(instrs[15], WasmVM::Opcode::End)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [15] expected End\n"; return 13;
     }
     return 0;
 }
@@ -718,8 +722,8 @@ static int test_no_prologue_without_address_taken() {
     symbolTable.popScope();
 
     const auto& instrs = wasmFunc.body;
-    if (instrs.size() != 2) {
-        std::cerr << "test_no_prologue_without_address_taken: expected 2 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 3) {
+        std::cerr << "test_no_prologue_without_address_taken: expected 3 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     auto c = asI32Const(instrs[0]);
@@ -728,6 +732,9 @@ static int test_no_prologue_without_address_taken() {
     }
     if (!is(instrs[1], WasmVM::Opcode::Return)) {
         std::cerr << "test_no_prologue_without_address_taken: [1] expected Return\n"; return 3;
+    }
+    if (!is(instrs[2], WasmVM::Opcode::End)) {
+        std::cerr << "test_no_prologue_without_address_taken: [2] expected End\n"; return 4;
     }
     return 0;
 }

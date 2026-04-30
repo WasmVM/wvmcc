@@ -16,17 +16,27 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     AddressTakenAnalyzer analyzer;
     addressTakenNames_ = analyzer.analyze(funcDef);
 
-    // Detect struct return: if so, param 0 is the hidden sret pointer.
-    for (const auto& ts : funcDef->specifiers.typeSpecifiers) {
-        if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
-            && ts.su) {
-            auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
-            node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
-                         ? wvmcc::parser::TypeNode::Kind::Struct
-                         : wvmcc::parser::TypeNode::Kind::Union;
-            node->su = ts.su;
-            returnTypeNode_ = node;
-            break;
+    // Detect struct return: struct/union base type AND no pointer in the declarator chain
+    // before the function declarator.
+    bool hasReturnPointer = false;
+    for (auto cur = funcDef->declarator; cur;
+         cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Function
+            || cur->kind == wvmcc::parser::Declarator::Kind::Identifier) break;
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Pointer) { hasReturnPointer = true; break; }
+    }
+    if (!hasReturnPointer) {
+        for (const auto& ts : funcDef->specifiers.typeSpecifiers) {
+            if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                && ts.su) {
+                auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                             ? wvmcc::parser::TypeNode::Kind::Struct
+                             : wvmcc::parser::TypeNode::Kind::Union;
+                node->su = ts.su;
+                returnTypeNode_ = node;
+                break;
+            }
         }
     }
     bool isStructRet = returnTypeNode_ != nullptr;
@@ -70,6 +80,7 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         instrBuffer_ = std::move(prologue);
     }
 
+    instrBuffer_.push_back(WasmVM::Instr::End{});
     func.locals = localTypes_;
     func.body = instrBuffer_;
     return func;
@@ -539,6 +550,7 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
             }
             return;
         }
+    } else {
     }
     emit(WasmVM::Instr::Unreachable{});
 }
@@ -609,7 +621,91 @@ void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, b
 }
 
 void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr) {
-    emit(WasmVM::Instr::Unreachable{});
+    if (!expr.type) {
+        emit(WasmVM::Instr::Unreachable{});
+        return;
+    }
+
+    size_t size  = typeMap_.byteSize(expr.type);
+    size_t align = typeMap_.byteAlignment(expr.type);
+
+    if (framePointerLocal_ == -1) {
+        framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
+    }
+    if (align > 1) frameSize_ = (frameSize_ + align - 1) & ~(align - 1);
+    size_t bufOff = frameSize_;
+    frameSize_ += size;
+
+    // Compute and stash temp address: fp + bufOff
+    int addrLocal = allocRawLocal(WasmVM::ValueType::i64);
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)bufOff});
+    emit(WasmVM::Instr::I64_add{});
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)addrLocal});
+
+    bool isList = expr.init && expr.init->kind == wvmcc::parser::Initializer::Kind::List;
+    bool isStruct = expr.type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || expr.type->kind == wvmcc::parser::TypeNode::Kind::Union;
+
+    if (isList && isStruct && expr.type->su) {
+        // Struct/union list initializer: assign fields in declaration order.
+        // Match positionally (or by member designator).
+        size_t clauseIdx = 0;
+        for (const auto& member : expr.type->su->members) {
+            for (const auto& sd : member.declarators) {
+                if (!sd.declarator || sd.declarator->id.name.empty()) continue;
+                const std::string& fieldName = sd.declarator->id.name;
+
+                const wvmcc::parser::InitClause* clause = nullptr;
+                // Prefer member designator match
+                for (const auto& cl : expr.init->clauses) {
+                    if (!cl.designators.empty()
+                        && cl.designators[0].kind == wvmcc::parser::Designator::Kind::Member
+                        && cl.designators[0].member == fieldName) {
+                        clause = &cl;
+                        break;
+                    }
+                }
+                // Fall back to positional
+                if (!clause && clauseIdx < expr.init->clauses.size()) {
+                    const auto& cl = expr.init->clauses[clauseIdx];
+                    if (cl.designators.empty()) clause = &cl;
+                }
+                if (clause) ++clauseIdx;
+                if (!clause || !clause->init
+                    || clause->init->kind != wvmcc::parser::Initializer::Kind::Expr
+                    || !clause->init->expr) continue;
+
+                auto fieldType = typeMap_.getFieldType(expr.type, fieldName);
+                size_t fieldOff = typeMap_.getFieldOffset(expr.type, fieldName);
+
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
+                if (fieldOff > 0) {
+                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
+                    emit(WasmVM::Instr::I64_add{});
+                }
+                emitExpr(clause->init->expr);
+                emit(typeMap_.makeStore(fieldType, 1));
+            }
+        }
+    } else if (isList) {
+        // Scalar list initializer: use first clause only
+        if (!expr.init->clauses.empty()) {
+            const auto& cl = expr.init->clauses[0];
+            if (cl.init && cl.init->kind == wvmcc::parser::Initializer::Kind::Expr && cl.init->expr) {
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
+                emitExpr(cl.init->expr);
+                emit(typeMap_.makeStore(expr.type, 1));
+            }
+        }
+    } else if (expr.init && expr.init->kind == wvmcc::parser::Initializer::Kind::Expr && expr.init->expr) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
+        emitExpr(expr.init->expr);
+        emit(typeMap_.makeStore(expr.type, 1));
+    }
+
+    // Leave address on stack as the expression value
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
 }
 
 void FunctionCodegen::emitStmt(const wvmcc::parser::StmtPtr& stmt) {
@@ -783,8 +879,32 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
 }
 
 void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
-    if (stmt.expr) {
-        emitExpr(stmt.expr);
+    if (!stmt.expr) return;
+
+    // Determine whether the expression leaves a value on the stack.
+    // For direct calls to known functions, check the callee's return type.
+    bool leavesValue = true;
+    if (stmt.expr->kind == wvmcc::parser::Expr::Kind::Call) {
+        const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*stmt.expr);
+        if (call.callee && call.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
+            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*call.callee);
+            auto funcSym = symbolTable_.lookupFunction(id.name);
+            if (funcSym) {
+                bool isVoidRet = !funcSym->type
+                    || (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                        && !funcSym->type->simple.empty()
+                        && funcSym->type->simple[0]
+                           == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
+                bool isStructRet = funcSym->type
+                    && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                        || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union);
+                leavesValue = !isVoidRet && !isStructRet;
+            }
+        }
+    }
+
+    emitExpr(stmt.expr);
+    if (leavesValue) {
         emit(WasmVM::Instr::Drop{});
     }
 }

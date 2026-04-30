@@ -64,10 +64,40 @@ std::string ModuleCodegen::getFuncName(const wvmcc::parser::DeclaratorPtr& decl)
     return "";
 }
 
+// Build the return TypeNode for a function, correctly applying pointer qualifiers from
+// the declarator chain that appear before the function-kind declarator.
+static wvmcc::parser::TypeNodePtr buildReturnTypeNode(
+    const wvmcc::parser::DeclarationSpecifiers& specs,
+    const wvmcc::parser::DeclaratorPtr& decl,
+    const wvmcc::parser::Semantic& semantic) {
+
+    auto baseType = semantic.buildTypeFromDeclaration(specs, nullptr);
+
+    // Walk the declarator chain: collect Pointer/Array nodes that sit BEFORE the
+    // Function (or Identifier) node.  These qualify the return type.
+    std::vector<wvmcc::parser::Declarator::Kind> quals;
+    for (auto cur = decl; cur;
+         cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Function
+            || cur->kind == wvmcc::parser::Declarator::Kind::Identifier) break;
+        quals.push_back(cur->kind);
+    }
+    // Apply qualifiers from innermost-to-outermost.
+    for (auto it = quals.rbegin(); it != quals.rend(); ++it) {
+        if (*it == wvmcc::parser::Declarator::Kind::Pointer) {
+            auto ptrNode = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            ptrNode->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+            ptrNode->pointee = baseType;
+            baseType = ptrNode;
+        }
+    }
+    return baseType;
+}
+
 WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::FunctionDefPtr& funcDef) const {
     WasmVM::FuncType ft;
 
-    auto retType = semantic_.buildTypeFromDeclaration(funcDef->specifiers, nullptr);
+    auto retType = buildReturnTypeNode(funcDef->specifiers, funcDef->declarator, semantic_);
     bool isVoid = retType && retType->kind == wvmcc::parser::TypeNode::Kind::Builtin
                   && !retType->simple.empty()
                   && retType->simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
@@ -98,7 +128,7 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::Functi
 WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDecl(const wvmcc::parser::DeclarationPtr& decl) const {
     WasmVM::FuncType ft;
 
-    auto retType = semantic_.buildTypeFromDeclaration(decl->specifiers, nullptr);
+    auto retType = buildReturnTypeNode(decl->specifiers, decl->declarator, semantic_);
     bool isVoid = retType && retType->kind == wvmcc::parser::TypeNode::Kind::Builtin
                   && !retType->simple.empty()
                   && retType->simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
@@ -162,7 +192,7 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
 
     std::string name = getFuncName(funcDef->declarator);
     FuncSymbol sym;
-    sym.type = semantic_.buildTypeFromDeclaration(funcDef->specifiers, nullptr);
+    sym.type = buildReturnTypeNode(funcDef->specifiers, funcDef->declarator, semantic_);
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = false;
     symbolTable_.defineFunction(name, sym);
