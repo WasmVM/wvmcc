@@ -31,3 +31,9 @@ target_include_directories(wvmcc-statement-emission-test PRIVATE ${WASMVM_INCLUD
 target_link_directories(wvmcc-statement-emission-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-statement-emission-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME statement-emission COMMAND wvmcc-statement-emission-test)
+
+add_executable(wvmcc-control-flow-test control_flow_test.cpp ${CODEGEN_SRCS})
+target_include_directories(wvmcc-control-flow-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-control-flow-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-control-flow-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME control-flow COMMAND wvmcc-control-flow-test)

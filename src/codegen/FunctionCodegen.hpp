@@ -4,14 +4,26 @@
 #include "SymbolTable.hpp"
 #include "GlobalDataAllocator.hpp"
 #include "AddressTakenAnalyzer.hpp"
+#include "../common.hpp"
 #include "../parser/AST.hpp"
 #include "../parser/Semantic.hpp"
 #include <WasmVM.hpp>
 #include <vector>
 #include <stack>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace wvmcc::codegen {
+
+// Tracks break/continue targets for nested loops and switch statements.
+// breakDepth/continueDepth store the value of currentBlockDepth_ *after* the
+// corresponding scope (Block/Loop) has been opened. The Br index from any
+// emission point inside is then `currentBlockDepth_ - savedDepth`.
+struct ControlFlowEntry {
+    enum Kind { Loop, Switch } kind;
+    int breakDepth;
+    int continueDepth;
+};
 
 class FunctionCodegen {
 public:
@@ -37,6 +49,10 @@ public:
         return instrBuffer_;
     }
 
+    const std::vector<wvmcc::Diagnostic>& getDiagnostics() const {
+        return diagnostics_;
+    }
+
     void emit(const WasmVM::WasmInstr& instr);
 
     // needLValue=true: leave the address (i64) on the stack rather than the value.
@@ -56,6 +72,11 @@ public:
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);
     void emitBlockItem(const wvmcc::parser::BlockItemPtr& item);
 
+    // Emit a sequence of block items at one lexical level, lifting forward
+    // gotos at this level into wrapping Blocks. Used by both function-body
+    // emission and nested compound-statement emission.
+    void emitItemsWithGotoLift(const std::vector<wvmcc::parser::BlockItemPtr>& items);
+
     // For testing: force the frame-pointer local to a specific index.
     // In production, generate() sets this automatically when address-taken vars exist.
     void forceFramePointerLocal(int idx) { framePointerLocal_ = idx; }
@@ -70,7 +91,9 @@ private:
     std::vector<WasmVM::ValueType> localTypes_;
 
     int localIndexCounter_ = 0;
-    std::stack<int> controlFlowStack_;
+    std::stack<ControlFlowEntry> controlFlowStack_;
+    int currentBlockDepth_ = 0;            // # currently open block/loop/if scopes
+    std::vector<wvmcc::Diagnostic> diagnostics_;
     int framePointerLocal_ = -1;
     size_t frameSize_ = 0;
 
@@ -94,6 +117,25 @@ private:
     void emitIfStmt(const wvmcc::parser::IfStmt& stmt);
     void emitWhileStmt(const wvmcc::parser::WhileStmt& stmt);
     void emitForStmt(const wvmcc::parser::ForStmt& stmt);
+    void emitDoWhileStmt(const wvmcc::parser::DoWhileStmt& stmt);
+    void emitSwitchStmt(const wvmcc::parser::SwitchStmt& stmt);
+    void emitBreakStmt(const wvmcc::parser::BreakStmt& stmt);
+    void emitContinueStmt(const wvmcc::parser::ContinueStmt& stmt);
+    void emitGotoStmt(const wvmcc::parser::GotoStmt& stmt);
+    void emitLabelStmt(const wvmcc::parser::LabelStmt& stmt);
+
+    // Control-flow helpers: push/pop ControlFlowEntry as scopes are opened.
+    // pushLoop() takes explicit absolute depths for break / continue targets
+    // (the value of currentBlockDepth_ right after the corresponding Block /
+    // Loop was opened). pushSwitch() expects the outer break-target Block
+    // has already been emitted.
+    void pushLoop(int breakDepthAtOpen, int continueDepthAtOpen);
+    void pushSwitch();
+    void popControlFlow();
+    // Br index for break/continue from the current emission point. continue
+    // skips Switch entries to find the nearest enclosing loop.
+    WasmVM::index_t breakDepth() const;
+    WasmVM::index_t continueDepth() const;
 
     WasmVM::ValueType getExprType(const wvmcc::parser::ExprPtr& expr) const;
 
