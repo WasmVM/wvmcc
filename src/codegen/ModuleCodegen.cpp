@@ -1,5 +1,6 @@
 #include "ModuleCodegen.hpp"
 #include "FunctionCodegen.hpp"
+#include "AddressTakenAnalyzer.hpp"
 #include <stdexcept>
 
 namespace wvmcc::codegen {
@@ -10,16 +11,43 @@ ModuleCodegen::ModuleCodegen(const wvmcc::parser::Semantic& semantic)
 WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitPtr& tu) {
     module_ = WasmVM::WasmModule{};
     nextFuncIndex_ = 0;
+    funcTypeIdx_.clear();
+    funcTableSlots_.clear();
 
     setupMemory();
     setupGlobals();
 
     symbolTable_.pushScope();
     firstPass(tu);
+    analyzeFuncAddressTaken(tu);
     secondPass(tu);
     symbolTable_.popScope();
 
     return module_;
+}
+
+std::optional<size_t> ModuleCodegen::getFuncTableSlot(const std::string& name) const {
+    auto it = funcTableSlots_.find(name);
+    if (it == funcTableSlots_.end()) return std::nullopt;
+    return it->second;
+}
+
+std::optional<WasmVM::index_t> ModuleCodegen::getFuncTypeIdx(const std::string& name) const {
+    auto it = funcTypeIdx_.find(name);
+    if (it == funcTypeIdx_.end()) return std::nullopt;
+    return it->second;
+}
+
+WasmVM::index_t ModuleCodegen::allocateGuardGlobal() {
+    WasmVM::WasmGlobal g;
+    g.type = WasmVM::GlobalType{WasmVM::GlobalType::variable, WasmVM::ValueType::i32};
+    g.init = WasmVM::Instr::I32_const{0};
+    module_.globals.push_back(g);
+    return (WasmVM::index_t)(module_.globals.size() - 1);
+}
+
+size_t ModuleCodegen::allocateStaticStorage(size_t size, size_t align) {
+    return dataAllocator_.allocate(size, align);
 }
 
 void ModuleCodegen::setupMemory() {
@@ -188,9 +216,11 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     if (!funcDef) return;
 
     auto ft = buildFuncTypeFromDef(funcDef);
-    internFuncType(ft);
+    WasmVM::index_t typeidx = internFuncType(ft);
 
     std::string name = getFuncName(funcDef->declarator);
+    funcTypeIdx_[name] = typeidx;
+
     FuncSymbol sym;
     sym.type = buildReturnTypeNode(funcDef->specifiers, funcDef->declarator, semantic_);
     sym.funcIndex = nextFuncIndex_++;
@@ -205,6 +235,7 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     WasmVM::index_t typeidx = internFuncType(ft);
 
     std::string name = getFuncName(decl->declarator);
+    funcTypeIdx_[name] = typeidx;
 
     WasmVM::WasmImport imp;
     imp.module = "env";
@@ -217,6 +248,59 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = true;
     symbolTable_.defineFunction(name, sym);
+}
+
+// ---------------------------------------------------------------------------
+// Function-pointer support: scan every function body for `&funcname` usage,
+// allocate one funcref-table slot per address-taken function, and emit an
+// active element segment populating the table.
+// ---------------------------------------------------------------------------
+
+void ModuleCodegen::analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnitPtr& tu) {
+    if (!tu) return;
+
+    AddressTakenAnalyzer analyzer;
+    std::unordered_set<std::string> allTaken;
+    for (const auto& ext : tu->externals) {
+        if (!ext) continue;
+        if (auto fd = std::get_if<wvmcc::parser::FunctionDefPtr>(&ext->decl)) {
+            if (!*fd) continue;
+            auto names = analyzer.analyze(*fd);
+            for (auto& n : names) allTaken.insert(n);
+        }
+    }
+
+    // Filter to names that resolve to a function symbol.
+    std::vector<std::pair<std::string, int>> tableFuncs;  // name → funcIndex
+    for (const auto& name : allTaken) {
+        auto sym = symbolTable_.lookupFunction(name);
+        if (!sym) continue;
+        size_t slot = tableFuncs.size();
+        funcTableSlots_[name] = slot;
+        tableFuncs.emplace_back(name, sym->funcIndex);
+    }
+
+    if (tableFuncs.empty()) return;
+
+    // Add a single funcref table sized exactly to fit all slots.
+    WasmVM::TableType t;
+    t.limits.min = (WasmVM::offset_t)tableFuncs.size();
+    t.limits.max = (WasmVM::offset_t)tableFuncs.size();
+    t.limits.is64 = false;
+    t.reftype = WasmVM::RefType::funcref;
+    module_.tables.push_back(t);
+
+    // Active element segment: populate the table at offset 0.
+    WasmVM::WasmElem elem;
+    elem.type = WasmVM::RefType::funcref;
+    elem.mode.type = WasmVM::WasmElem::ElemMode::Mode::active;
+    elem.mode.tableidx = 0;
+    elem.mode.offset = WasmVM::Instr::I32_const{0};
+    for (const auto& [name, funcIdx] : tableFuncs) {
+        (void)name;
+        elem.elemlist.push_back(WasmVM::Instr::Ref_func{(WasmVM::index_t)funcIdx});
+    }
+    module_.elems.push_back(std::move(elem));
 }
 
 // ---------------------------------------------------------------------------
@@ -240,7 +324,7 @@ void ModuleCodegen::secondPass(const wvmcc::parser::TranslationUnitPtr& tu) {
 void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef) {
     if (!funcDef) return;
 
-    FunctionCodegen funcCodegen(typeMap_, symbolTable_, &dataAllocator_);
+    FunctionCodegen funcCodegen(typeMap_, symbolTable_, &dataAllocator_, this, &semantic_);
     auto wasmFunc = funcCodegen.generate(funcDef, semantic_);
 
     auto ft = buildFuncTypeFromDef(funcDef);

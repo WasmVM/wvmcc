@@ -1157,11 +1157,13 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 auto bi = make_ast<BlockItem>();
                 bi->item = decl;
                 // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
-                // external or internal linkage, the declaration shall have no initializer.
-                if (decl && decl->initializer.has_value() && (specs.hasStorage(StorageClass::Extern) || specs.hasStorage(StorageClass::Static))) {
+                // external linkage, the declaration shall have no initializer. Block-scope
+                // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
+                // permitted (and are evaluated once on first call).
+                if (decl && decl->initializer.has_value() && specs.hasStorage(StorageClass::Extern)) {
                     wvmcc::Diagnostic diag;
                     diag.severity = wvmcc::Diagnostic::Severity::Error;
-                    diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
+                    diag.message = "declaration at block scope with external linkage shall not have an initializer";
                     diag.span = decl->span;
                     diagnostics.push_back(std::move(diag));
                 }

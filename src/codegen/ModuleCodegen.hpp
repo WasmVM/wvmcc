@@ -9,6 +9,7 @@
 #include "../parser/Semantic.hpp"
 #include <WasmVM.hpp>
 #include <vector>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace wvmcc::codegen {
@@ -16,13 +17,25 @@ namespace wvmcc::codegen {
 class ModuleCodegen {
 public:
     ModuleCodegen(const wvmcc::parser::Semantic& semantic);
-    
+
     // Generate a Wasm module from a translation unit
     WasmVM::WasmModule generate(const wvmcc::parser::TranslationUnitPtr& tu);
-    
+
+    // Public hooks used by FunctionCodegen during body emission.
+    // Returns table-slot index for an address-taken function, or std::nullopt.
+    std::optional<size_t> getFuncTableSlot(const std::string& name) const;
+    // typeIdx in module_.types for a function by name (looked up via FuncSymbol).
+    std::optional<WasmVM::index_t> getFuncTypeIdx(const std::string& name) const;
+    // Append a new mutable i32 global initialized to 0; return its index.
+    WasmVM::index_t allocateGuardGlobal();
+    // Allocate space in mem[0] for a static local; return its address.
+    size_t allocateStaticStorage(size_t size, size_t align);
+    // Intern a function type into module_.types (deduplicates).
+    WasmVM::index_t internFuncType(const WasmVM::FuncType& ft);
+
 private:
     const wvmcc::parser::Semantic& semantic_;
-    
+
     // Code generation components
     TypeMap typeMap_;
     SymbolTable symbolTable_;
@@ -35,8 +48,13 @@ private:
     // Monotonically increasing function index counter (imports + defs share one space)
     int nextFuncIndex_ = 0;
 
-    // Intern a FuncType into module_.types (deduplicates)
-    WasmVM::index_t internFuncType(const WasmVM::FuncType& ft);
+    // Function-name → type-idx (in module_.types) for every registered function.
+    // Filled during firstPass() so indirect calls and `&func` know the FuncType.
+    std::unordered_map<std::string, WasmVM::index_t> funcTypeIdx_;
+
+    // Function-name → table-slot index (in funcref table 0) for every
+    // address-taken function. Populated by analyzeFuncAddressTaken().
+    std::unordered_map<std::string, size_t> funcTableSlots_;
 
     // Extract the identifier name from a (possibly nested) declarator
     std::string getFuncName(const wvmcc::parser::DeclaratorPtr& decl) const;
@@ -53,6 +71,9 @@ private:
     void setupMemory();
     void setupGlobals();
     void firstPass(const wvmcc::parser::TranslationUnitPtr& tu);
+    // Walk every function body to collect &funcname expressions; allocate
+    // table slots and emit a funcref table + element segment.
+    void analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnitPtr& tu);
     void secondPass(const wvmcc::parser::TranslationUnitPtr& tu);
     void emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef);
     void emitGlobalScalar(const wvmcc::parser::DeclarationPtr& decl);

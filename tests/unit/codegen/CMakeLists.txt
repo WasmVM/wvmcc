@@ -2,6 +2,7 @@ set(SRC ${PROJECT_SOURCE_DIR}/src)
 
 set(CODEGEN_SRCS
     ${SRC}/codegen/FunctionCodegen.cpp
+    ${SRC}/codegen/ModuleCodegen.cpp
     ${SRC}/codegen/TypeMap.cpp
     ${SRC}/codegen/SymbolTable.cpp
     ${SRC}/codegen/LayoutEngine.cpp
@@ -37,3 +38,9 @@ target_include_directories(wvmcc-control-flow-test PRIVATE ${WASMVM_INCLUDE_DIR}
 target_link_directories(wvmcc-control-flow-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-control-flow-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME control-flow COMMAND wvmcc-control-flow-test)
+
+add_executable(wvmcc-phase4-test phase4_test.cpp ${CODEGEN_SRCS})
+target_include_directories(wvmcc-phase4-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-phase4-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-phase4-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME phase4 COMMAND wvmcc-phase4-test)
