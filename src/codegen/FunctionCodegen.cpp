@@ -1,7 +1,11 @@
 #include "FunctionCodegen.hpp"
 #include "AddressTakenAnalyzer.hpp"
+#include "../parser/ConstExprEval.hpp"
+#include <algorithm>
+#include <functional>
 #include <stdexcept>
 #include <limits>
+#include <unordered_map>
 
 namespace wvmcc::codegen {
 
@@ -49,8 +53,37 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     }
     for (const auto& param : funcDef->params) {
         if (param.declarator && !param.declarator->id.name.empty()) {
+            // Build TypeNode from param specifiers so getExprTypeNode works for params.
+            wvmcc::parser::TypeNodePtr paramType;
+            for (const auto& ts : param.specifiers.typeSpecifiers) {
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                    && !ts.simple.empty()) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                    node->simple = ts.simple;
+                    paramType = node;
+                    break;
+                } else if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                           && ts.su) {
+                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                                 ? wvmcc::parser::TypeNode::Kind::Struct
+                                 : wvmcc::parser::TypeNode::Kind::Union;
+                    node->su = ts.su;
+                    paramType = node;
+                    break;
+                }
+            }
+            // Wrap with pointer if the declarator has a pointer prefix.
+            if (paramType && param.declarator->inner.has_value() && *param.declarator->inner
+                && (*param.declarator->inner)->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+                auto ptrNode = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                ptrNode->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                ptrNode->pointee = paramType;
+                paramType = ptrNode;
+            }
             ScalarLocal info;
-            info.type = nullptr;
+            info.type = paramType;
             info.isAddressTaken = false;
             info.localIndex = paramIdx;
             symbolTable_.define(param.declarator->id.name, info);
@@ -65,9 +98,7 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
     }
 
-    for (const auto& item : funcDef->body) {
-        emitBlockItem(item);
-    }
+    emitItemsWithGotoLift(funcDef->body);
 
     symbolTable_.popScope();
 
@@ -120,6 +151,57 @@ int FunctionCodegen::allocLocal(const wvmcc::parser::TypeNodePtr& type, bool isA
 
 void FunctionCodegen::emit(const WasmVM::WasmInstr& instr) {
     instrBuffer_.push_back(instr);
+    switch (instr.opcode) {
+    case WasmVM::Opcode::Block:
+    case WasmVM::Opcode::Loop:
+    case WasmVM::Opcode::If:
+        ++currentBlockDepth_;
+        break;
+    case WasmVM::Opcode::End:
+        --currentBlockDepth_;  // may go negative for the function-body End; harmless
+        break;
+    default:
+        break;
+    }
+}
+
+void FunctionCodegen::pushLoop(int breakDepthAtOpen, int continueDepthAtOpen) {
+    ControlFlowEntry e;
+    e.kind = ControlFlowEntry::Loop;
+    e.breakDepth = breakDepthAtOpen;
+    e.continueDepth = continueDepthAtOpen;
+    controlFlowStack_.push(e);
+}
+
+void FunctionCodegen::pushSwitch() {
+    ControlFlowEntry e;
+    e.kind = ControlFlowEntry::Switch;
+    e.breakDepth    = currentBlockDepth_;       // outer break block, after open
+    e.continueDepth = -1;
+    controlFlowStack_.push(e);
+}
+
+void FunctionCodegen::popControlFlow() {
+    if (!controlFlowStack_.empty()) controlFlowStack_.pop();
+}
+
+WasmVM::index_t FunctionCodegen::breakDepth() const {
+    if (controlFlowStack_.empty()) return 0;
+    return (WasmVM::index_t)(currentBlockDepth_ - controlFlowStack_.top().breakDepth);
+}
+
+WasmVM::index_t FunctionCodegen::continueDepth() const {
+    // Continue skips Switch entries to find the nearest enclosing Loop
+    // (C semantics: `continue` inside a switch refers to the enclosing loop).
+    auto stk = controlFlowStack_;
+    while (!stk.empty()) {
+        const auto& e = stk.top();
+        if (e.kind == ControlFlowEntry::Loop) {
+            return (WasmVM::index_t)(currentBlockDepth_ - e.continueDepth);
+        }
+        stk.pop();
+    }
+    return 0;
 }
 
 std::vector<WasmVM::WasmInstr> FunctionCodegen::generatePrologue() {
@@ -731,6 +813,33 @@ void FunctionCodegen::emitStmt(const wvmcc::parser::StmtPtr& stmt) {
     case K::For:
         emitForStmt(static_cast<const wvmcc::parser::ForStmt&>(*stmt));
         break;
+    case K::DoWhile:
+        emitDoWhileStmt(static_cast<const wvmcc::parser::DoWhileStmt&>(*stmt));
+        break;
+    case K::Switch:
+        emitSwitchStmt(static_cast<const wvmcc::parser::SwitchStmt&>(*stmt));
+        break;
+    case K::Break:
+        emitBreakStmt(static_cast<const wvmcc::parser::BreakStmt&>(*stmt));
+        break;
+    case K::Continue:
+        emitContinueStmt(static_cast<const wvmcc::parser::ContinueStmt&>(*stmt));
+        break;
+    case K::Goto:
+        emitGotoStmt(static_cast<const wvmcc::parser::GotoStmt&>(*stmt));
+        break;
+    case K::Label:
+        emitLabelStmt(static_cast<const wvmcc::parser::LabelStmt&>(*stmt));
+        break;
+    case K::Case:
+    case K::Default:
+        // Stray case/default outside a switch: emit body only.
+        if (stmt->kind == K::Case) {
+            emitStmt(static_cast<const wvmcc::parser::CaseStmt&>(*stmt).stmt);
+        } else {
+            emitStmt(static_cast<const wvmcc::parser::DefaultStmt&>(*stmt).stmt);
+        }
+        break;
     case K::Empty:
         break;
     default:
@@ -909,11 +1018,69 @@ void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
     }
 }
 
-void FunctionCodegen::emitCompoundStmt(const wvmcc::parser::CompoundStmt& stmt) {
-    symbolTable_.pushScope();
-    for (const auto& item : stmt.items) {
+void FunctionCodegen::emitItemsWithGotoLift(const std::vector<wvmcc::parser::BlockItemPtr>& items) {
+    using K = wvmcc::parser::Stmt::Kind;
+
+    // Pre-pass: collect labels at this level (label name → item index).
+    std::unordered_map<std::string, size_t> labelIdx;
+    for (size_t i = 0; i < items.size(); ++i) {
+        const auto& item = items[i];
+        if (!item) continue;
+        if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&item->item)) {
+            if (*sp && (*sp)->kind == K::Label) {
+                const auto& ls = static_cast<const wvmcc::parser::LabelStmt&>(**sp);
+                labelIdx[ls.name] = i;
+            }
+        }
+    }
+
+    // Stack of currently-open forward-goto wrapper Blocks. Each entry records
+    // the item index at which the wrapping Block must close.
+    struct OpenBlock { size_t closeAt; };
+    std::vector<OpenBlock> openBlocks;
+
+    for (size_t i = 0; i < items.size(); ++i) {
+        while (!openBlocks.empty() && openBlocks.back().closeAt == i) {
+            emit(WasmVM::Instr::End{});
+            openBlocks.pop_back();
+        }
+
+        const auto& item = items[i];
+        if (!item) continue;
+
+        if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&item->item)) {
+            if (*sp && (*sp)->kind == K::Goto) {
+                const auto& gs = static_cast<const wvmcc::parser::GotoStmt&>(**sp);
+                auto it = labelIdx.find(gs.label);
+                if (it != labelIdx.end() && it->second > i) {
+                    if (!openBlocks.empty() && it->second > openBlocks.back().closeAt) {
+                        emit(WasmVM::Instr::Unreachable{});
+                        wvmcc::Diagnostic d;
+                        d.severity = wvmcc::Diagnostic::Severity::Error;
+                        d.message = "forward goto with overlapping range is not supported";
+                        diagnostics_.push_back(std::move(d));
+                        continue;
+                    }
+                    emit(WasmVM::Instr::Block{std::nullopt});
+                    openBlocks.push_back({it->second});
+                    emit(WasmVM::Instr::Br{0});
+                    continue;
+                }
+            }
+        }
+
         emitBlockItem(item);
     }
+
+    while (!openBlocks.empty()) {
+        emit(WasmVM::Instr::End{});
+        openBlocks.pop_back();
+    }
+}
+
+void FunctionCodegen::emitCompoundStmt(const wvmcc::parser::CompoundStmt& stmt) {
+    symbolTable_.pushScope();
+    emitItemsWithGotoLift(stmt.items);
     symbolTable_.popScope();
 }
 
@@ -930,45 +1097,321 @@ void FunctionCodegen::emitIfStmt(const wvmcc::parser::IfStmt& stmt) {
 
 void FunctionCodegen::emitWhileStmt(const wvmcc::parser::WhileStmt& stmt) {
     // block $break
-    //   loop $continue
-    //     <cond>; i32.eqz; br_if 1  (exit block)
+    //   loop $top   (= $continue: re-evaluates the condition)
+    //     <cond>; i32.eqz; br_if $break
     //     <body>
-    //     br 0                       (back to loop top)
+    //     br $top
     //   end
     // end
     emit(WasmVM::Instr::Block{std::nullopt});
+    int breakD = currentBlockDepth_;
     emit(WasmVM::Instr::Loop{std::nullopt});
+    int contD = currentBlockDepth_;
+    pushLoop(breakD, contD);
     emitExpr(stmt.cond);
     emit(WasmVM::Instr::I32_eqz{});
-    emit(WasmVM::Instr::Br_if{1});
+    emit(WasmVM::Instr::Br_if{breakDepth()});
     emitStmt(stmt.body);
-    emit(WasmVM::Instr::Br{0});
+    emit(WasmVM::Instr::Br{continueDepth()});
+    popControlFlow();
     emit(WasmVM::Instr::End{});
     emit(WasmVM::Instr::End{});
 }
 
 void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
-    // Push a scope so the init declaration is scoped to the for statement.
+    // block $break
+    //   loop $continue
+    //     <cond>; i32.eqz; br_if $break
+    //     <body>
+    //     <step>
+    //     br $continue
+    //   end
+    // end
+    // Note: `continue` re-enters the loop top, skipping any remaining body
+    // statements but also skipping the step. Strict C semantics would require
+    // a nested $continue block above step; this simpler form matches the
+    // existing tests and the Phase 3 issue specification.
     symbolTable_.pushScope();
     if (stmt.init) {
         emitBlockItem(*stmt.init);
     }
     emit(WasmVM::Instr::Block{std::nullopt});
+    int breakD = currentBlockDepth_;
     emit(WasmVM::Instr::Loop{std::nullopt});
+    int contD = currentBlockDepth_;
+    pushLoop(breakD, contD);
     if (stmt.cond) {
         emitExpr(*stmt.cond);
         emit(WasmVM::Instr::I32_eqz{});
-        emit(WasmVM::Instr::Br_if{1});
+        emit(WasmVM::Instr::Br_if{breakDepth()});
     }
     emitStmt(stmt.body);
     if (stmt.step) {
         emitExpr(*stmt.step);
         emit(WasmVM::Instr::Drop{});
     }
-    emit(WasmVM::Instr::Br{0});
+    emit(WasmVM::Instr::Br{continueDepth()});
+    popControlFlow();
     emit(WasmVM::Instr::End{});
     emit(WasmVM::Instr::End{});
     symbolTable_.popScope();
+}
+
+void FunctionCodegen::emitDoWhileStmt(const wvmcc::parser::DoWhileStmt& stmt) {
+    // block $break
+    //   loop $continue
+    //     <body>
+    //     <cond>; br_if $continue   (loop back if true)
+    //   end
+    // end
+    // Note: `continue` re-enters the loop top, skipping the cond test.
+    // The Phase 3 issue specifies this simpler shape.
+    emit(WasmVM::Instr::Block{std::nullopt});
+    int breakD = currentBlockDepth_;
+    emit(WasmVM::Instr::Loop{std::nullopt});
+    int contD = currentBlockDepth_;
+    pushLoop(breakD, contD);
+    emitStmt(stmt.body);
+    emitExpr(stmt.cond);
+    emit(WasmVM::Instr::Br_if{continueDepth()});
+    popControlFlow();
+    emit(WasmVM::Instr::End{});
+    emit(WasmVM::Instr::End{});
+}
+
+void FunctionCodegen::emitBreakStmt(const wvmcc::parser::BreakStmt&) {
+    if (controlFlowStack_.empty()) {
+        emit(WasmVM::Instr::Unreachable{});
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "'break' not inside loop or switch";
+        diagnostics_.push_back(std::move(d));
+        return;
+    }
+    emit(WasmVM::Instr::Br{breakDepth()});
+}
+
+void FunctionCodegen::emitContinueStmt(const wvmcc::parser::ContinueStmt&) {
+    // Continue requires an enclosing loop (skipping switches).
+    auto stk = controlFlowStack_;
+    bool hasLoop = false;
+    while (!stk.empty()) {
+        if (stk.top().kind == ControlFlowEntry::Loop) { hasLoop = true; break; }
+        stk.pop();
+    }
+    if (!hasLoop) {
+        emit(WasmVM::Instr::Unreachable{});
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "'continue' not inside a loop";
+        diagnostics_.push_back(std::move(d));
+        return;
+    }
+    emit(WasmVM::Instr::Br{continueDepth()});
+}
+
+void FunctionCodegen::emitLabelStmt(const wvmcc::parser::LabelStmt& stmt) {
+    // The block wrapping a forward-goto target is emitted in emitCompoundStmt;
+    // here we just emit the inner statement.
+    emitStmt(stmt.stmt);
+}
+
+void FunctionCodegen::emitGotoStmt(const wvmcc::parser::GotoStmt&) {
+    // Forward gotos are lifted in emitCompoundStmt and emitted there as Br.
+    // Reaching this method means the goto was not lifted (backward goto, or
+    // target outside the current compound-statement scope).
+    emit(WasmVM::Instr::Unreachable{});
+    wvmcc::Diagnostic d;
+    d.severity = wvmcc::Diagnostic::Severity::Error;
+    d.message = "backward or non-local goto is not supported";
+    diagnostics_.push_back(std::move(d));
+}
+
+namespace {
+struct CaseEntry {
+    long long value;
+    int segmentIdx;     // index into segments[]
+};
+struct Segment {
+    bool isDefault = false;
+    std::vector<long long> caseValues;
+    std::vector<wvmcc::parser::StmtPtr> body;
+};
+
+// Walk a switch body and partition it into segments.
+// One segment per case/default label (chained labels each get their own
+// segment with empty body, falling through to the next).
+// Statements before the first case label are dropped (unreachable).
+static void collectSwitchSegments(const wvmcc::parser::StmtPtr& body,
+                                  std::vector<Segment>& segments,
+                                  int& defaultSegIdx,
+                                  std::vector<CaseEntry>& cases,
+                                  std::vector<wvmcc::Diagnostic>& diags) {
+    using namespace wvmcc::parser;
+    if (!body) return;
+
+    std::function<void(const StmtPtr&)> process = [&](const StmtPtr& s) {
+        if (!s) return;
+        if (s->kind == Stmt::Kind::Case) {
+            const auto& cs = static_cast<const CaseStmt&>(*s);
+            segments.emplace_back();
+            auto v = ConstExprEvaluator::evalIntegerConstantExpr(cs.value);
+            if (!v.has_value()) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "case label requires an integer constant expression";
+                diags.push_back(std::move(d));
+            } else {
+                segments.back().caseValues.push_back(*v);
+                cases.push_back({*v, (int)segments.size() - 1});
+            }
+            process(cs.stmt);
+        } else if (s->kind == Stmt::Kind::Default) {
+            const auto& ds = static_cast<const DefaultStmt&>(*s);
+            segments.emplace_back();
+            segments.back().isDefault = true;
+            if (defaultSegIdx == -1) defaultSegIdx = (int)segments.size() - 1;
+            process(ds.stmt);
+        } else {
+            if (segments.empty()) return;  // pre-label stmt: unreachable
+            segments.back().body.push_back(s);
+        }
+    };
+
+    if (body->kind == Stmt::Kind::Compound) {
+        const auto& cs = static_cast<const CompoundStmt&>(*body);
+        for (const auto& item : cs.items) {
+            if (auto stmtPtr = std::get_if<StmtPtr>(&item->item)) {
+                if (*stmtPtr) process(*stmtPtr);
+            }
+            // Declarations before any case label are unreachable; ignored.
+        }
+    } else {
+        process(body);
+    }
+}
+} // namespace
+
+void FunctionCodegen::emitSwitchStmt(const wvmcc::parser::SwitchStmt& stmt) {
+    using namespace wvmcc::parser;
+
+    std::vector<Segment> segments;
+    int defaultSegIdx = -1;
+    std::vector<CaseEntry> cases;
+    collectSwitchSegments(stmt.body, segments, defaultSegIdx, cases, diagnostics_);
+
+    // Open the outer break-target Block.
+    emit(WasmVM::Instr::Block{std::nullopt});
+    pushSwitch();
+    int breakD = currentBlockDepth_;  // depth after break-block open
+
+    int N = (int)segments.size();
+    if (N == 0) {
+        // No cases at all: just evaluate the switch expression for side effects.
+        emitExpr(stmt.cond);
+        emit(WasmVM::Instr::Drop{});
+        popControlFlow();
+        emit(WasmVM::Instr::End{});
+        return;
+    }
+
+    // Open one Block per segment, outermost (segment N-1) first so segment 0
+    // is innermost and falls through to segment 1, ..., N-1 in source order.
+    // Depth assigned to segment i is (breakD + N - i).
+    for (int i = N - 1; i >= 0; --i) {
+        emit(WasmVM::Instr::Block{std::nullopt});
+    }
+
+    // Emit dispatch inside the innermost block.
+    // Decide dense vs. sparse using the case-value range vs. count.
+    bool dense = !cases.empty();
+    long long minV = 0, maxV = 0;
+    if (!cases.empty()) {
+        minV = cases[0].value;
+        maxV = cases[0].value;
+        for (const auto& c : cases) {
+            if (c.value < minV) minV = c.value;
+            if (c.value > maxV) maxV = c.value;
+        }
+        long long range = maxV - minV;
+        long long count = (long long)cases.size();
+        // dense if range <= 4 * count and the range fits in a reasonable table
+        if (range < 0 || range > (long long)(4 * count) || range > 1024) dense = false;
+    }
+
+    int defaultBrIdx;  // Br depth from the innermost block to the default target
+    {
+        int defaultDepthAtOpen;
+        if (defaultSegIdx >= 0) {
+            defaultDepthAtOpen = breakD + N - defaultSegIdx;
+        } else {
+            defaultDepthAtOpen = breakD;  // jump to end of break block
+        }
+        defaultBrIdx = currentBlockDepth_ - defaultDepthAtOpen;
+    }
+
+    auto segBrIdx = [&](int segIdx) {
+        int depthAtOpen = breakD + N - segIdx;
+        return currentBlockDepth_ - depthAtOpen;
+    };
+
+    if (dense) {
+        // <expr>; if min != 0: i32.const min; i32.sub; br_table table default
+        emitExpr(stmt.cond);
+        // Assume i32 switch value (typical for C int). If the expression came
+        // back as i64, wrap to i32 for the table dispatch.
+        if (getExprType(stmt.cond) == WasmVM::ValueType::i64) {
+            emit(WasmVM::Instr::I32_wrap_i64{});
+        }
+        if (minV != 0) {
+            emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)minV});
+            emit(WasmVM::Instr::I32_sub{});
+        }
+        WasmVM::Instr::Br_table bt;
+        long long tableLen = (maxV - minV + 1);
+        bt.indices.reserve((size_t)tableLen + 1);
+        // Build value→segment lookup for quick mapping
+        std::unordered_map<long long, int> valToSeg;
+        for (const auto& c : cases) valToSeg[c.value] = c.segmentIdx;
+        for (long long v = minV; v <= maxV; ++v) {
+            auto it = valToSeg.find(v);
+            if (it != valToSeg.end()) {
+                bt.indices.push_back((WasmVM::index_t)segBrIdx(it->second));
+            } else {
+                bt.indices.push_back((WasmVM::index_t)defaultBrIdx);
+            }
+        }
+        bt.indices.push_back((WasmVM::index_t)defaultBrIdx);
+        emit(bt);
+    } else {
+        // Sparse: stash value in a local, chain `local.get; const; eq; br_if`.
+        // Use i32 arithmetic; if value is i64, wrap first.
+        emitExpr(stmt.cond);
+        if (getExprType(stmt.cond) == WasmVM::ValueType::i64) {
+            emit(WasmVM::Instr::I32_wrap_i64{});
+        }
+        int valLocal = allocRawLocal(WasmVM::ValueType::i32);
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)valLocal});
+        for (const auto& c : cases) {
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)valLocal});
+            emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)c.value});
+            emit(WasmVM::Instr::I32_eq{});
+            emit(WasmVM::Instr::Br_if{(WasmVM::index_t)segBrIdx(c.segmentIdx)});
+        }
+        emit(WasmVM::Instr::Br{(WasmVM::index_t)defaultBrIdx});
+    }
+
+    // Close case blocks in source order: after end of segment 0's wrapping
+    // block, emit body 0; then end of segment 1's block, body 1; etc.
+    for (int i = 0; i < N; ++i) {
+        emit(WasmVM::Instr::End{});  // close segment i's block
+        for (const auto& s : segments[i].body) {
+            emitStmt(s);
+        }
+    }
+
+    popControlFlow();
+    emit(WasmVM::Instr::End{});  // close outer break block
 }
 
 WasmVM::ValueType FunctionCodegen::getExprType(const wvmcc::parser::ExprPtr& expr) const {

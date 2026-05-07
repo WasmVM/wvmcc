@@ -8,4 +8,4 @@ exclude
 .antlr/
 *.a
 Testing/
-*.log
+*.logtests/integration/phase2/*.wasm
