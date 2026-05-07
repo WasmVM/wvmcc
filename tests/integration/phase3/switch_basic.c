@@ -1,7 +1,15 @@
-// Phase 3 verification: switch statements (sparse-cased only).
-// Note: dense cases (range / count <= 4) lower to a Wasm br_table, which is
-// implemented in code but currently triggers a validator bug in WasmVM
-// (br_table label indexing). Sparse cases below validate cleanly.
+// Phase 3 verification: switch statements (dense and sparse).
+
+int dense_switch(int x) {
+    switch (x) {
+        case 0: return 10;
+        case 1: return 20;
+        case 2: return 30;
+        case 3: return 40;
+        default: return 0;
+    }
+    return -1;
+}
 
 int sparse_switch(int x) {
     switch (x) {
