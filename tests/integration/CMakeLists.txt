@@ -22,6 +22,11 @@ set(INTEGRATION_TEST_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #   Compiles <source.c> with wvmcc and runs the resulting wasm under wasmvm.
 #   Test passes iff wasmvm exits 0 (i.e., the C `main` returned 0). A 10-second
 #   ctest timeout guards against codegen bugs that produce infinite loops.
+#
+#   wasmvm CLI (post-WasmVM 5966c7d): host args are positional after the
+#   module path — `wasmvm out.wasm foo bar` (was `--args foo bar`). Module
+#   search paths moved to `--extra/-e`. Tests here pass no args, so the
+#   invocation is the same under both old and new CLIs.
 function(add_e2e_test name source)
     set(wasm_out ${INTEGRATION_TEST_DIR}/${name}.wasm)
     add_test(
