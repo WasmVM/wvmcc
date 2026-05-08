@@ -15,6 +15,8 @@
 
 namespace wvmcc::codegen {
 
+class ModuleCodegen; // forward declaration to break circular include
+
 // Tracks break/continue targets for nested loops and switch statements.
 // breakDepth/continueDepth store the value of currentBlockDepth_ *after* the
 // corresponding scope (Block/Loop) has been opened. The Br index from any
@@ -28,7 +30,9 @@ struct ControlFlowEntry {
 class FunctionCodegen {
 public:
     FunctionCodegen(const TypeMap& typeMap, SymbolTable& symbolTable,
-                    GlobalDataAllocator* dataAllocator = nullptr);
+                    GlobalDataAllocator* dataAllocator = nullptr,
+                    ModuleCodegen* moduleCg = nullptr,
+                    const wvmcc::parser::Semantic* semantic = nullptr);
 
     // Generate code for a function definition
     WasmVM::WasmFunc generate(const wvmcc::parser::FunctionDefPtr& funcDef,
@@ -86,6 +90,8 @@ private:
     const TypeMap& typeMap_;
     SymbolTable& symbolTable_;
     GlobalDataAllocator* dataAllocator_;
+    ModuleCodegen* moduleCg_;
+    const wvmcc::parser::Semantic* semantic_;
 
     std::vector<WasmVM::WasmInstr> instrBuffer_;
     std::vector<WasmVM::ValueType> localTypes_;
@@ -110,6 +116,14 @@ private:
 
     void emitStringLiteral(const wvmcc::parser::StringLiteral& expr);
     void emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr);
+
+    // Emit a (possibly designated) initializer-list assigning into the storage
+    // at `baseAddrLocal + 0`. memidx selects mem[0] (static / heap) vs mem[1]
+    // (shadow stack).
+    void emitListInitializer(int baseAddrLocal,
+                             const wvmcc::parser::TypeNodePtr& type,
+                             const wvmcc::parser::InitializerPtr& init,
+                             uint8_t memidx);
 
     void emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt);
     void emitExprStmt(const wvmcc::parser::ExprStmt& stmt);

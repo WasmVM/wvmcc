@@ -1295,12 +1295,14 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
     }
 
     // If this declaration is inside a function body (block scope) and has
-    // external/internal linkage with an initializer, report error.
+    // external linkage with an initializer, report error. Block-scope `static`
+    // gives the identifier no linkage (C 6.2.2p6) and is allowed to have an
+    // initializer.
     if (functionDepth > 0 && curDiagnostics) {
-        if (d->initializer.has_value() && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern) || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static))) {
+        if (d->initializer.has_value() && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) {
             Diagnostic diag;
             diag.severity = Diagnostic::Severity::Error;
-            diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
+            diag.message = "declaration at block scope with external linkage shall not have an initializer";
             diag.span = d->span;
             curDiagnostics->push_back(std::move(diag));
         }

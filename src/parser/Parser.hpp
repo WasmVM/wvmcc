@@ -41,6 +41,11 @@ private:
 
     // parse declarators (identifier, pointer, array, function)
     DeclaratorPtr parseDeclarator();
+    // parse one or more `__attribute__((...))` specifiers and return a flat
+    // list of attributes. Returns an empty vector if no attribute specifier
+    // follows. Unknown attribute names are kept; unsupported argument forms
+    // are skipped.
+    std::vector<GnuAttribute> parseGnuAttributeSpecifierList();
     // initializer parsing (assignment-expression or braced initializer-list)
     InitializerPtr parseInitializer();
     Designator parseDesignator();

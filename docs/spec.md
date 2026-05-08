@@ -16,13 +16,13 @@
 - Entry point: configurable (e.g., `_start` or `main`) but no runtime provided by us in M0.
 - Environment: linear memory only; any I/O must be via explicit imports the user defines.
 
-## Data Layout & ABI (wasm32)
+## Data Layout & ABI (wasm64)
 - Endianness: little-endian.
-- Pointer size: 32-bit; `size_t`/`ptrdiff_t` are 32-bit.
-- Alignment: natural (1/2/4/8). Struct layout follows wasm32/Clang-like natural alignment; document padding.
+- Pointer size: 64-bit; `size_t`/`ptrdiff_t` are 64-bit. `long` remains 32-bit (LP64 not used; wasm64 only widens pointers).
+- Alignment: natural (1/2/4/8). Struct layout follows wasm64/Clang-like natural alignment; document padding.
 - `char` signedness: implementation-defined; default to signed (`-funsigned-char` available later).
 - `long double`: initially aliased to `double`.
-- Variadics: supported with wasm32-compatible ABI; validate alignment rules via tests.
+- Variadics: supported with wasm64-compatible ABI; validate alignment rules via tests.
 
 ## Architecture
 - Frontend:
@@ -36,7 +36,7 @@
 - Backend:
   - Final output is `WasmModule`; lowering to wasm binary is handled by `WasmVM::module_encode`.
   - Lower custom IR → WasmVM op set (`i32/i64/f32/f64`) mapped into linear memory for aggregates.
-  - Calling convention: wasm32-compatible; spill to linear memory as needed.
+  - Calling convention: wasm64-compatible; spill to linear memory as needed.
   - No host imports in M0; expose only minimal module sections.
 
 ## Translation Phases (C17 §5.1.1.2)
@@ -166,16 +166,16 @@ using PPTokenStream = std::vector<PPToken>;
 - M2: Variadics, `_Alignof/_Static_assert`, bitfields; improved IR passes.
 
 ## Open Topics
-- Exact mapping of struct/union layout to WasmVM memory: confirm rules against Clang wasm32 and freeze.
+- Exact mapping of struct/union layout to WasmVM memory: confirm rules against Clang wasm64 and freeze.
 - Module format details: emit `.wasm` via `module_encode`; consider WasmVM-native serialization if needed.
 - Dependency integration: WasmVM discovered via `cmake/FindWasmVM.cmake`; keep `#include <WasmVM.hpp>`.
-- CLI flags: `-target wasm32`, `-funsigned-char`, `-fno-long-double`, output selection.
+- CLI flags: `-target wasm64`, `-funsigned-char`, `-fno-long-double`, output selection.
  - Include search paths and file I/O: add `-I` handling; define default search order.
 
 ## Implementation-Defined Behavior (Defaults in M0)
 - Data model:
-  - Pointer width: 32-bit; `sizeof(void*) == 4`; `size_t`/`ptrdiff_t` are 32-bit.
-  - Integer widths: `char` 8-bit, `short` 16-bit, `int` 32-bit, `long` 32-bit, `long long` 64-bit.
+  - Pointer width: 64-bit; `sizeof(void*) == 8`; `size_t`/`ptrdiff_t` are 64-bit.
+  - Integer widths: `char` 8-bit, `short` 16-bit, `int` 32-bit, `long` 32-bit, `long long` 64-bit. (LP64 not used; wasm64 only widens pointers.)
   - Endianness: little-endian.
 - `char` signedness:
   - Default: signed. Flag: `-funsigned-char` to switch.
@@ -184,7 +184,7 @@ using PPTokenStream = std::vector<PPToken>;
   - `long double`: alias to `double` in M0. Flag: `-flong-double=64` (enforced).
 - Alignment & layout:
   - Fundamental alignments: `char` 1, `short` 2, `int`/`float` 4, `long`/`double`/`long long` 8.
-  - Struct/union: natural alignment with padding; follows Clang wasm32 rules.
+  - Struct/union: natural alignment with padding; follows Clang wasm64 rules.
   - Bitfields: allocation order defined left-to-right within storage unit; LSB index 0 for unsigned.
   - `max_align_t`: 8.
 - Characters and execution set:
@@ -220,7 +220,7 @@ Any `?` not starting one of the above trigraphs is left unchanged.
   - `void*`: aligned to hold any object pointer.
 - Variadics (ABI):
   - Default promotions: per C17 (float→double; small integers→int).
-  - Calling convention: wasm32; extra args spilled per ABI definition (documented later). `va_list` representation deferred until M1/M2.
+  - Calling convention: wasm64; extra args spilled per ABI definition (documented later). `va_list` representation deferred until M1/M2.
 - Enums:
   - Underlying type: `int` unless values exceed range.
 - `setjmp/longjmp`:

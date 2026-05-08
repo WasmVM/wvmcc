@@ -1,6 +1,7 @@
 #include "TypeMap.hpp"
 #include "LayoutEngine.hpp"
 #include "../parser/Semantic.hpp"
+#include "../parser/ConstExprEval.hpp"
 
 namespace wvmcc::codegen {
 
@@ -114,12 +115,15 @@ size_t TypeMap::byteSize(const wvmcc::parser::TypeNodePtr& type) const {
             return 8;
         }
         case wvmcc::parser::TypeNode::Kind::Array: {
-            // For arrays, we need to calculate based on element size and count
-            if (type->element && type->sizeExpr) {
-                // This is a simplified approach - in a real implementation we'd evaluate the size expression
-                return byteSize(type->element) * 1; // Placeholder
+            if (!type->element) return 0;
+            size_t elemSize = byteSize(type->element);
+            if (type->sizeExpr) {
+                auto v = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(*type->sizeExpr);
+                if (v.has_value() && *v > 0) {
+                    return elemSize * (size_t)*v;
+                }
             }
-            return 0;
+            return elemSize;
         }
         case wvmcc::parser::TypeNode::Kind::Struct:
         case wvmcc::parser::TypeNode::Kind::Union: {

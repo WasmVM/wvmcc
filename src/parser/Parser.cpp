@@ -36,6 +36,58 @@ static bool initializerIsConstant(const InitializerPtr &init) {
 // Returns std::nullopt if not a constant integer.
 // integer constant evaluation is provided by ConstExprEvaluator
 
+std::vector<GnuAttribute> Parser::parseGnuAttributeSpecifierList() {
+    std::vector<GnuAttribute> result;
+    while (auto p = lex.peek()) {
+        if (p->kind() != TokenKind::Identifier || p->lexeme() != "__attribute__") break;
+        lex.next(); // consume __attribute__
+        if (!acceptPunct("(") || !acceptPunct("(")) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected '((' after __attribute__";
+            if (lex.peek()) d.span = lex.peek()->span;
+            diagnostics.push_back(std::move(d));
+            return result;
+        }
+        // attribute-list: zero or more attributes separated by ','
+        while (auto q = lex.peek()) {
+            if (q->kind() == TokenKind::Punctuator && q->lexeme() == ")") break;
+            // attribute name: identifier or keyword (GCC permits keywords like 'const')
+            if (q->kind() != TokenKind::Identifier && q->kind() != TokenKind::Keyword) {
+                // unrecognized token in attribute list; skip to recover
+                lex.next();
+                continue;
+            }
+            GnuAttribute attr;
+            attr.name = q->lexeme();
+            lex.next();
+            if (acceptPunct("(")) {
+                while (auto r = lex.peek()) {
+                    if (r->kind() == TokenKind::Punctuator && r->lexeme() == ")") break;
+                    if (r->kind() == TokenKind::StringLiteral) {
+                        attr.stringArgs.push_back(r->lexeme());
+                    }
+                    // string literals, identifiers, integers: consume; commas separate them
+                    lex.next();
+                    if (auto sep = lex.peek(); sep && sep->kind() == TokenKind::Punctuator && sep->lexeme() == ",") {
+                        lex.next();
+                    }
+                }
+                acceptPunct(")");
+            }
+            result.push_back(std::move(attr));
+            // optional comma between attributes
+            if (auto sep = lex.peek(); sep && sep->kind() == TokenKind::Punctuator && sep->lexeme() == ",") {
+                lex.next();
+            }
+        }
+        // expect '))'
+        acceptPunct(")");
+        acceptPunct(")");
+    }
+    return result;
+}
+
 DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
     DeclarationSpecifiers specs;
 
@@ -633,8 +685,15 @@ TranslationUnitPtr Parser::parseTranslationUnit() {
 }
 
 ExternalDeclPtr Parser::parseExternalDecl() {
+    // optional GCC __attribute__((...)) before the declaration-specifiers
+    auto gnuAttrs = parseGnuAttributeSpecifierList();
     // gather specifiers (keywords like 'int', 'static', etc.)
     auto specs = parseDeclarationSpecifiers();
+    // attributes may also appear between declaration-specifiers and declarator
+    {
+        auto more = parseGnuAttributeSpecifierList();
+        gnuAttrs.insert(gnuAttrs.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+    }
 
     // Handle _Static_assert (C 6.7.10): create a StaticAssert external node so
     // semantic checks can evaluate the constant-expression with TU context.
@@ -736,6 +795,11 @@ ExternalDeclPtr Parser::parseExternalDecl() {
             decl = parseDeclarator();
         }
     }
+    // attributes may also appear after the declarator (before initializer or ';')
+    {
+        auto more = parseGnuAttributeSpecifierList();
+        gnuAttrs.insert(gnuAttrs.end(), std::make_move_iterator(more.begin()), std::make_move_iterator(more.end()));
+    }
 
     // Early constraint check: storage-class specifiers 'auto' and 'register' are invalid
     // in external declarations (C standard 6.9). Emit parser diagnostics (constraint).
@@ -776,6 +840,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
             auto f = parseFunctionDef(specs, decl);
             if (!f) return nullptr;
+            f->gnuAttributes = std::move(gnuAttrs);
             auto ext = make_ast_with_span<ExternalDecl>(f->span);
             ext->decl = f;
 
@@ -802,6 +867,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         } else {
                 auto d = parseDeclaration(specs, decl);
                 if (!d) return nullptr;
+                d->gnuAttributes = std::move(gnuAttrs);
                 // static/thread storage duration initializers must be constant (C 6.7.9 constraint 4)
                 if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
                     // semantic check (constant initializer) moved to Semantic pass
@@ -816,6 +882,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     if (!decl && lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ";") {
         auto d = parseDeclaration(specs, "");
         if (!d) return nullptr;
+        d->gnuAttributes = std::move(gnuAttrs);
         auto ext = make_ast_with_span<ExternalDecl>(d->span);
         ext->decl = d;
         return ext;
@@ -825,6 +892,7 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     if (decl) {
         auto d = parseDeclaration(specs, decl);
         if (!d) return nullptr;
+        d->gnuAttributes = std::move(gnuAttrs);
         // If this declaration has static/thread storage duration, its initializer
         // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
         if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
@@ -1157,11 +1225,13 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 auto bi = make_ast<BlockItem>();
                 bi->item = decl;
                 // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
-                // external or internal linkage, the declaration shall have no initializer.
-                if (decl && decl->initializer.has_value() && (specs.hasStorage(StorageClass::Extern) || specs.hasStorage(StorageClass::Static))) {
+                // external linkage, the declaration shall have no initializer. Block-scope
+                // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
+                // permitted (and are evaluated once on first call).
+                if (decl && decl->initializer.has_value() && specs.hasStorage(StorageClass::Extern)) {
                     wvmcc::Diagnostic diag;
                     diag.severity = wvmcc::Diagnostic::Severity::Error;
-                    diag.message = "declaration at block scope with external/internal linkage shall not have an initializer";
+                    diag.message = "declaration at block scope with external linkage shall not have an initializer";
                     diag.span = decl->span;
                     diagnostics.push_back(std::move(diag));
                 }

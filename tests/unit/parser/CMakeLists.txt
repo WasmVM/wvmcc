@@ -65,6 +65,9 @@ add_test(NAME parser-statements COMMAND wvmcc-parser-statements-test)
 add_executable(wvmcc-parser-static-assert-test static_assert_test.cpp ${PARSER_SRCS})
 add_test(NAME parser-static-assert COMMAND wvmcc-parser-static-assert-test)
 
+add_executable(wvmcc-parser-gnu-attribute-test gnu_attribute_test.cpp ${PARSER_SRCS})
+add_test(NAME parser-gnu-attribute COMMAND wvmcc-parser-gnu-attribute-test)
+
 # Semantic tests
 
 add_executable(wvmcc-sema-external-decl-test sema_external_decl_test.cpp ${SEMA_SRCS})
