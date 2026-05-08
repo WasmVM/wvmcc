@@ -56,6 +56,21 @@ private:
     // address-taken function. Populated by analyzeFuncAddressTaken().
     std::unordered_map<std::string, size_t> funcTableSlots_;
 
+    // Hosted-environment state (issue #40). When the translation unit defines
+    // `main`, ModuleCodegen pre-injects four sys_proc imports and emits a
+    // hidden start-section wrapper that calls `main` with argc/argv before
+    // forwarding the result to sys_proc.exit.
+    bool hasMain_ = false;
+    bool mainHasArgv_ = false;
+    int mainFuncIndex_ = -1;
+    int sysProcArgcIdx_ = -1;
+    int sysProcArgvLenIdx_ = -1;
+    int sysProcArgvIdx_ = -1;
+    int sysProcExitIdx_ = -1;
+    void scanForMain(const wvmcc::parser::TranslationUnitPtr& tu);
+    void injectSysProcImports();
+    void emitStartWrapper();
+
     // Extract the identifier name from a (possibly nested) declarator
     std::string getFuncName(const wvmcc::parser::DeclaratorPtr& decl) const;
 

@@ -15,6 +15,15 @@ set(CODEGEN_SRCS
     ${SRC}/parser/ASTPrinter.cpp
 )
 
+set(CODEGEN_FRONTEND_SRCS ${CODEGEN_SRCS}
+    ${SRC}/parser/Lexer.cpp
+    ${SRC}/parser/Parser.cpp
+    ${SRC}/pp/Preprocessor.cpp
+    ${SRC}/pp/Tokenizer.cpp
+    ${SRC}/pp/MacroTable.cpp
+    ${SRC}/pp/ConstExprParser.cpp
+)
+
 add_executable(wvmcc-basic-codegen-test basic_codegen_test.cpp ${CODEGEN_SRCS})
 target_include_directories(wvmcc-basic-codegen-test PRIVATE ${WASMVM_INCLUDE_DIR})
 target_link_directories(wvmcc-basic-codegen-test PRIVATE ${WASMVM_LIBRARY_DIR})
@@ -44,3 +53,15 @@ target_include_directories(wvmcc-phase4-test PRIVATE ${WASMVM_INCLUDE_DIR})
 target_link_directories(wvmcc-phase4-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-phase4-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME phase4 COMMAND wvmcc-phase4-test)
+
+add_executable(wvmcc-import-attribute-test import_attribute_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-import-attribute-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-import-attribute-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-import-attribute-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME import-attribute COMMAND wvmcc-import-attribute-test)
+
+add_executable(wvmcc-start-wrapper-test start_wrapper_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME start-wrapper COMMAND wvmcc-start-wrapper-test)

@@ -13,15 +13,30 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     nextFuncIndex_ = 0;
     funcTypeIdx_.clear();
     funcTableSlots_.clear();
+    hasMain_ = false;
+    mainHasArgv_ = false;
+    mainFuncIndex_ = -1;
+    sysProcArgcIdx_ = sysProcArgvLenIdx_ = sysProcArgvIdx_ = sysProcExitIdx_ = -1;
 
     setupMemory();
     setupGlobals();
+
+    // Detect main() and inject sys_proc imports before any user functions are
+    // registered, so the sys_proc imports occupy function indices 0..3.
+    scanForMain(tu);
+    if (hasMain_) {
+        injectSysProcImports();
+    }
 
     symbolTable_.pushScope();
     firstPass(tu);
     analyzeFuncAddressTaken(tu);
     secondPass(tu);
     symbolTable_.popScope();
+
+    if (hasMain_) {
+        emitStartWrapper();
+    }
 
     return module_;
 }
@@ -92,6 +107,22 @@ std::string ModuleCodegen::getFuncName(const wvmcc::parser::DeclaratorPtr& decl)
     return "";
 }
 
+// True iff `params` is the C `(void)` parameter list (single unnamed `void`
+// parameter), which the standard treats as zero parameters.
+static bool isVoidParamList(const std::vector<wvmcc::parser::Parameter>& params) {
+    if (params.size() != 1) return false;
+    const auto& p = params[0];
+    if (p.declarator) return false; // a named/typed declarator means a real param
+    for (const auto& ts : p.specifiers.typeSpecifiers) {
+        if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+            && ts.simple.size() == 1
+            && ts.simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void) {
+            return true;
+        }
+    }
+    return false;
+}
+
 // Build the return TypeNode for a function, correctly applying pointer qualifiers from
 // the declarator chain that appear before the function-kind declarator.
 static wvmcc::parser::TypeNodePtr buildReturnTypeNode(
@@ -125,6 +156,18 @@ static wvmcc::parser::TypeNodePtr buildReturnTypeNode(
 WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::FunctionDefPtr& funcDef) const {
     WasmVM::FuncType ft;
 
+    // Hosted-environment override: main() always has the canonical Wasm
+    // signature regardless of how its parameter list is spelled in C.
+    //   main()              -> () -> i32
+    //   main(int, char**)   -> (i32, i64) -> i32
+    if (funcDef && getFuncName(funcDef->declarator) == "main") {
+        ft.results.push_back(WasmVM::ValueType::i32);
+        if (funcDef->params.size() == 2) {
+            ft.params = {WasmVM::ValueType::i32, WasmVM::ValueType::i64};
+        }
+        return ft;
+    }
+
     auto retType = buildReturnTypeNode(funcDef->specifiers, funcDef->declarator, semantic_);
     bool isVoid = retType && retType->kind == wvmcc::parser::TypeNode::Kind::Builtin
                   && !retType->simple.empty()
@@ -138,15 +181,17 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::Functi
         ft.results.push_back(retType ? typeMap_.toWasmType(retType) : WasmVM::ValueType::i32);
     }
 
-    for (const auto& param : funcDef->params) {
-        auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
-        if (!paramType) {
-            ft.params.push_back(WasmVM::ValueType::i32);
-        } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
-                   || paramType->kind == wvmcc::parser::TypeNode::Kind::Union) {
-            ft.params.push_back(WasmVM::ValueType::i64); // pointer to caller's struct copy
-        } else {
-            ft.params.push_back(typeMap_.toWasmType(paramType));
+    if (!isVoidParamList(funcDef->params)) {
+        for (const auto& param : funcDef->params) {
+            auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
+            if (!paramType) {
+                ft.params.push_back(WasmVM::ValueType::i32);
+            } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                       || paramType->kind == wvmcc::parser::TypeNode::Kind::Union) {
+                ft.params.push_back(WasmVM::ValueType::i64); // pointer to caller's struct copy
+            } else {
+                ft.params.push_back(typeMap_.toWasmType(paramType));
+            }
         }
     }
 
@@ -170,15 +215,18 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDecl(const wvmcc::parser::Decla
     }
 
     if (decl->declarator && decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) {
-        for (const auto& param : decl->declarator->function.params) {
-            auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
-            if (!paramType) {
-                ft.params.push_back(WasmVM::ValueType::i32);
-            } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
-                       || paramType->kind == wvmcc::parser::TypeNode::Kind::Union) {
-                ft.params.push_back(WasmVM::ValueType::i64);
-            } else {
-                ft.params.push_back(typeMap_.toWasmType(paramType));
+        const auto& params = decl->declarator->function.params;
+        if (!isVoidParamList(params)) {
+            for (const auto& param : params) {
+                auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
+                if (!paramType) {
+                    ft.params.push_back(WasmVM::ValueType::i32);
+                } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                           || paramType->kind == wvmcc::parser::TypeNode::Kind::Union) {
+                    ft.params.push_back(WasmVM::ValueType::i64);
+                } else {
+                    ft.params.push_back(typeMap_.toWasmType(paramType));
+                }
             }
         }
     }
@@ -226,6 +274,10 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = false;
     symbolTable_.defineFunction(name, sym);
+
+    if (name == "main") {
+        mainFuncIndex_ = sym.funcIndex;
+    }
 }
 
 void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::DeclarationPtr& decl) {
@@ -237,9 +289,19 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     std::string name = getFuncName(decl->declarator);
     funcTypeIdx_[name] = typeidx;
 
+    std::string importModule = "env";
+    std::string importName = name;
+    for (const auto& attr : decl->gnuAttributes) {
+        if (attr.name == "import_module" && !attr.stringArgs.empty()) {
+            importModule = attr.stringArgs[0];
+        } else if (attr.name == "import_name" && !attr.stringArgs.empty()) {
+            importName = attr.stringArgs[0];
+        }
+    }
+
     WasmVM::WasmImport imp;
-    imp.module = "env";
-    imp.name = name;
+    imp.module = importModule;
+    imp.name = importName;
     imp.desc = typeidx;
     module_.imports.push_back(imp);
 
@@ -347,6 +409,177 @@ void ModuleCodegen::emitStringLiterals() {
     for (auto& seg : dataAllocator_.getDataSegments()) {
         module_.datas.push_back(std::move(seg));
     }
+}
+
+// ---------------------------------------------------------------------------
+// Hosted-environment support (issue #40)
+// ---------------------------------------------------------------------------
+
+void ModuleCodegen::scanForMain(const wvmcc::parser::TranslationUnitPtr& tu) {
+    if (!tu) return;
+    for (const auto& ext : tu->externals) {
+        if (!ext) continue;
+        auto fd = std::get_if<wvmcc::parser::FunctionDefPtr>(&ext->decl);
+        if (!fd || !*fd) continue;
+        std::string name = getFuncName((*fd)->declarator);
+        if (name != "main") continue;
+        hasMain_ = true;
+        // Determine if main takes the (argc, argv) form by looking at the
+        // function declarator's parameter list.
+        if ((*fd)->declarator) {
+            auto cur = (*fd)->declarator;
+            while (cur && cur->kind != wvmcc::parser::Declarator::Kind::Function) {
+                cur = cur->inner.has_value() ? *cur->inner : nullptr;
+            }
+            if (cur && cur->function.params.size() == 2) {
+                mainHasArgv_ = true;
+            }
+        }
+        return;
+    }
+}
+
+void ModuleCodegen::injectSysProcImports() {
+    auto registerImport = [&](const std::string& name,
+                              std::vector<WasmVM::ValueType> params,
+                              std::vector<WasmVM::ValueType> results) -> int {
+        WasmVM::FuncType ft;
+        ft.params = std::move(params);
+        ft.results = std::move(results);
+        WasmVM::index_t typeidx = internFuncType(ft);
+        WasmVM::WasmImport imp;
+        imp.module = "sys_proc";
+        imp.name = name;
+        imp.desc = typeidx;
+        module_.imports.push_back(imp);
+        int idx = nextFuncIndex_++;
+        return idx;
+    };
+
+    sysProcArgcIdx_    = registerImport("argc",     {},                                                   {WasmVM::ValueType::i32});
+    sysProcArgvLenIdx_ = registerImport("argv_len", {WasmVM::ValueType::i32},                             {WasmVM::ValueType::i32});
+    sysProcArgvIdx_    = registerImport("argv",     {WasmVM::ValueType::i32, WasmVM::ValueType::i64,
+                                                     WasmVM::ValueType::i64},                            {WasmVM::ValueType::i32});
+    sysProcExitIdx_    = registerImport("exit",     {WasmVM::ValueType::i32},                             {});
+}
+
+void ModuleCodegen::emitStartWrapper() {
+    if (mainFuncIndex_ < 0) return;
+
+    // FuncType: () -> ()
+    WasmVM::FuncType ft;
+    WasmVM::index_t wrapperType = internFuncType(ft);
+
+    // Stack pointer global is module_.globals[0] (see setupGlobals()).
+    constexpr WasmVM::index_t kSpGlobal = 0;
+
+    WasmVM::WasmFunc wrapper;
+    wrapper.typeidx = wrapperType;
+    auto& body = wrapper.body;
+
+    if (mainHasArgv_) {
+        // Locals: [argc:i32, i:i32, len:i32, argv_base:i64, sp_save:i64]
+        wrapper.locals = {
+            WasmVM::ValueType::i32, // 0: argc
+            WasmVM::ValueType::i32, // 1: i
+            WasmVM::ValueType::i32, // 2: len
+            WasmVM::ValueType::i64, // 3: argv_base
+            WasmVM::ValueType::i64, // 4: sp_save
+        };
+
+        // argc = sys_proc.argc()
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcArgcIdx_});
+        body.push_back(WasmVM::Instr::Local_set{0});
+        // sp_save = sp
+        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        body.push_back(WasmVM::Instr::Local_set{4});
+        // argv_base = sp - argc * 8;  sp = argv_base
+        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        body.push_back(WasmVM::Instr::Local_get{0});
+        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
+        body.push_back(WasmVM::Instr::I64_const{8});
+        body.push_back(WasmVM::Instr::I64_mul{});
+        body.push_back(WasmVM::Instr::I64_sub{});
+        body.push_back(WasmVM::Instr::Local_tee{3});
+        body.push_back(WasmVM::Instr::Global_set{kSpGlobal});
+        // i = 0
+        body.push_back(WasmVM::Instr::I32_const{0});
+        body.push_back(WasmVM::Instr::Local_set{1});
+        // Block / Loop
+        body.push_back(WasmVM::Instr::Block{std::nullopt});
+        body.push_back(WasmVM::Instr::Loop{std::nullopt});
+        // if (i >= argc) br outer (label index 1 from inside Loop)
+        body.push_back(WasmVM::Instr::Local_get{1});
+        body.push_back(WasmVM::Instr::Local_get{0});
+        body.push_back(WasmVM::Instr::I32_ge_s{});
+        body.push_back(WasmVM::Instr::Br_if{1});
+        // len = sys_proc.argv_len(i)
+        body.push_back(WasmVM::Instr::Local_get{1});
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcArgvLenIdx_});
+        body.push_back(WasmVM::Instr::Local_set{2});
+        // sp -= (len + 8) & ~7
+        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        body.push_back(WasmVM::Instr::Local_get{2});
+        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
+        body.push_back(WasmVM::Instr::I64_const{8});
+        body.push_back(WasmVM::Instr::I64_add{});
+        body.push_back(WasmVM::Instr::I64_const{-8});
+        body.push_back(WasmVM::Instr::I64_and{});
+        body.push_back(WasmVM::Instr::I64_sub{});
+        body.push_back(WasmVM::Instr::Global_set{kSpGlobal});
+        // argv_base[i] = sp  (store i64 pointer, mem 0)
+        body.push_back(WasmVM::Instr::Local_get{3});
+        body.push_back(WasmVM::Instr::Local_get{1});
+        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
+        body.push_back(WasmVM::Instr::I64_const{8});
+        body.push_back(WasmVM::Instr::I64_mul{});
+        body.push_back(WasmVM::Instr::I64_add{});
+        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        // 8-byte aligned: argv_base is computed from an 8-aligned stack pointer
+        // and indexed by i*8 (align hint log2(8) = 3).
+        body.push_back(WasmVM::Instr::I64_store{0, 0, 3});
+        // sys_proc.argv(i, sp, (i64)(len + 1))
+        body.push_back(WasmVM::Instr::Local_get{1});
+        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        body.push_back(WasmVM::Instr::Local_get{2});
+        body.push_back(WasmVM::Instr::I32_const{1});
+        body.push_back(WasmVM::Instr::I32_add{});
+        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcArgvIdx_});
+        body.push_back(WasmVM::Instr::Drop{});
+        // ++i
+        body.push_back(WasmVM::Instr::Local_get{1});
+        body.push_back(WasmVM::Instr::I32_const{1});
+        body.push_back(WasmVM::Instr::I32_add{});
+        body.push_back(WasmVM::Instr::Local_set{1});
+        // br loop (label 0)
+        body.push_back(WasmVM::Instr::Br{0});
+        body.push_back(WasmVM::Instr::End{}); // end loop
+        body.push_back(WasmVM::Instr::End{}); // end block
+        // call main(argc, argv_base) -> i32, then sys_proc.exit
+        body.push_back(WasmVM::Instr::Local_get{0});
+        body.push_back(WasmVM::Instr::Local_get{3});
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)mainFuncIndex_});
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcExitIdx_});
+        body.push_back(WasmVM::Instr::Unreachable{});
+    } else {
+        // main(void) wrapper: call main; pass result to exit
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)mainFuncIndex_});
+        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcExitIdx_});
+        body.push_back(WasmVM::Instr::Unreachable{});
+    }
+    body.push_back(WasmVM::Instr::End{});
+
+    WasmVM::index_t wrapperIdx =
+        (WasmVM::index_t)(module_.imports.size() + module_.funcs.size());
+    module_.funcs.push_back(std::move(wrapper));
+    module_.start = wrapperIdx;
+
+    WasmVM::WasmExport ex;
+    ex.name = "main";
+    ex.desc = WasmVM::WasmExport::DescType::func;
+    ex.index = (WasmVM::index_t)mainFuncIndex_;
+    module_.exports.push_back(ex);
 }
 
 } // namespace wvmcc::codegen

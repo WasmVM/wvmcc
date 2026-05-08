@@ -235,11 +235,20 @@ struct Parameter {
     std::optional<ExprPtr> defaultValue;
 };
 
+// GCC-style attribute specifier: __attribute__((name, name(args...), ...))
+// Unknown attribute names are silently retained so codegen / later passes can
+// inspect them. String arguments are stored decoded (no surrounding quotes).
+struct GnuAttribute {
+    std::string name;
+    std::vector<std::string> stringArgs;
+};
+
 // Declaration: specifiers + declarator + optional initializer
 struct Declaration : Node {
     DeclarationSpecifiers specifiers; // storage-class, type-specifiers, qualifiers
     DeclaratorPtr declarator;
     std::optional<InitializerPtr> initializer;
+    std::vector<GnuAttribute> gnuAttributes;
 };
 
 // Function definition: specifiers + declarator + params + body
@@ -248,6 +257,7 @@ struct FunctionDef : Node {
     DeclaratorPtr declarator; // name and type
     std::vector<Parameter> params;
     std::vector<BlockItemPtr> body; // compound-stmt flattened for now
+    std::vector<GnuAttribute> gnuAttributes;
 };
 
 // Expressions

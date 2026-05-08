@@ -62,7 +62,24 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     if (isStructRet) {
         hiddenRetPtrLocal_ = paramIdx++; // param 0 is the hidden sret pointer
     }
+    // C `(void)` parameter list means zero parameters — skip the synthetic
+    // void parameter so its slot doesn't shift the local index space.
+    auto isVoidParamList = [](const std::vector<wvmcc::parser::Parameter>& ps) {
+        if (ps.size() != 1) return false;
+        const auto& p = ps[0];
+        if (p.declarator) return false;
+        for (const auto& ts : p.specifiers.typeSpecifiers) {
+            if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                && ts.simple.size() == 1
+                && ts.simple[0] == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void) {
+                return true;
+            }
+        }
+        return false;
+    };
+    const bool skipVoidParams = isVoidParamList(funcDef->params);
     for (const auto& param : funcDef->params) {
+        if (skipVoidParams) break;
         if (param.declarator) {
             std::string pname;
             // Walk the declarator chain to find the bound identifier (the
