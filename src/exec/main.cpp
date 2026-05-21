@@ -231,8 +231,8 @@ int main(int argc, char** argv) {
     }
 
     // Resolve sysroot (4-tier: --sysroot > WVMCC_SYSROOT > argv[0]-relative
-    // > unset). The result is consumed by the preprocessor (M2-I) and the
-    // future link phase (M2-H).
+    // > unset). The result feeds preprocessor include search (M2-I) and the
+    // future link phase.
     wvmcc::SysrootEnv srEnv;
     srEnv.cliFlag = args.sysrootFlag;
     srEnv.envVar  = std::getenv("WVMCC_SYSROOT");
@@ -243,7 +243,12 @@ int main(int argc, char** argv) {
     for (const auto& p : args.includePaths) {
         pp.addIncludePath(p);
     }
-    (void)sysroot; // consumed by M2-I (preprocessor sysroot include search)
+    for (const auto& p : args.systemIncludePaths) {
+        pp.addSystemIncludePath(p);
+    }
+    if (sysroot) {
+        pp.setSysroot(*sysroot);
+    }
     
     if (!pp.open(*args.inputPath)) {
         std::cerr << "preprocess error: failed to open input" << std::endl;

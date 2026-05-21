@@ -28,8 +28,12 @@ public:
 
     // Include path management
     void addIncludePath(const std::string& path) { includePaths.push_back(path); }
+    void addSystemIncludePath(const std::string& path) { systemIncludePaths.push_back(path); }
+    void setSysroot(const std::string& path) { sysroot = path; }
     void clearIncludePaths() { includePaths.clear(); }
     const std::vector<std::string>& getIncludePaths() const { return includePaths; }
+    const std::vector<std::string>& getSystemIncludePaths() const { return systemIncludePaths; }
+    const std::string& getSysroot() const { return sysroot; }
 
     // Diagnostics collected during preprocessing
     const std::vector<Diagnostic>& getDiagnostics() const { return diagnostics; }
@@ -37,6 +41,8 @@ public:
 private:
     // --- Configuration & state -----------------------------------------------
     std::vector<std::string> includePaths{};           // -I search paths
+    std::vector<std::string> systemIncludePaths{};     // -isystem search paths
+    std::string sysroot{};                             // resolved sysroot (M2-J)
     std::vector<std::string> inclusionStack{};         // include cycle detection
     std::unordered_set<std::string> pragmaOnceFiles{}; // pragma once tracking
     std::vector<Diagnostic> diagnostics{};

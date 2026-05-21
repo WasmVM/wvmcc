@@ -508,6 +508,8 @@ bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
         
         Preprocessor child;
         child.includePaths = includePaths;
+        child.systemIncludePaths = systemIncludePaths;
+        child.sysroot = sysroot;
         child.inclusionStack = inclusionStack;
         child.pragmaOnceFiles = pragmaOnceFiles;
         // Use streaming API on child to collect tokens from included file
@@ -693,9 +695,17 @@ std::optional<std::string> Preprocessor::resolveInclude(const std::string& heade
         }
     }
 
-    // Both forms: search -I paths
+    // Both forms: search -I paths, then -isystem, then <sysroot>/include/.
     for (const auto& base : includePaths) {
         fs::path p = fs::path(base) / header;
+        if (existsFile(p)) return fs::weakly_canonical(p).string();
+    }
+    for (const auto& base : systemIncludePaths) {
+        fs::path p = fs::path(base) / header;
+        if (existsFile(p)) return fs::weakly_canonical(p).string();
+    }
+    if (!sysroot.empty()) {
+        fs::path p = fs::path(sysroot) / "include" / header;
         if (existsFile(p)) return fs::weakly_canonical(p).string();
     }
 
