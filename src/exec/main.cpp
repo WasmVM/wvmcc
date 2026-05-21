@@ -29,10 +29,16 @@ static bool write_module_to_file(const WasmVM::WasmModule& module, const std::st
 struct CommandLineArgs {
     std::string outPath;
     std::optional<std::string> inputPath;
-    std::vector<std::string> includePaths;
-    std::optional<std::string> sysrootFlag; // --sysroot=<path>
+    std::vector<std::string> includePaths;       // -I
+    std::vector<std::string> systemIncludePaths; // -isystem
+    std::vector<std::string> libraryPaths;       // -L
+    std::vector<std::string> linkLibraries;      // -l<name>
+    std::optional<std::string> sysrootFlag;      // --sysroot=<path>
     bool dumpAst = false;
     bool preprocessOnly = false; // -E
+    bool compileOnly = false;    // -c
+    bool freestanding = false;   // -ffreestanding
+    bool noStdLib = false;       // -nostdlib
 };
 
 void showHelp() {
@@ -40,9 +46,14 @@ void showHelp() {
                  "\n"
                  "Options:\n"
                  "  -o <file>       Write output wasm to <file> (default: a.wasm)\n"
+                 "  -c              Compile only — emit a linkable .wasm object, no link\n"
                  "  -E              Run preprocessor only and write output to stdout\n"
-                 "  -I <path>       Add header search path (can repeat)\n"
-                 "  -I<path>        Add header search path (attached form)\n"
+                 "  -I <path>       Add header search path (can repeat; attached `-I<path>` ok)\n"
+                 "  -isystem <dir>  Add system header search path (between -I and sysroot)\n"
+                 "  -L <dir>        Add archive search path for -l\n"
+                 "  -l<name>        Link `lib<name>.a` from -L or <sysroot>/lib (multiple ok)\n"
+                 "  -nostdlib       Skip default libc linking and crt0 injection\n"
+                 "  -ffreestanding  Emit a self-contained module (no linker step)\n"
                  "  --sysroot=<dir> Override sysroot path (also: --sysroot <dir>)\n"
                  "                  Resolved in order: --sysroot > WVMCC_SYSROOT >\n"
                  "                  dirname(argv[0])/../share/wvmcc\n"
@@ -97,6 +108,18 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
             args.preprocessOnly = true;
             continue;
         }
+        if (arg == "-c") {
+            args.compileOnly = true;
+            continue;
+        }
+        if (arg == "-ffreestanding") {
+            args.freestanding = true;
+            continue;
+        }
+        if (arg == "-nostdlib") {
+            args.noStdLib = true;
+            continue;
+        }
         if (arg == "-o") {
             if (!parseOutputPath(i, argc, argv, args.outPath)) {
                 continue;
@@ -107,6 +130,35 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
             if (!parseIncludePath(i, argc, argv, args.includePaths)) {
                 return 2;
             }
+            continue;
+        }
+        // -isystem <dir>
+        if (arg == "-isystem") {
+            if (i + 1 < argc) {
+                args.systemIncludePaths.push_back(argv[++i]);
+            } else {
+                std::cerr << "error: -isystem requires a path\n";
+                return 2;
+            }
+            continue;
+        }
+        // -L <dir> or -L<dir>
+        if (arg == "-L") {
+            if (i + 1 < argc) {
+                args.libraryPaths.push_back(argv[++i]);
+            } else {
+                std::cerr << "error: -L requires a path\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg.rfind("-L", 0) == 0 && arg.size() > 2) {
+            args.libraryPaths.push_back(arg.substr(2));
+            continue;
+        }
+        // -l<name> (attached form only; -l with separate name is rare)
+        if (arg.rfind("-l", 0) == 0 && arg.size() > 2) {
+            args.linkLibraries.push_back(arg.substr(2));
             continue;
         }
         // --sysroot=<dir> or --sysroot <dir>
@@ -165,6 +217,16 @@ int main(int argc, char** argv) {
     if (!args.inputPath.has_value()) {
         std::cerr << "error: no input file specified\n";
         showHelp();
+        return 2;
+    }
+
+    // Linker invocation is not yet implemented (lands with M2-L1..L10).
+    // Any flag that demands a link step is rejected up-front so users get a
+    // clear message instead of a silent half-link.
+    if (!args.linkLibraries.empty() && !args.compileOnly) {
+        std::cerr << "error: -l requires a link step; the integrated linker "
+                     "is not yet implemented. Pass -c to emit a linkable "
+                     "object, or -ffreestanding for a self-contained module.\n";
         return 2;
     }
 

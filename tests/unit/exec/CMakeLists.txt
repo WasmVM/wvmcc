@@ -8,3 +8,7 @@ add_executable(wvmcc-sysroot-resolve-test
 target_include_directories(wvmcc-sysroot-resolve-test PRIVATE
     ${CMAKE_SOURCE_DIR}/src)
 add_test(NAME sysroot-resolve COMMAND wvmcc-sysroot-resolve-test)
+
+add_executable(wvmcc-cli-flags-test cli_flags_test.cpp)
+add_dependencies(wvmcc-cli-flags-test wvmcc)
+add_test(NAME cli-flags COMMAND wvmcc-cli-flags-test)
