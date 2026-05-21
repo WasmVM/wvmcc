@@ -64,6 +64,7 @@ public:
 
     void emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr);
     void emitCharLiteral(const wvmcc::parser::CharLiteral& expr);
+    void emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr);
     void emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue = false);
     void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
     void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue = false);

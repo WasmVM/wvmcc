@@ -53,3 +53,7 @@ add_e2e_test(phase4-static-local     ${CMAKE_CURRENT_SOURCE_DIR}/phase4/e2e_stat
 
 # M2-A — variadic function support (compiler prereq for M2 libc/printf)
 add_e2e_test(phase5-variadic         ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_variadic.c)
+
+# M2-B — float arithmetic codegen
+add_e2e_test(phase5-float            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_float.c)
+add_e2e_test(phase5-variadic-float   ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_variadic_float.c)

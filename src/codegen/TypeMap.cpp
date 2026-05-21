@@ -16,31 +16,20 @@ WasmVM::ValueType TypeMap::toWasmType(const wvmcc::parser::TypeNodePtr& type) co
             if (type->simple.empty()) {
                 return WasmVM::ValueType::i32; // Default fallback
             }
-            
-            // Get the first simple type specifier
-            auto simpleType = type->simple[0];
-            switch (simpleType) {
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void:
-                    return WasmVM::ValueType::i32; // void: no WasmVM None; callers must handle empty result list separately
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Bool:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Short:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Signed:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Unsigned:
-                    return WasmVM::ValueType::i32;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Complex:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Imaginary:
-                    return WasmVM::ValueType::i64;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Float:
-                    return WasmVM::ValueType::f32;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double:
-                    return WasmVM::ValueType::f64;
-                default:
-                    return WasmVM::ValueType::i32;
+            // Scan all specifiers — a multi-token declaration like
+            // `unsigned long` has simple=[Unsigned, Long] and resolves to i64.
+            using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+            bool hasDouble = false, hasFloat = false, hasLong = false;
+            for (auto s : type->simple) {
+                if (s == STS::Double) hasDouble = true;
+                else if (s == STS::Float) hasFloat = true;
+                else if (s == STS::Long)  hasLong  = true;
             }
-            break;
+            if (hasDouble) return WasmVM::ValueType::f64; // long double → f64
+            if (hasFloat)  return WasmVM::ValueType::f32;
+            if (hasLong)   return WasmVM::ValueType::i64;
+            if (type->simple[0] == STS::Void) return WasmVM::ValueType::i32;
+            return WasmVM::ValueType::i32;
         }
         case wvmcc::parser::TypeNode::Kind::Pointer: {
             // Pointers are i64 in Wasm64
@@ -85,30 +74,25 @@ size_t TypeMap::byteSize(const wvmcc::parser::TypeNodePtr& type) const {
             if (type->simple.empty()) {
                 return 0;
             }
-            
+            using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+            bool hasDouble = false, hasFloat = false, hasLong = false, hasShort = false;
+            for (auto s : type->simple) {
+                if (s == STS::Double) hasDouble = true;
+                else if (s == STS::Float) hasFloat = true;
+                else if (s == STS::Long)  hasLong  = true;
+                else if (s == STS::Short) hasShort = true;
+            }
+            if (hasDouble) return 8; // long double → double in wvmcc
+            if (hasFloat)  return 4;
+            if (hasLong)   return 8;
+            if (hasShort)  return 2;
             auto simpleType = type->simple[0];
             switch (simpleType) {
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void:
-                    return 0;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Bool:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char:
-                    return 1;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Short:
-                    return 2;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Signed:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Unsigned:
-                    return 4;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long:
-                    return 8;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Float:
-                    return 4;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double:
-                    return 8;
-                default:
-                    return 4;
+                case STS::Void: return 0;
+                case STS::Bool:
+                case STS::Char: return 1;
+                default:        return 4;
             }
-            break;
         }
         case wvmcc::parser::TypeNode::Kind::Pointer: {
             // Pointers are 8 bytes in Wasm64
@@ -159,30 +143,9 @@ size_t TypeMap::byteAlignment(const wvmcc::parser::TypeNodePtr& type) const {
             if (type->simple.empty()) {
                 return 1;
             }
-            
-            auto simpleType = type->simple[0];
-            switch (simpleType) {
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void:
-                    return 1;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Bool:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char:
-                    return 1;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Short:
-                    return 2;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Signed:
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Unsigned:
-                    return 4;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long:
-                    return 8;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Float:
-                    return 4;
-                case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double:
-                    return 8;
-                default:
-                    return 4;
-            }
-            break;
+            // Alignment follows size for these scalar types.
+            size_t sz = byteSize(type);
+            return sz > 0 ? sz : 1;
         }
         case wvmcc::parser::TypeNode::Kind::Pointer: {
             // Pointers are 8 bytes aligned in Wasm64

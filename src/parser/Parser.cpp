@@ -1610,6 +1610,24 @@ ExprPtr Parser::parsePrimary() {
         il->kind = Expr::Kind::Integer;
         return il;
     }
+    if (t->kind() == TokenKind::FloatingConstant) {
+        auto tok = *lex.next();
+        auto fl = make_ast<FloatLiteral>();
+        fl->span = tok.span;
+        fl->raw = tok.lexeme();
+        // Detect suffix (f/F/l/L). Strip before stod.
+        bool isFloat = false;
+        std::string body = fl->raw;
+        if (!body.empty()) {
+            char last = body.back();
+            if (last == 'f' || last == 'F') { isFloat = true; body.pop_back(); }
+            else if (last == 'l' || last == 'L') { body.pop_back(); }
+        }
+        try { fl->value = std::stod(body); } catch (...) { fl->value = 0.0; }
+        fl->isFloat = isFloat;
+        fl->kind = Expr::Kind::Float;
+        return fl;
+    }
     if (t->kind() == TokenKind::Identifier) {
         auto tok = *lex.next();
         auto id = make_ast<IdentifierExpr>();

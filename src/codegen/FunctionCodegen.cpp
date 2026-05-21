@@ -10,6 +10,37 @@
 
 namespace wvmcc::codegen {
 
+namespace {
+
+// C "usual arithmetic conversions" subset over Wasm value types.
+// f64 dominates everything; f32 dominates ints; i64 dominates i32.
+WasmVM::ValueType arithCommonType(WasmVM::ValueType lhs, WasmVM::ValueType rhs) {
+    if (lhs == WasmVM::ValueType::f64 || rhs == WasmVM::ValueType::f64) return WasmVM::ValueType::f64;
+    if (lhs == WasmVM::ValueType::f32 || rhs == WasmVM::ValueType::f32) return WasmVM::ValueType::f32;
+    if (lhs == WasmVM::ValueType::i64 || rhs == WasmVM::ValueType::i64) return WasmVM::ValueType::i64;
+    return WasmVM::ValueType::i32;
+}
+
+} // namespace
+
+// Emit a conversion instruction that turns `from` into `to`. Caller guarantees
+// the value of type `from` is on top of the Wasm stack. No-op if from == to.
+// (Signed conversions; unsigned variants are not yet exposed by the type system.)
+static void emitConvert(FunctionCodegen* fc, WasmVM::ValueType from, WasmVM::ValueType to) {
+    if (from == to) return;
+    using VT = WasmVM::ValueType;
+    if (from == VT::i32 && to == VT::i64) { fc->emit(WasmVM::Instr::I64_extend_i32_s{}); return; }
+    if (from == VT::i64 && to == VT::i32) { fc->emit(WasmVM::Instr::I32_wrap_i64{}); return; }
+    if (from == VT::i32 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_convert_i32_s{}); return; }
+    if (from == VT::i32 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_convert_i32_s{}); return; }
+    if (from == VT::i64 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_convert_i64_s{}); return; }
+    if (from == VT::i64 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_convert_i64_s{}); return; }
+    if (from == VT::f32 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_promote_f32{}); return; }
+    if (from == VT::f64 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_demote_f64{}); return; }
+    fc->emit(WasmVM::Instr::Unreachable{});
+}
+
+
 FunctionCodegen::FunctionCodegen(const TypeMap& typeMap, SymbolTable& symbolTable,
                                  GlobalDataAllocator* dataAllocator,
                                  ModuleCodegen* moduleCg,
@@ -251,28 +282,31 @@ WasmVM::index_t FunctionCodegen::continueDepth() const {
 }
 
 std::vector<WasmVM::WasmInstr> FunctionCodegen::generatePrologue() {
-    // shadow-stack frame setup:
-    //   global.get __stack_pointer   ; push current SP
-    //   local.tee  fp_local          ; save as frame pointer, keep on stack
-    //   i64.const  frameSize         ; push frame size
+    // shadow-stack frame setup. The frame pointer is the *new* SP (low end of
+    // the frame), so memory-resident locals at frameOffset `o` live at
+    // `fp + o` for `o in [0, frameSize)`.
+    //
+    //   global.get __stack_pointer   ; push current SP (high end)
+    //   i64.const  frameSize
     //   i64.sub                      ; new SP = old SP - frameSize
+    //   local.tee  fp_local          ; fp = new SP, keep on stack
     //   global.set __stack_pointer   ; update SP
     constexpr WasmVM::index_t kStackPtrIdx = 0;
     std::vector<WasmVM::WasmInstr> p;
     p.push_back(WasmVM::Instr::Global_get{kStackPtrIdx});
-    p.push_back(WasmVM::Instr::Local_tee{(WasmVM::index_t)framePointerLocal_});
     p.push_back(WasmVM::Instr::I64_const{(WasmVM::i64_t)frameSize_});
     p.push_back(WasmVM::Instr::I64_sub{});
+    p.push_back(WasmVM::Instr::Local_tee{(WasmVM::index_t)framePointerLocal_});
     p.push_back(WasmVM::Instr::Global_set{kStackPtrIdx});
     return p;
 }
 
 void FunctionCodegen::generateEpilogue() {
-    // shadow-stack frame teardown:
-    //   local.get  fp_local          ; restore saved SP
-    //   global.set __stack_pointer   ; update SP
+    // shadow-stack frame teardown: SP = fp + frameSize (restore old SP).
     constexpr WasmVM::index_t kStackPtrIdx = 0;
     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)frameSize_});
+    emit(WasmVM::Instr::I64_add{});
     emit(WasmVM::Instr::Global_set{kStackPtrIdx});
 }
 
@@ -286,6 +320,9 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         break;
     case K::Char:
         emitCharLiteral(static_cast<const wvmcc::parser::CharLiteral&>(*expr));
+        break;
+    case K::Float:
+        emitFloatLiteral(static_cast<const wvmcc::parser::FloatLiteral&>(*expr));
         break;
     case K::Ident:
         emitIdentifierExpr(static_cast<const wvmcc::parser::IdentifierExpr&>(*expr), needLValue);
@@ -330,6 +367,14 @@ void FunctionCodegen::emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& ex
 
 void FunctionCodegen::emitCharLiteral(const wvmcc::parser::CharLiteral& expr) {
     emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)expr.value});
+}
+
+void FunctionCodegen::emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr) {
+    if (expr.isFloat) {
+        emit(WasmVM::Instr::F32_const{(WasmVM::f32_t)expr.value});
+    } else {
+        emit(WasmVM::Instr::F64_const{(WasmVM::f64_t)expr.value});
+    }
 }
 
 void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue) {
@@ -388,6 +433,12 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
             if (sym) {
                 if (auto* sl = std::get_if<ScalarLocal>(&*sym)) {
                     emitExpr(expr.rhs, false);
+                    // Convert rhs to lhs type if they differ (e.g. `long x = 1`
+                    // promotes the i32 literal to i64 before the local.tee).
+                    auto rhsVt = getExprType(expr.rhs);
+                    auto lhsVt = sl->type ? typeMap_.toWasmType(sl->type)
+                                          : WasmVM::ValueType::i32;
+                    emitConvert(this, rhsVt, lhsVt);
                     // _Bool: normalize the assigned value to 0/1.
                     if (sl->type
                         && sl->type->kind == wvmcc::parser::TypeNode::Kind::Builtin
@@ -477,74 +528,109 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
     }
 
     // --- Normal binary ops ---
+    // Compute the common arithmetic type (usual arithmetic conversions) and
+    // promote both operands to it before dispatching. Float operands route to
+    // F32/F64 instructions; bitwise/shift ops stay int-only.
+    auto lhsValueType = getExprType(expr.lhs);
+    auto rhsValueType = getExprType(expr.rhs);
+    bool isBitwise = (expr.op == "&" || expr.op == "|" || expr.op == "^"
+                      || expr.op == "<<" || expr.op == ">>");
+    auto commonType = isBitwise
+        ? (lhsValueType == WasmVM::ValueType::i64 || rhsValueType == WasmVM::ValueType::i64
+              ? WasmVM::ValueType::i64
+              : WasmVM::ValueType::i32)
+        : arithCommonType(lhsValueType, rhsValueType);
+
     emitExpr(expr.lhs, false);
+    emitConvert(this, lhsValueType, commonType);
     emitExpr(expr.rhs, false);
+    emitConvert(this, rhsValueType, commonType);
 
-    auto lhsType = getExprType(expr.lhs);
-
+    using VT = WasmVM::ValueType;
     if (expr.op == "+") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_add{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_add{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_add{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_add{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_add{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_add{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "-") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_sub{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_sub{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_sub{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_sub{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_sub{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_sub{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "*") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_mul{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_mul{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_mul{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_mul{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_mul{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_mul{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "/") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_div_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_div_s{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_div_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_div_s{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_div{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_div{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "%") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_rem_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_rem_s{});
+        // C: % is integer-only; floats are a constraint violation.
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_rem_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_rem_s{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "==") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_eq{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_eq{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_eq{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_eq{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_eq{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_eq{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "!=") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_ne{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_ne{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_ne{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_ne{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_ne{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_ne{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "<") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_lt_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_lt_s{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_lt_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_lt_s{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_lt{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_lt{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == ">") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_gt_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_gt_s{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_gt_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_gt_s{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_gt{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_gt{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "<=") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_le_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_le_s{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_le_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_le_s{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_le{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_le{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == ">=") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_ge_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_ge_s{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_ge_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_ge_s{});
+        else if (commonType == VT::f32) emit(WasmVM::Instr::F32_ge{});
+        else if (commonType == VT::f64) emit(WasmVM::Instr::F64_ge{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "&") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_and{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_and{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_and{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_and{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "|") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_or{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_or{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_or{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_or{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "^") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_xor{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_xor{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_xor{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_xor{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == "<<") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_shl{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_shl{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_shl{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_shl{});
         else emit(WasmVM::Instr::Unreachable{});
     } else if (expr.op == ">>") {
-        if (lhsType == WasmVM::ValueType::i32) emit(WasmVM::Instr::I32_shr_s{});
-        else if (lhsType == WasmVM::ValueType::i64) emit(WasmVM::Instr::I64_shr_s{});
+        if (commonType == VT::i32) emit(WasmVM::Instr::I32_shr_s{});
+        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_shr_s{});
         else emit(WasmVM::Instr::Unreachable{});
     } else {
         emit(WasmVM::Instr::Unreachable{});
@@ -643,13 +729,13 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
     } else if (sourceType == WasmVM::ValueType::i64 && targetType == WasmVM::ValueType::i32) {
         emit(WasmVM::Instr::I32_wrap_i64{});
     } else if (sourceType == WasmVM::ValueType::f32 && targetType == WasmVM::ValueType::i32) {
-        emit(WasmVM::Instr::I32_trunc_f32_s{});
+        emit(WasmVM::Instr::I32_trunc_sat_f32_s{});
     } else if (sourceType == WasmVM::ValueType::f64 && targetType == WasmVM::ValueType::i32) {
-        emit(WasmVM::Instr::I32_trunc_f64_s{});
+        emit(WasmVM::Instr::I32_trunc_sat_f64_s{});
     } else if (sourceType == WasmVM::ValueType::f32 && targetType == WasmVM::ValueType::i64) {
-        emit(WasmVM::Instr::I64_trunc_f32_s{});
+        emit(WasmVM::Instr::I64_trunc_sat_f32_s{});
     } else if (sourceType == WasmVM::ValueType::f64 && targetType == WasmVM::ValueType::i64) {
-        emit(WasmVM::Instr::I64_trunc_f64_s{});
+        emit(WasmVM::Instr::I64_trunc_sat_f64_s{});
     } else if (sourceType == WasmVM::ValueType::i32 && targetType == WasmVM::ValueType::f32) {
         emit(WasmVM::Instr::F32_convert_i32_s{});
     } else if (sourceType == WasmVM::ValueType::i64 && targetType == WasmVM::ValueType::f32) {
@@ -733,19 +819,17 @@ void FunctionCodegen::emitVaBuiltin(const std::string& name,
         auto resultWasmType = vargType ? typeMap_.toWasmType(vargType)
                                        : WasmVM::ValueType::i32;
 
-        if (resultWasmType == WasmVM::ValueType::f32
-            || resultWasmType == WasmVM::ValueType::f64) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "va_arg with floating-point type not yet supported (deferred to M2-B)";
-            diagnostics_.push_back(std::move(d));
-        }
-
-        // 1. Load *ap as i64 from mem[1]; truncate to i32 if T fits.
+        // 1. Load *ap as i64 from mem[1]; coerce to T.
         emitExpr(expr.args[0]); // pointer value (i64) at ap
         emit(WasmVM::Instr::I64_load{1, 0, 3});
         if (resultWasmType == WasmVM::ValueType::i32) {
             emit(WasmVM::Instr::I32_wrap_i64{});
+        } else if (resultWasmType == WasmVM::ValueType::f32) {
+            // Slot holds a double (default promotion); reinterpret + demote.
+            emit(WasmVM::Instr::F64_reinterpret_i64{});
+            emit(WasmVM::Instr::F32_demote_f64{});
+        } else if (resultWasmType == WasmVM::ValueType::f64) {
+            emit(WasmVM::Instr::F64_reinterpret_i64{});
         }
 
         // 2. Stash the result in a temp, advance ap by 8, then push result back.
@@ -941,13 +1025,6 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
             auto vargWasmType = vargType ? typeMap_.toWasmType(vargType)
                                          : WasmVM::ValueType::i32;
 
-            if (vargWasmType == WasmVM::ValueType::f32
-                || vargWasmType == WasmVM::ValueType::f64) {
-                wvmcc::Diagnostic d;
-                d.severity = wvmcc::Diagnostic::Severity::Error;
-                d.message = "variadic floating-point arguments not yet supported (deferred to M2-B)";
-                diagnostics_.push_back(std::move(d));
-            }
             if (vargType
                 && (vargType->kind == wvmcc::parser::TypeNode::Kind::Struct
                     || vargType->kind == wvmcc::parser::TypeNode::Kind::Union)) {
@@ -960,10 +1037,14 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
             emit(WasmVM::Instr::Local_get{(WasmVM::index_t)spillBaseLocal});
             emitExpr(varg);
 
-            if (vargWasmType == WasmVM::ValueType::i32) {
-                // Default argument promotion already widens char/short to int;
-                // here we extend int→i64. Sign-extend by default (matches
-                // existing wvmcc convention for int).
+            // Default argument promotions: char/short→int (already i32),
+            // float→double. Then store as i64.
+            if (vargWasmType == WasmVM::ValueType::f32) {
+                emit(WasmVM::Instr::F64_promote_f32{});
+                emit(WasmVM::Instr::I64_reinterpret_f64{});
+            } else if (vargWasmType == WasmVM::ValueType::f64) {
+                emit(WasmVM::Instr::I64_reinterpret_f64{});
+            } else if (vargWasmType == WasmVM::ValueType::i32) {
                 emit(WasmVM::Instr::I64_extend_i32_s{});
             }
 
@@ -1436,6 +1517,11 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                     && (*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
                     && (*v->initializer)->expr) {
                     emitExpr((*v->initializer)->expr);
+                    // Convert initializer to local's declared type if needed.
+                    auto rhsVt = getExprType((*v->initializer)->expr);
+                    auto lhsVt = typeNode ? typeMap_.toWasmType(typeNode)
+                                          : WasmVM::ValueType::i32;
+                    emitConvert(this, rhsVt, lhsVt);
                     // _Bool: normalize the stored value to 0 or 1.
                     if (typeNode && typeNode->kind == wvmcc::parser::TypeNode::Kind::Builtin
                         && !typeNode->simple.empty()
@@ -1946,7 +2032,11 @@ void FunctionCodegen::emitSwitchStmt(const wvmcc::parser::SwitchStmt& stmt) {
 }
 
 WasmVM::ValueType FunctionCodegen::getExprType(const wvmcc::parser::ExprPtr& expr) const {
-    // Placeholder — defaults to i32 until a full type-inference pass exists.
+    // Best-effort: if we can derive a TypeNode, map it. Otherwise fall back to
+    // i32 — the historical default that keeps int-only paths working.
+    if (auto tn = getExprTypeNode(expr)) {
+        return typeMap_.toWasmType(tn);
+    }
     return WasmVM::ValueType::i32;
 }
 
@@ -1955,6 +2045,80 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     using K = wvmcc::parser::Expr::Kind;
 
     switch (expr->kind) {
+    case K::Float: {
+        const auto& fl = static_cast<const wvmcc::parser::FloatLiteral&>(*expr);
+        auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        tn->simple.push_back(fl.isFloat
+            ? wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Float
+            : wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double);
+        return tn;
+    }
+    case K::Integer:
+    case K::Char: {
+        auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        tn->simple.push_back(
+            wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+        return tn;
+    }
+    case K::String: {
+        // String literals decay to `char *` (i64 pointer).
+        auto charTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        charTn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        charTn->simple.push_back(
+            wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char);
+        auto ptrTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        ptrTn->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+        ptrTn->pointee = charTn;
+        return ptrTn;
+    }
+    case K::Binary: {
+        const auto& b = static_cast<const wvmcc::parser::BinaryExpr&>(*expr);
+        // Comparison and logical ops yield int.
+        static const std::unordered_set<std::string> compareOps = {
+            "==", "!=", "<", ">", "<=", ">=", "&&", "||"
+        };
+        if (compareOps.count(b.op)) {
+            auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+            tn->simple.push_back(wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+            return tn;
+        }
+        // Assignment yields the lhs type.
+        if (b.op == "=") return getExprTypeNode(b.lhs);
+        // Arithmetic / bitwise / shift: usual arithmetic conversions on operand
+        // types; here we pick the "wider" of the two.
+        auto lt = getExprTypeNode(b.lhs);
+        auto rt = getExprTypeNode(b.rhs);
+        auto lvt = lt ? typeMap_.toWasmType(lt) : WasmVM::ValueType::i32;
+        auto rvt = rt ? typeMap_.toWasmType(rt) : WasmVM::ValueType::i32;
+        auto common = arithCommonType(lvt, rvt);
+        auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+        switch (common) {
+            case WasmVM::ValueType::f64: tn->simple.push_back(STS::Double); break;
+            case WasmVM::ValueType::f32: tn->simple.push_back(STS::Float);  break;
+            case WasmVM::ValueType::i64: tn->simple.push_back(STS::Long);   break;
+            default:                     tn->simple.push_back(STS::Int);    break;
+        }
+        return tn;
+    }
+    case K::Cast: {
+        const auto& c = static_cast<const wvmcc::parser::CastExpr&>(*expr);
+        return c.type;
+    }
+    case K::Call: {
+        const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*expr);
+        if (call.vaArgType) return call.vaArgType; // __builtin_va_arg
+        if (call.callee && call.callee->kind == K::Ident) {
+            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*call.callee);
+            auto fs = symbolTable_.lookupFunction(id.name);
+            if (fs && fs->type) return fs->type;
+        }
+        return nullptr;
+    }
     case K::Ident: {
         const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr);
         auto sym = symbolTable_.lookup(id.name);
@@ -1972,6 +2136,22 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         }
         if (u.op == "&") {
             auto rhsType = getExprTypeNode(u.rhs);
+            // Function names with no scalar symbol decay to function pointers
+            // (i64). Synthesize a pointer-to-void TypeNode as a placeholder.
+            if (!rhsType && u.rhs && u.rhs->kind == wvmcc::parser::Expr::Kind::Ident
+                && moduleCg_) {
+                const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*u.rhs);
+                if (symbolTable_.lookupFunction(id.name).has_value()) {
+                    auto voidTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    voidTn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                    voidTn->simple.push_back(
+                        wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
+                    auto ptr = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    ptr->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                    ptr->pointee = voidTn;
+                    return ptr;
+                }
+            }
             if (rhsType) {
                 auto ptrNode = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
                 ptrNode->kind = wvmcc::parser::TypeNode::Kind::Pointer;

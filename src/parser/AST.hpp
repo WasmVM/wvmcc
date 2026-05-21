@@ -272,6 +272,11 @@ struct IdentifierExpr : Expr { std::string name; };
 struct IntegerLiteral : Expr { std::int64_t value; std::string raw; };
 struct StringLiteral : Expr { std::string value; };
 struct CharLiteral : Expr { char value; };
+struct FloatLiteral : Expr {
+    double value;
+    std::string raw;
+    bool isFloat{false}; // true → f32 (suffix f/F); false → f64 (suffix L or none)
+};
 
 struct UnaryExpr : Expr {
     std::string op;
