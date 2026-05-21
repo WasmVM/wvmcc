@@ -66,3 +66,9 @@ target_include_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_INCLUDE_DIR
 target_link_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME start-wrapper COMMAND wvmcc-start-wrapper-test)
+
+add_executable(wvmcc-linkable-mode-test linkable_mode_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-linkable-mode-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-linkable-mode-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-linkable-mode-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME linkable-mode COMMAND wvmcc-linkable-mode-test)

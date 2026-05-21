@@ -50,7 +50,7 @@ public:
 
 private:
     const wvmcc::parser::Semantic& semantic_;
-    CompileMode compileMode_ = CompileMode::Freestanding;
+    CompileMode compileMode_ = CompileMode::Linkable; // M2-D: default flipped from Freestanding
 
     // Code generation components
     TypeMap typeMap_;

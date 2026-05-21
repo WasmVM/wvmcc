@@ -73,25 +73,52 @@ size_t ModuleCodegen::allocateStaticStorage(size_t size, size_t align) {
 }
 
 void ModuleCodegen::setupMemory() {
-    WasmVM::MemType mem0;
-    mem0.min = 1;
-    mem0.is64 = true;
-    mem0.max = std::nullopt;
+    WasmVM::MemType memTy;
+    memTy.min = 1;
+    memTy.is64 = true;
+    memTy.max = std::nullopt;
 
-    WasmVM::MemType mem1;
-    mem1.min = 1;
-    mem1.is64 = true;
-    mem1.max = std::nullopt;
+    if (compileMode_ == CompileMode::Linkable) {
+        // Linkable mode: import both memories from the env module so multiple
+        // linked TUs share the same heap (mem[0]) and shadow stack (mem[1]).
+        // The linker's synthetic crt0 (M2-L6) provides them.
+        WasmVM::WasmImport heap;
+        heap.module = "env";
+        heap.name = "__linear_memory";
+        heap.desc = memTy;
+        module_.imports.push_back(heap);
 
-    module_.mems.push_back(mem0);
-    module_.mems.push_back(mem1);
+        WasmVM::WasmImport shadow;
+        shadow.module = "env";
+        shadow.name = "__stack_memory";
+        shadow.desc = memTy;
+        module_.imports.push_back(shadow);
+        return;
+    }
+
+    // Freestanding: self-contained — define mem[0] and mem[1] locally.
+    module_.mems.push_back(memTy);
+    module_.mems.push_back(memTy);
 }
 
 void ModuleCodegen::setupGlobals() {
-    WasmVM::WasmGlobal stackPointerGlobal;
-    stackPointerGlobal.type = WasmVM::GlobalType{WasmVM::GlobalType::variable, WasmVM::ValueType::i64};
-    stackPointerGlobal.init = WasmVM::Instr::I64_const{0x10000};
+    WasmVM::GlobalType spType{WasmVM::GlobalType::variable, WasmVM::ValueType::i64};
 
+    if (compileMode_ == CompileMode::Linkable) {
+        // Linkable mode: import $__stack_pointer from env. Its initial value
+        // is set by crt0 once the merged memory layout is known.
+        WasmVM::WasmImport spImp;
+        spImp.module = "env";
+        spImp.name = "__stack_pointer";
+        spImp.desc = spType;
+        module_.imports.push_back(spImp);
+        return;
+    }
+
+    // Freestanding: define the global locally with M1's standalone init value.
+    WasmVM::WasmGlobal stackPointerGlobal;
+    stackPointerGlobal.type = spType;
+    stackPointerGlobal.init = WasmVM::Instr::I64_const{0x10000};
     module_.globals.push_back(stackPointerGlobal);
 }
 
@@ -369,15 +396,33 @@ void ModuleCodegen::analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnit
 
     if (tableFuncs.empty()) return;
 
-    // Add a single funcref table sized exactly to fit all slots.
-    WasmVM::TableType t;
-    t.limits.min = (WasmVM::offset_t)tableFuncs.size();
-    t.limits.max = (WasmVM::offset_t)tableFuncs.size();
-    t.limits.is64 = false;
-    t.reftype = WasmVM::RefType::funcref;
-    module_.tables.push_back(t);
+    if (compileMode_ == CompileMode::Linkable) {
+        // Linkable mode: import the shared funcref table from env.
+        // The linker (M2-L7) merges per-TU element segments and renumbers
+        // slots to match the merged table layout.
+        WasmVM::TableType tImp;
+        tImp.limits.min = 0;
+        tImp.limits.max = std::nullopt;
+        tImp.limits.is64 = false;
+        tImp.reftype = WasmVM::RefType::funcref;
+        WasmVM::WasmImport tableImp;
+        tableImp.module = "env";
+        tableImp.name = "__indirect_function_table";
+        tableImp.desc = tImp;
+        module_.imports.push_back(tableImp);
+    } else {
+        // Freestanding: define our own funcref table sized to fit slots.
+        WasmVM::TableType t;
+        t.limits.min = (WasmVM::offset_t)tableFuncs.size();
+        t.limits.max = (WasmVM::offset_t)tableFuncs.size();
+        t.limits.is64 = false;
+        t.reftype = WasmVM::RefType::funcref;
+        module_.tables.push_back(t);
+    }
 
-    // Active element segment: populate the table at offset 0.
+    // Active element segment: populate table 0 at offset 0. In linkable mode
+    // the offset (and possibly which slots go where) is rewritten by the
+    // linker; the segment still records this TU's logical slot ordering.
     WasmVM::WasmElem elem;
     elem.type = WasmVM::RefType::funcref;
     elem.mode.type = WasmVM::WasmElem::ElemMode::Mode::active;
