@@ -594,21 +594,16 @@ static int test_return_call() {
 
 // Simulate: int f() { int x; (&x); return 0; }
 // x is address-taken → MemoryLocal, frameSize = 4 (sizeof int)
-// Expected final instructions:
-//   [0]  Global_get{0}          // prologue: save SP
-//   [1]  Local_tee{0}           // prologue: fp = saved SP
-//   [2]  I64_const{4}           // prologue: frameSize
-//   [3]  I64_sub                // prologue: new SP = fp - frameSize
-//   [4]  Global_set{0}          // prologue: update SP
-//   [5]  Unreachable            // emitExpr(x) for MemoryLocal (not yet implemented)
-//   [6]  Unreachable            // emitUnaryExpr('&') not yet implemented
-//   [7]  Drop                   // ExprStmt
-//   [8]  I32_const{0}           // return 0
-//   [9]  Local_get{0}           // epilogue before return: get fp
-//   [10] Global_set{0}          // epilogue before return: restore SP
-//   [11] Return
-//   [12] Local_get{0}           // epilogue at end (fallthrough)
-//   [13] Global_set{0}
+// Expected final instructions (M2-B prologue: fp = *new* SP at bottom of
+// frame; epilogue restores SP = fp + frameSize):
+//   [0]  Global_get{0}          // prologue: push old SP
+//   [1]  I64_const{4}           // prologue: frameSize
+//   [2]  I64_sub                // prologue: new SP = old SP - frameSize
+//   [3]  Local_tee{0}           // prologue: fp = new SP
+//   [4]  Global_set{0}          // prologue: commit new SP
+//   [5–...] body...
+//   epilogue before each return / at function end:
+//     Local_get{fp}; I64_const{frameSize}; I64_add; Global_set{0}
 static int test_memory_local_prologue_epilogue() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -652,54 +647,62 @@ static int test_memory_local_prologue_epilogue() {
     if (!is(instrs[0], WasmVM::Opcode::Global_get)) {
         std::cerr << "test_memory_local_prologue_epilogue: [0] expected Global_get\n"; return 2;
     }
-    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
-    if (!ltee) {
-        std::cerr << "test_memory_local_prologue_epilogue: [1] expected Local_tee\n"; return 3;
-    }
-    auto fsize = asI64Const(instrs[2]);
+    auto fsize = asI64Const(instrs[1]);
     if (!fsize || fsize->value != 4) {
-        std::cerr << "test_memory_local_prologue_epilogue: [2] expected I64_const{4}, got "
-                  << (fsize ? std::to_string(fsize->value) : "?") << "\n"; return 4;
+        std::cerr << "test_memory_local_prologue_epilogue: [1] expected I64_const{4}, got "
+                  << (fsize ? std::to_string(fsize->value) : "?") << "\n"; return 3;
     }
-    if (!is(instrs[3], WasmVM::Opcode::I64_sub)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [3] expected I64_sub\n"; return 5;
+    if (!is(instrs[2], WasmVM::Opcode::I64_sub)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [2] expected I64_sub\n"; return 4;
+    }
+    auto ltee = asOneIdx(instrs[3], WasmVM::Opcode::Local_tee);
+    if (!ltee) {
+        std::cerr << "test_memory_local_prologue_epilogue: [3] expected Local_tee{fp}\n"; return 5;
     }
     if (!is(instrs[4], WasmVM::Opcode::Global_set)) {
         std::cerr << "test_memory_local_prologue_epilogue: [4] expected Global_set\n"; return 6;
     }
 
-    // (&x) now correctly emits: Local_get{fp}, I64_const{0}, I64_add, Drop  (4 instrs)
-    // return 0: I32_const{0}, Local_get{fp}, Global_set, Return              (4 instrs)
-    // epilogue at end: Local_get{fp}, Global_set                             (2 instrs)
-    // End{}                                                                  (1 instr)
-    // Total: 5 prologue + 4 body + 4 return + 2 epilogue + 1 end = 16
-    if (instrs.size() != 16) {
-        std::cerr << "test_memory_local_prologue_epilogue: expected 16 instrs, got " << instrs.size() << "\n";
+    // Body: (&x) → Local_get{fp}, I64_const{0}, I64_add, Drop                (4 instrs)
+    // Return: I32_const{0}, [epilogue Local_get fp, I64_const, I64_add,
+    //   Global_set] (4), Return                                             (6 instrs)
+    // Fallthrough epilogue: Local_get{fp}, I64_const, I64_add, Global_set   (4 instrs)
+    // End                                                                   (1 instr)
+    // Total: 5 prologue + 4 body + 6 return-w-epilogue + 4 trailing + 1 end = 20
+    if (instrs.size() != 20) {
+        std::cerr << "test_memory_local_prologue_epilogue: expected 20 instrs, got " << instrs.size() << "\n";
         return 7;
     }
 
-    // epilogue before Return: instrs[10]=Local_get{fp}, [11]=Global_set, [12]=Return
+    // Return-side epilogue: instrs[10..13]
     auto fpGet = asOneIdx(instrs[10], WasmVM::Opcode::Local_get);
     if (!fpGet || fpGet->index != ltee->index) {
         std::cerr << "test_memory_local_prologue_epilogue: [10] expected Local_get{fp}\n"; return 8;
     }
-    if (!is(instrs[11], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [11] expected Global_set\n"; return 9;
+    auto fpConst = asI64Const(instrs[11]);
+    if (!fpConst || fpConst->value != 4) {
+        std::cerr << "test_memory_local_prologue_epilogue: [11] expected I64_const{4}\n"; return 9;
     }
-    if (!is(instrs[12], WasmVM::Opcode::Return)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [12] expected Return\n"; return 10;
+    if (!is(instrs[12], WasmVM::Opcode::I64_add)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [12] expected I64_add\n"; return 10;
+    }
+    if (!is(instrs[13], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [13] expected Global_set\n"; return 11;
+    }
+    if (!is(instrs[14], WasmVM::Opcode::Return)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [14] expected Return\n"; return 12;
     }
 
-    // epilogue at end: instrs[13]=Local_get{fp}, [14]=Global_set, [15]=End
-    auto fpGet2 = asOneIdx(instrs[13], WasmVM::Opcode::Local_get);
+    // Trailing fallthrough epilogue: instrs[15..18]
+    auto fpGet2 = asOneIdx(instrs[15], WasmVM::Opcode::Local_get);
     if (!fpGet2 || fpGet2->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [13] expected Local_get{fp}\n"; return 11;
+        std::cerr << "test_memory_local_prologue_epilogue: [15] expected Local_get{fp}\n"; return 13;
     }
-    if (!is(instrs[14], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [14] expected Global_set\n"; return 12;
+    if (!is(instrs[18], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [18] expected Global_set\n"; return 14;
     }
-    if (!is(instrs[15], WasmVM::Opcode::End)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [15] expected End\n"; return 13;
+    if (!is(instrs[19], WasmVM::Opcode::End)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [19] expected End\n"; return 15;
     }
     return 0;
 }
@@ -828,14 +831,17 @@ static int test_ac1_shadow_stack_address_sequence() {
 
     const auto& instrs = wf.body;
 
-    // Prologue (x is address-taken → shadow stack): Global_get, Local_tee{fp}, I64_const{4}, I64_sub, Global_set
+    // Prologue (x is address-taken → shadow stack):
+    //   Global_get, I64_const{4}, I64_sub, Local_tee{fp}, Global_set
+    // (fp now points to the *new* SP at the bottom of the frame so that
+    // memory-resident locals at offset `o` live at fp+o.)
     if (instrs.size() < 5) { std::cerr << "AC1: too few instrs (" << instrs.size() << ")\n"; return 1; }
     if (!is(instrs[0], WasmVM::Opcode::Global_get)) { std::cerr << "AC1: [0] expected Global_get (prologue)\n"; return 2; }
-    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
-    if (!ltee) { std::cerr << "AC1: [1] expected Local_tee{fp} (prologue)\n"; return 3; }
-    auto fsize = asI64Const(instrs[2]);
-    if (!fsize || fsize->value != 4) { std::cerr << "AC1: [2] expected I64_const{4} (frame size=4 for int x)\n"; return 4; }
-    if (!is(instrs[3], WasmVM::Opcode::I64_sub)) { std::cerr << "AC1: [3] expected I64_sub (prologue)\n"; return 5; }
+    auto fsize = asI64Const(instrs[1]);
+    if (!fsize || fsize->value != 4) { std::cerr << "AC1: [1] expected I64_const{4} (frame size=4 for int x)\n"; return 3; }
+    if (!is(instrs[2], WasmVM::Opcode::I64_sub)) { std::cerr << "AC1: [2] expected I64_sub (prologue)\n"; return 4; }
+    auto ltee = asOneIdx(instrs[3], WasmVM::Opcode::Local_tee);
+    if (!ltee) { std::cerr << "AC1: [3] expected Local_tee{fp} (prologue)\n"; return 5; }
     if (!is(instrs[4], WasmVM::Opcode::Global_set)) { std::cerr << "AC1: [4] expected Global_set (prologue)\n"; return 6; }
 
     // &x → shadow-stack address of x at offset 0: Local_get{fp}, I64_const{0}, I64_add
@@ -912,9 +918,11 @@ static int test_ac2_struct_field_offset() {
     const auto& instrs = wf.body;
 
     // Prologue: 5 instrs (struct forces shadow stack even without explicit address-of)
+    //   [0] Global_get{0}  [1] I64_const{frameSize}  [2] I64_sub
+    //   [3] Local_tee{fp}  [4] Global_set{0}
     if (instrs.size() < 5) { std::cerr << "AC2: too few instrs\n"; return 1; }
-    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
-    if (!ltee) { std::cerr << "AC2: [1] expected Local_tee{fp}\n"; return 2; }
+    auto ltee = asOneIdx(instrs[3], WasmVM::Opcode::Local_tee);
+    if (!ltee) { std::cerr << "AC2: [3] expected Local_tee{fp}\n"; return 2; }
 
     // s.b body (starts at [5]):
     //   [5] Local_get{fp}   — base of s (lvalue)

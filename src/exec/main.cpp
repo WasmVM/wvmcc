@@ -3,6 +3,7 @@
 #include <string>
 #include <fstream>
 #include <optional>
+#include <cstdlib>
 
 #include <WasmVM.hpp>
 #include "../pp/Preprocessor.hpp"
@@ -12,6 +13,7 @@
 #include "../parser/Parser.hpp"
 #include "../parser/Semantic.hpp"
 #include "../codegen/ModuleCodegen.hpp"
+#include "Sysroot.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
     std::ofstream ofs(path, std::ios::binary);
@@ -28,6 +30,7 @@ struct CommandLineArgs {
     std::string outPath;
     std::optional<std::string> inputPath;
     std::vector<std::string> includePaths;
+    std::optional<std::string> sysrootFlag; // --sysroot=<path>
     bool dumpAst = false;
     bool preprocessOnly = false; // -E
 };
@@ -36,12 +39,15 @@ void showHelp() {
     std::cout << "Usage: wvmcc [options] <input>\n"
                  "\n"
                  "Options:\n"
-                 "  -o <file>   Write output wasm to <file> (default: a.wasm)\n"
-                 "  -E          Run preprocessor only and write output to stdout\n"
-                 "  -I <path>   Add header search path (can repeat)\n"
-                 "  -I<path>    Add header search path (attached form)\n"
-                 "  --ast       Dump a simple AST (XML) to stdout\n"
-                 "  -h, --help  Show this help\n"
+                 "  -o <file>       Write output wasm to <file> (default: a.wasm)\n"
+                 "  -E              Run preprocessor only and write output to stdout\n"
+                 "  -I <path>       Add header search path (can repeat)\n"
+                 "  -I<path>        Add header search path (attached form)\n"
+                 "  --sysroot=<dir> Override sysroot path (also: --sysroot <dir>)\n"
+                 "                  Resolved in order: --sysroot > WVMCC_SYSROOT >\n"
+                 "                  dirname(argv[0])/../share/wvmcc\n"
+                 "  --ast           Dump a simple AST (XML) to stdout\n"
+                 "  -h, --help      Show this help\n"
               << std::endl;
 }
 
@@ -103,6 +109,20 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
             }
             continue;
         }
+        // --sysroot=<dir> or --sysroot <dir>
+        if (arg == "--sysroot") {
+            if (i + 1 < argc) {
+                args.sysrootFlag = std::string(argv[++i]);
+            } else {
+                std::cerr << "error: --sysroot requires a path\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg.rfind("--sysroot=", 0) == 0) {
+            args.sysrootFlag = arg.substr(std::string("--sysroot=").size());
+            continue;
+        }
         parseInputPath(arg, args.inputPath);
     }
     return -1;
@@ -148,10 +168,20 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Resolve sysroot (4-tier: --sysroot > WVMCC_SYSROOT > argv[0]-relative
+    // > unset). The result is consumed by the preprocessor (M2-I) and the
+    // future link phase (M2-H).
+    wvmcc::SysrootEnv srEnv;
+    srEnv.cliFlag = args.sysrootFlag;
+    srEnv.envVar  = std::getenv("WVMCC_SYSROOT");
+    srEnv.argv0   = argc > 0 ? argv[0] : nullptr;
+    auto sysroot = wvmcc::resolveSysroot(srEnv);
+
     wvmcc::Preprocessor pp;
     for (const auto& p : args.includePaths) {
         pp.addIncludePath(p);
     }
+    (void)sysroot; // consumed by M2-I (preprocessor sysroot include search)
     
     if (!pp.open(*args.inputPath)) {
         std::cerr << "preprocess error: failed to open input" << std::endl;
