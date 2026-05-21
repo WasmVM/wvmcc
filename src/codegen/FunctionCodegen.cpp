@@ -759,6 +759,9 @@ void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr
         return;
     }
     size_t addr = dataAllocator_->internString(expr.value);
+    // Record the data-pointer site BEFORE the emit() so we capture the
+    // instruction index of the i64.const itself (not the next instruction).
+    dataPtrSites_.push_back({instrBuffer_.size(), addr});
     emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)addr});
 }
 

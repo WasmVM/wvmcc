@@ -13,15 +13,22 @@
 #include "../parser/Parser.hpp"
 #include "../parser/Semantic.hpp"
 #include "../codegen/ModuleCodegen.hpp"
+#include "../codegen/RelocSection.hpp"
 #include "Sysroot.hpp"
 
-static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
+static bool write_module_to_file(const WasmVM::WasmModule& module,
+                                 const std::string& path,
+                                 const wvmcc::codegen::ModuleCodegen* cg = nullptr) {
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs) {
         std::cerr << "error: cannot open output file: " << path << std::endl;
         return false;
     }
     WasmVM::module_encode(module, ofs);
+    // M2-E: append linking / reloc.CODE custom sections in linkable mode.
+    if (cg && cg->getCompileMode() == wvmcc::codegen::CompileMode::Linkable) {
+        wvmcc::codegen::appendRelocSections(ofs, *cg);
+    }
     ofs.flush();
     return true;
 }
@@ -315,7 +322,7 @@ int main(int argc, char** argv) {
         return 1;
     }
     const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
-    if (!write_module_to_file(module, target)) {
+    if (!write_module_to_file(module, target, &codegen)) {
         return 1;
     }
     return 0;

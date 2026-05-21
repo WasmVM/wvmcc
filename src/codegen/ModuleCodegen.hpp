@@ -48,6 +48,24 @@ public:
     // Intern a function type into module_.types (deduplicates).
     WasmVM::index_t internFuncType(const WasmVM::FuncType& ft);
 
+    // M2-E: a module-level data-pointer relocation. `codeFuncIdx` is the
+    // function's index within `module.funcs` (NOT the module-wide function
+    // index space, which would include imports). `instrIdx` is the
+    // instruction's position within that function's body. `dataSymbolIdx`
+    // indexes `getDataSymbols()`.
+    struct Relocation {
+        size_t codeFuncIdx;
+        size_t instrIdx;
+        size_t dataSymbolIdx;
+        int64_t addend;
+    };
+    struct DataSymbol {
+        std::string name;
+        size_t address; // mem[0] offset of the referenced datum
+    };
+    const std::vector<Relocation>& getRelocations() const { return relocations_; }
+    const std::vector<DataSymbol>& getDataSymbols() const { return dataSymbols_; }
+
 private:
     const wvmcc::parser::Semantic& semantic_;
     CompileMode compileMode_ = CompileMode::Linkable; // M2-D: default flipped from Freestanding
@@ -71,6 +89,11 @@ private:
     // Function-name → table-slot index (in funcref table 0) for every
     // address-taken function. Populated by analyzeFuncAddressTaken().
     std::unordered_map<std::string, size_t> funcTableSlots_;
+
+    // M2-E: data symbols (one per distinct string literal so far) and the
+    // relocations collected from each FunctionCodegen.
+    std::vector<DataSymbol> dataSymbols_;
+    std::vector<Relocation> relocations_;
 
     // Hosted-environment state (issue #40). When the translation unit defines
     // `main`, ModuleCodegen pre-injects four sys_proc imports and emits a

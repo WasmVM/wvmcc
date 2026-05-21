@@ -512,6 +512,27 @@ void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& 
     auto ft = buildFuncTypeFromDef(funcDef);
     wasmFunc.typeidx = internFuncType(ft);
 
+    // M2-E: collect data-pointer sites from this function into module-level
+    // relocation records. Each unique data address becomes a data symbol.
+    if (compileMode_ == CompileMode::Linkable) {
+        size_t codeFuncIdx = module_.funcs.size();
+        for (const auto& site : funcCodegen.getDataPtrSites()) {
+            // Dedup data symbols by address.
+            size_t symIdx = (size_t)-1;
+            for (size_t i = 0; i < dataSymbols_.size(); ++i) {
+                if (dataSymbols_[i].address == site.address) { symIdx = i; break; }
+            }
+            if (symIdx == (size_t)-1) {
+                symIdx = dataSymbols_.size();
+                dataSymbols_.push_back({
+                    std::string("$str.") + std::to_string(site.address),
+                    site.address,
+                });
+            }
+            relocations_.push_back({codeFuncIdx, site.instrIdx, symIdx, 0});
+        }
+    }
+
     module_.funcs.push_back(wasmFunc);
 }
 

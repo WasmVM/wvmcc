@@ -57,6 +57,15 @@ public:
         return diagnostics_;
     }
 
+    // M2-E: positions within `instrBuffer_` where a data-pointer i64.const
+    // was emitted, paired with the mem[0] address pushed. ModuleCodegen
+    // reads this after generate() to populate reloc.CODE.
+    struct DataPtrSite {
+        size_t instrIdx;
+        size_t address;
+    };
+    const std::vector<DataPtrSite>& getDataPtrSites() const { return dataPtrSites_; }
+
     void emit(const WasmVM::WasmInstr& instr);
 
     // needLValue=true: leave the address (i64) on the stack rather than the value.
@@ -112,6 +121,9 @@ private:
     wvmcc::parser::TypeNodePtr returnTypeNode_;
 
     std::unordered_set<std::string> addressTakenNames_;
+
+    // Sites where a data-pointer i64.const was emitted (M2-E).
+    std::vector<DataPtrSite> dataPtrSites_;
 
     int allocRawLocal(WasmVM::ValueType valType);
     std::vector<WasmVM::WasmInstr> generatePrologue();

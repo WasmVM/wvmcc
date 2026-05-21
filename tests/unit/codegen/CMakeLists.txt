@@ -4,6 +4,7 @@ set(CODEGEN_SRCS
     ${SRC}/codegen/FunctionCodegen.cpp
     ${SRC}/codegen/ModuleCodegen.cpp
     ${SRC}/codegen/StartWrapper.cpp
+    ${SRC}/codegen/RelocSection.cpp
     ${SRC}/codegen/TypeMap.cpp
     ${SRC}/codegen/SymbolTable.cpp
     ${SRC}/codegen/LayoutEngine.cpp
@@ -78,3 +79,9 @@ target_include_directories(wvmcc-export-visibility-test PRIVATE ${WASMVM_INCLUDE
 target_link_directories(wvmcc-export-visibility-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-export-visibility-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME export-visibility COMMAND wvmcc-export-visibility-test)
+
+add_executable(wvmcc-reloc-section-test reloc_section_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-reloc-section-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-reloc-section-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-reloc-section-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME reloc-section COMMAND wvmcc-reloc-section-test)
