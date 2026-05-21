@@ -880,6 +880,7 @@ std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSp
             // represent return type as element (reuse element field)
             f->element = curType;
             f->hasParamTypeList = layer->function.hasParamTypeList;
+            f->isVariadic = layer->function.isVariadic;
             for (const auto &p : layer->function.params) {
                 // best-effort: build param type nodes (limited info)
                 std::shared_ptr<TypeNode> ptn = nullptr;
@@ -956,6 +957,7 @@ std::shared_ptr<TypeNode> Semantic::canonicalTypeRepr(const DeclarationSpecifier
                 f->kind = TypeNode::Kind::Function;
                 f->element = cur;
                 f->hasParamTypeList = layer->function.hasParamTypeList;
+                f->isVariadic = layer->function.isVariadic;
                 for (const auto &p : layer->function.params) {
                     std::shared_ptr<TypeNode> ptn = nullptr;
                     if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);

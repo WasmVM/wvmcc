@@ -50,3 +50,6 @@ add_e2e_test(phase3-goto             ${CMAKE_CURRENT_SOURCE_DIR}/phase3/e2e_goto
 # Phase 4 — advanced features
 add_e2e_test(phase4-func-pointer     ${CMAKE_CURRENT_SOURCE_DIR}/phase4/e2e_func_pointer.c)
 add_e2e_test(phase4-static-local     ${CMAKE_CURRENT_SOURCE_DIR}/phase4/e2e_static_local.c)
+
+# M2-A — variadic function support (compiler prereq for M2 libc/printf)
+add_e2e_test(phase5-variadic         ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_variadic.c)

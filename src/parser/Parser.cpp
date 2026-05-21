@@ -6,7 +6,12 @@
 
 namespace wvmcc::parser {
 
-Parser::Parser(Lexer &lexer) : lex(lexer) {}
+Parser::Parser(Lexer &lexer) : lex(lexer) {
+    // Predefined builtin typedef-names. __builtin_va_list is the variadic
+    // arg-list cookie; we represent it as a Wasm i64 (a pointer to the
+    // current variadic-arg slot on the shadow stack).
+    typedef_names.insert("__builtin_va_list");
+}
 
 static bool initializerIsConstant(const InitializerPtr &init) {
     if (!init) return false;
@@ -121,6 +126,16 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
         // If identifier and it's a known typedef-name, treat as type-specifier.
         if (t->kind() == TokenKind::Identifier) {
             if (typedef_names.count(t->lexeme())) {
+                // Special-case the builtin va_list typedef: represent as `long`
+                // so the rest of the type system handles it as an i64 scalar.
+                if (t->lexeme() == "__builtin_va_list") {
+                    DeclarationSpecifiers::TypeSpecifier ts;
+                    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+                    ts.simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Long);
+                    specs.typeSpecifiers.push_back(ts);
+                    lex.next();
+                    continue;
+                }
                 DeclarationSpecifiers::TypeSpecifier ts;
                 ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName;
                 ts.text = t->lexeme();
@@ -561,8 +576,18 @@ DeclaratorPtr Parser::parseDeclarator() {
             std::vector<Parameter> params;
             std::vector<std::string> idlist;
             bool hasParamTypeList = false;
+            bool isVariadic = false;
 
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                // `...` before any named parameter is illegal in C.
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "...") {
+                    wvmcc::Diagnostic d;
+                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                    d.message = "'...' requires at least one named parameter";
+                    d.span = lex.peek()->span;
+                    diagnostics.push_back(std::move(d));
+                    lex.next(); // consume to recover
+                }
                 // heuristics: if it starts with a type keyword or a typedef-name treat as parameter-type-list
                 if (lex.peek() && (lex.peek()->kind() == TokenKind::Keyword || (lex.peek()->kind() == TokenKind::Identifier && typedef_names.count(lex.peek()->lexeme())))) {
                     hasParamTypeList = true;
@@ -578,6 +603,18 @@ DeclaratorPtr Parser::parseDeclarator() {
                         params.push_back(param);
                         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
                             lex.next();
+                            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "...") {
+                                lex.next();
+                                isVariadic = true;
+                                if (lex.peek() && !(lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                                    wvmcc::Diagnostic d;
+                                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                                    d.message = "'...' must be the last parameter";
+                                    d.span = lex.peek()->span;
+                                    diagnostics.push_back(std::move(d));
+                                }
+                                break;
+                            }
                             if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") break;
                             continue;
                         }
@@ -606,6 +643,7 @@ DeclaratorPtr Parser::parseDeclarator() {
             fn->kind = Declarator::Kind::Function;
             fn->function.params = params;
             fn->function.hasParamTypeList = hasParamTypeList;
+            fn->function.isVariadic = isVariadic;
             fn->function.identifierList = idlist;
             fn->inner = d;
             d = fn;
@@ -964,6 +1002,7 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     for (auto cur = decl; cur; cur = cur->inner.has_value() ? *cur->inner : nullptr) {
         if (cur->kind == Declarator::Kind::Function) {
             f->params = cur->function.params;
+            f->isVariadic = cur->function.isVariadic;
             break;
         }
     }
@@ -1974,6 +2013,70 @@ ExprPtr Parser::applyPostfixSuffix(ExprPtr lhs) {
             lhs = ie; continue;
         }
         if (p == "(") {
+            // Special-case __builtin_va_arg(expr, type-name): second arg is a
+            // type-name, not an expression. Build a CallExpr with vaArgType
+            // populated so codegen can size/load the slot correctly.
+            bool isVaArg = false;
+            if (lhs && lhs->kind == Expr::Kind::Ident) {
+                const auto& id = static_cast<const IdentifierExpr&>(*lhs);
+                if (id.name == "__builtin_va_arg") isVaArg = true;
+            }
+            if (isVaArg) {
+                lex.next(); // '('
+                std::vector<ExprPtr> args;
+                ExprPtr apExpr = parseAssignmentExpression();
+                args.push_back(apExpr);
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                    lex.next();
+                } else {
+                    wvmcc::Diagnostic d;
+                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                    d.message = "__builtin_va_arg expects (va_list, type-name)";
+                    if (lex.peek()) d.span = lex.peek()->span;
+                    diagnostics.push_back(std::move(d));
+                }
+                // Parse the type-name as declaration-specifiers + optional abstract declarator.
+                auto vaSpecs = parseDeclarationSpecifiers();
+                bool sawPointer = false;
+                while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "*") {
+                    lex.next();
+                    sawPointer = true;
+                    // skip qualifiers after '*'
+                    while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+                        std::string qk = lex.peek()->lexeme();
+                        if (qk == "const" || qk == "volatile" || qk == "restrict" || qk == "_Atomic") {
+                            lex.next();
+                        } else break;
+                    }
+                }
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") {
+                    lex.next();
+                }
+                // Build a TypeNode from the parsed specifiers.
+                auto tn = make_ast<TypeNode>();
+                if (!vaSpecs.typeSpecifiers.empty()
+                    && vaSpecs.typeSpecifiers[0].kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                    tn->kind = TypeNode::Kind::Builtin;
+                    tn->simple = vaSpecs.typeSpecifiers[0].simple;
+                } else {
+                    tn->kind = TypeNode::Kind::Builtin;
+                }
+                if (sawPointer) {
+                    auto ptr = make_ast<TypeNode>();
+                    ptr->kind = TypeNode::Kind::Pointer;
+                    ptr->pointee = tn;
+                    tn = ptr;
+                }
+                auto ce = make_ast<CallExpr>();
+                ce->callee = lhs;
+                ce->args = std::move(args);
+                ce->vaArgType = tn;
+                ce->kind = Expr::Kind::Call;
+                ce->span = lhs->span;
+                lhs = ce;
+                continue;
+            }
+
             lex.next();
             std::vector<ExprPtr> args;
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {

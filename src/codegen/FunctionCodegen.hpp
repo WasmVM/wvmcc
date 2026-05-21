@@ -105,6 +105,8 @@ private:
 
     // ABI: hidden first parameter for struct-returning functions (-1 if not struct return)
     int hiddenRetPtrLocal_ = -1;
+    // ABI: hidden trailing parameter for variadic callees (spill-base ptr, -1 if not variadic)
+    int vaArgsPtrLocal_ = -1;
     // C return type when function returns a struct (used by emitReturnStmt)
     wvmcc::parser::TypeNodePtr returnTypeNode_;
 
@@ -116,6 +118,9 @@ private:
 
     void emitStringLiteral(const wvmcc::parser::StringLiteral& expr);
     void emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr);
+
+    // __builtin_va_start / __builtin_va_arg / __builtin_va_end / __builtin_va_copy
+    void emitVaBuiltin(const std::string& name, const wvmcc::parser::CallExpr& expr);
 
     // Emit a (possibly designated) initializer-list assigning into the storage
     // at `baseAddrLocal + 0`. memidx selects mem[0] (static / heap) vs mem[1]

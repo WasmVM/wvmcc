@@ -131,6 +131,11 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         }
         ++paramIdx;
     }
+    // Variadic callees receive a hidden trailing i64 spill-base pointer.
+    // It occupies the next param slot but has no C-level name.
+    if (funcDef->isVariadic) {
+        vaArgsPtrLocal_ = paramIdx++;
+    }
     localIndexCounter_ = paramIdx; // locals start after params
 
     // Allocate frame-pointer local early so its index is fixed; frameSize_ is
@@ -671,7 +676,95 @@ void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr
     emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)addr});
 }
 
+void FunctionCodegen::emitVaBuiltin(const std::string& name,
+                                    const wvmcc::parser::CallExpr& expr) {
+    // Helper: assign the i64 value currently on top of the Wasm stack into
+    // a ScalarLocal va_list variable identified by `apExpr`. Falls back to
+    // a diagnostic if `apExpr` is not a plain identifier referring to a
+    // ScalarLocal — wvmcc's va_list ABI assumes that form.
+    auto assignTopToApLocal = [&](const wvmcc::parser::ExprPtr& apExpr) {
+        if (apExpr && apExpr->kind == wvmcc::parser::Expr::Kind::Ident) {
+            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*apExpr);
+            auto sym = symbolTable_.lookup(id.name);
+            if (sym) {
+                if (auto* sl = std::get_if<ScalarLocal>(&*sym)) {
+                    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)sl->localIndex});
+                    return;
+                }
+            }
+        }
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "va_list argument must be a plain local variable";
+        diagnostics_.push_back(std::move(d));
+        emit(WasmVM::Instr::Drop{});
+    };
+
+    if (name == "__builtin_va_start") {
+        // ap = __va_args_ptr (the hidden trailing param of the enclosing callee)
+        if (expr.args.empty()) return;
+        if (vaArgsPtrLocal_ < 0) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "__builtin_va_start used outside a variadic function";
+            diagnostics_.push_back(std::move(d));
+            return;
+        }
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)vaArgsPtrLocal_});
+        assignTopToApLocal(expr.args[0]);
+        return;
+    }
+
+    if (name == "__builtin_va_end") {
+        return; // no-op
+    }
+
+    if (name == "__builtin_va_copy") {
+        if (expr.args.size() < 2) return;
+        emitExpr(expr.args[1]);
+        assignTopToApLocal(expr.args[0]);
+        return;
+    }
+
+    if (name == "__builtin_va_arg") {
+        // Result type T comes from expr.vaArgType (parsed as a type-name).
+        if (expr.args.empty()) return;
+        auto vargType = expr.vaArgType;
+        auto resultWasmType = vargType ? typeMap_.toWasmType(vargType)
+                                       : WasmVM::ValueType::i32;
+
+        if (resultWasmType == WasmVM::ValueType::f32
+            || resultWasmType == WasmVM::ValueType::f64) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "va_arg with floating-point type not yet supported (deferred to M2-B)";
+            diagnostics_.push_back(std::move(d));
+        }
+
+        // 1. Load *ap as i64 from mem[1]; truncate to i32 if T fits.
+        emitExpr(expr.args[0]); // pointer value (i64) at ap
+        emit(WasmVM::Instr::I64_load{1, 0, 3});
+        if (resultWasmType == WasmVM::ValueType::i32) {
+            emit(WasmVM::Instr::I32_wrap_i64{});
+        }
+
+        // 2. Stash the result in a temp, advance ap by 8, then push result back.
+        int tmpLocal = allocRawLocal(resultWasmType);
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tmpLocal});
+
+        emitExpr(expr.args[0]); // current ap value
+        emit(WasmVM::Instr::I64_const{8});
+        emit(WasmVM::Instr::I64_add{});
+        assignTopToApLocal(expr.args[0]);
+
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tmpLocal});
+        return;
+    }
+}
+
 void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
+    constexpr WasmVM::index_t kStackPtrIdx = 0;
+
     // Direct call iff the callee is a bare identifier referring to a known
     // function symbol. Otherwise this is an indirect (function-pointer) call
     // and we lower it via `call_indirect`.
@@ -682,6 +775,38 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
         if (symbolTable_.lookupFunction(id.name).has_value()) {
             isDirect = true;
             directName = id.name;
+        }
+    }
+
+    // __builtin_va_* are recognized by name and lowered inline. They are not
+    // real Wasm functions; the symbol table never registers them.
+    if (expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
+        const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
+        if (id.name == "__builtin_va_start" || id.name == "__builtin_va_end"
+            || id.name == "__builtin_va_copy" || id.name == "__builtin_va_arg") {
+            emitVaBuiltin(id.name, expr);
+            return;
+        }
+    }
+
+    // Determine variadic-ness and named-parameter count of the callee.
+    bool calleeIsVariadic = false;
+    int namedParamCount = 0;
+    if (isDirect) {
+        auto funcSym = symbolTable_.lookupFunction(directName);
+        if (funcSym) {
+            calleeIsVariadic = funcSym->isVariadic;
+            namedParamCount = funcSym->namedParamCount;
+        }
+    } else {
+        auto calleeType = getExprTypeNode(expr.callee);
+        auto fnNode = calleeType;
+        if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Pointer) {
+            fnNode = fnNode->pointee;
+        }
+        if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Function) {
+            calleeIsVariadic = fnNode->isVariadic;
+            namedParamCount = static_cast<int>(fnNode->params.size());
         }
     }
 
@@ -717,65 +842,157 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
         emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)sretBufLocal});
     }
 
-    if (isDirect) {
+    auto emitDirectCall = [&]() {
+        auto funcSym = symbolTable_.lookupFunction(directName);
+        emit(WasmVM::Instr::Call{(WasmVM::index_t)funcSym->funcIndex});
+    };
+
+    auto emitIndirectCall = [&]() {
+        emitExpr(expr.callee, false);            // pointer value (i64)
+        emit(WasmVM::Instr::I32_wrap_i64{});     // call_indirect expects i32 index
+
+        std::optional<WasmVM::index_t> typeIdx;
+        auto calleeType = getExprTypeNode(expr.callee);
+        auto fnNode = calleeType;
+        if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Pointer) {
+            fnNode = fnNode->pointee;
+        }
+        if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Function && moduleCg_) {
+            WasmVM::FuncType ft;
+            if (fnNode->element) {
+                bool isVoid = fnNode->element->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                              && !fnNode->element->simple.empty()
+                              && fnNode->element->simple[0]
+                                 == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
+                if (!isVoid) ft.results.push_back(typeMap_.toWasmType(fnNode->element));
+            }
+            for (const auto& p : fnNode->params) {
+                ft.params.push_back(typeMap_.toWasmType(p));
+            }
+            if (fnNode->isVariadic) {
+                ft.params.push_back(WasmVM::ValueType::i64); // trailing va_args ptr
+            }
+            typeIdx = moduleCg_->internFuncType(ft);
+        }
+        if (!typeIdx && expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident && moduleCg_) {
+            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
+            typeIdx = moduleCg_->getFuncTypeIdx(id.name);
+        }
+
+        if (!typeIdx) {
+            emit(WasmVM::Instr::Unreachable{});
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "indirect call: unable to determine callee type";
+            diagnostics_.push_back(std::move(d));
+            return;
+        }
+
+        emit(WasmVM::Instr::Call_indirect{0, *typeIdx});
+    };
+
+    if (!calleeIsVariadic) {
+        // Non-variadic path: push args in order, call.
         for (const auto& arg : expr.args) {
             emitExpr(arg);
         }
-        auto funcSym = symbolTable_.lookupFunction(directName);
-        emit(WasmVM::Instr::Call{(WasmVM::index_t)funcSym->funcIndex});
+        if (isDirect) {
+            emitDirectCall();
+        } else {
+            emitIndirectCall();
+        }
         if (sretBufLocal != -1) {
             emit(WasmVM::Instr::Local_get{(WasmVM::index_t)sretBufLocal});
         }
         return;
     }
 
-    // Indirect call. Stack discipline for call_indirect: args... index → results
-    for (const auto& arg : expr.args) {
-        emitExpr(arg);
-    }
-    emitExpr(expr.callee, false);            // pointer value (i64)
-    emit(WasmVM::Instr::I32_wrap_i64{});     // call_indirect expects i32 index
+    // Variadic call: spill extra args onto the shadow stack as i64 slots,
+    // pass the spill base as a hidden trailing i64 parameter, restore SP.
+    int totalArgs = static_cast<int>(expr.args.size());
+    if (totalArgs < namedParamCount) namedParamCount = totalArgs; // recover gracefully
+    int numVariadic = totalArgs - namedParamCount;
+    size_t spillSize = static_cast<size_t>(numVariadic) * 8;
 
-    // Recover the FuncType for typeidx. Prefer the callee's TypeNode chain
-    // (variable of type pointer-to-function); fall back to the function-name
-    // lookup when the callee is a bare function identifier (decay to pointer).
-    std::optional<WasmVM::index_t> typeIdx;
-    auto calleeType = getExprTypeNode(expr.callee);
-    auto fnNode = calleeType;
-    if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Pointer) {
-        fnNode = fnNode->pointee;
+    // 1. Push named args (left-to-right).
+    for (int i = 0; i < namedParamCount; ++i) {
+        emitExpr(expr.args[i]);
     }
-    if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Function && moduleCg_) {
-        WasmVM::FuncType ft;
-        // Return type: stored in `element` for Function TypeNodes.
-        if (fnNode->element) {
-            bool isVoid = fnNode->element->kind == wvmcc::parser::TypeNode::Kind::Builtin
-                          && !fnNode->element->simple.empty()
-                          && fnNode->element->simple[0]
-                             == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
-            if (!isVoid) ft.results.push_back(typeMap_.toWasmType(fnNode->element));
+
+    // 2. Save current SP into a local.
+    int savedSpLocal = allocRawLocal(WasmVM::ValueType::i64);
+    emit(WasmVM::Instr::Global_get{kStackPtrIdx});
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)savedSpLocal});
+
+    int spillBaseLocal = savedSpLocal; // when numVariadic == 0
+    if (numVariadic > 0) {
+        // 3. SP -= spillSize; capture new SP as spill base.
+        spillBaseLocal = allocRawLocal(WasmVM::ValueType::i64);
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)savedSpLocal});
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)spillSize});
+        emit(WasmVM::Instr::I64_sub{});
+        emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)spillBaseLocal});
+        emit(WasmVM::Instr::Global_set{kStackPtrIdx});
+
+        // 4. Store each variadic arg as i64 at [spillBase + 8*i] in mem[1].
+        for (int i = 0; i < numVariadic; ++i) {
+            const auto& varg = expr.args[namedParamCount + i];
+            auto vargType = getExprTypeNode(varg);
+            auto vargWasmType = vargType ? typeMap_.toWasmType(vargType)
+                                         : WasmVM::ValueType::i32;
+
+            if (vargWasmType == WasmVM::ValueType::f32
+                || vargWasmType == WasmVM::ValueType::f64) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "variadic floating-point arguments not yet supported (deferred to M2-B)";
+                diagnostics_.push_back(std::move(d));
+            }
+            if (vargType
+                && (vargType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || vargType->kind == wvmcc::parser::TypeNode::Kind::Union)) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "variadic struct-by-value arguments not yet supported";
+                diagnostics_.push_back(std::move(d));
+            }
+
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)spillBaseLocal});
+            emitExpr(varg);
+
+            if (vargWasmType == WasmVM::ValueType::i32) {
+                // Default argument promotion already widens char/short to int;
+                // here we extend int→i64. Sign-extend by default (matches
+                // existing wvmcc convention for int).
+                emit(WasmVM::Instr::I64_extend_i32_s{});
+            }
+
+            emit(WasmVM::Instr::I64_store{
+                /*memidx=*/1,
+                /*offset=*/static_cast<WasmVM::offset_t>(8 * i),
+                /*align=*/3});
         }
-        for (const auto& p : fnNode->params) {
-            ft.params.push_back(typeMap_.toWasmType(p));
-        }
-        typeIdx = moduleCg_->internFuncType(ft);
-    }
-    // If callee is a bare function identifier, look up its registered typeidx.
-    if (!typeIdx && expr.callee && expr.callee->kind == wvmcc::parser::Expr::Kind::Ident && moduleCg_) {
-        const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.callee);
-        typeIdx = moduleCg_->getFuncTypeIdx(id.name);
     }
 
-    if (!typeIdx) {
-        emit(WasmVM::Instr::Unreachable{});
-        wvmcc::Diagnostic d;
-        d.severity = wvmcc::Diagnostic::Severity::Error;
-        d.message = "indirect call: unable to determine callee type";
-        diagnostics_.push_back(std::move(d));
-        return;
+    // 5. Push spill base as hidden trailing i64 arg (or savedSp if no variadic args).
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)spillBaseLocal});
+
+    // 6. Emit the call.
+    if (isDirect) {
+        emitDirectCall();
+    } else {
+        emitIndirectCall();
     }
 
-    emit(WasmVM::Instr::Call_indirect{0, *typeIdx});
+    // 7. Restore SP from saved value if we changed it.
+    if (numVariadic > 0) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)savedSpLocal});
+        emit(WasmVM::Instr::Global_set{kStackPtrIdx});
+    }
+
+    if (sretBufLocal != -1) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)sretBufLocal});
+    }
 }
 
 void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue) {
@@ -1302,17 +1519,26 @@ void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
         const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*stmt.expr);
         if (call.callee && call.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
             const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*call.callee);
-            auto funcSym = symbolTable_.lookupFunction(id.name);
-            if (funcSym) {
-                bool isVoidRet = !funcSym->type
-                    || (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Builtin
-                        && !funcSym->type->simple.empty()
-                        && funcSym->type->simple[0]
-                           == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
-                bool isStructRet = funcSym->type
-                    && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
-                        || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union);
-                leavesValue = !isVoidRet && !isStructRet;
+            // __builtin_va_start/end/copy emit no value; __builtin_va_arg does.
+            if (id.name == "__builtin_va_start"
+                || id.name == "__builtin_va_end"
+                || id.name == "__builtin_va_copy") {
+                leavesValue = false;
+            } else if (id.name == "__builtin_va_arg") {
+                leavesValue = true;
+            } else {
+                auto funcSym = symbolTable_.lookupFunction(id.name);
+                if (funcSym) {
+                    bool isVoidRet = !funcSym->type
+                        || (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                            && !funcSym->type->simple.empty()
+                            && funcSym->type->simple[0]
+                               == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
+                    bool isStructRet = funcSym->type
+                        && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                            || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union);
+                    leavesValue = !isVoidRet && !isStructRet;
+                }
             }
         }
     }

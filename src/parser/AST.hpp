@@ -198,6 +198,7 @@ struct TypeNode : Node {
     // Function
     std::vector<std::shared_ptr<TypeNode>> params;
     bool hasParamTypeList{false};
+    bool isVariadic{false};
     // For function type, returnType is represented by nesting: function -> pointee? use element/pointee as appropriate
 };
 
@@ -224,6 +225,7 @@ struct Declarator : Node {
     struct FunctionInfo {
         std::vector<Parameter> params; // parameter-type-list
         bool hasParamTypeList{false};
+        bool isVariadic{false};        // trailing `...` present
         std::vector<std::string> identifierList; // identifier-list (old K&R style)
     } function;
 };
@@ -256,6 +258,7 @@ struct FunctionDef : Node {
     DeclarationSpecifiers specifiers;
     DeclaratorPtr declarator; // name and type
     std::vector<Parameter> params;
+    bool isVariadic{false}; // copied from declarator->function.isVariadic
     std::vector<BlockItemPtr> body; // compound-stmt flattened for now
     std::vector<GnuAttribute> gnuAttributes;
 };
@@ -323,7 +326,13 @@ struct TernaryExpr : Expr {
     ExprPtr elseExpr;
 };
 
-struct CallExpr : Expr { ExprPtr callee; std::vector<ExprPtr> args; };
+struct CallExpr : Expr {
+    ExprPtr callee;
+    std::vector<ExprPtr> args;
+    // For __builtin_va_arg(ap, T): T is parsed as a type-name and stored here.
+    // Null for all other calls.
+    TypeNodePtr vaArgType;
+};
 
 struct MemberExpr : Expr { ExprPtr base; std::string member; bool isArrow = false; };
 

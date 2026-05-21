@@ -37,6 +37,8 @@ struct FuncSymbol {
     wvmcc::parser::TypeNodePtr type;
     int funcIndex; // Index in Wasm module functions
     bool isImport; // Whether this is an imported function
+    bool isVariadic{false};       // trailing `...` in C signature
+    int namedParamCount{0};       // number of named (non-variadic) C parameters
 };
 
 // Variant type for different symbol kinds

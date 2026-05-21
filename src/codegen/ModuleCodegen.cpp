@@ -195,6 +195,10 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::Functi
         }
     }
 
+    if (funcDef->isVariadic) {
+        ft.params.push_back(WasmVM::ValueType::i64); // hidden trailing va_args spill-base pointer
+    }
+
     return ft;
 }
 
@@ -228,6 +232,9 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDecl(const wvmcc::parser::Decla
                     ft.params.push_back(typeMap_.toWasmType(paramType));
                 }
             }
+        }
+        if (decl->declarator->function.isVariadic) {
+            ft.params.push_back(WasmVM::ValueType::i64);
         }
     }
 
@@ -273,6 +280,10 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     sym.type = buildReturnTypeNode(funcDef->specifiers, funcDef->declarator, semantic_);
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = false;
+    sym.isVariadic = funcDef->isVariadic;
+    sym.namedParamCount = isVoidParamList(funcDef->params)
+                              ? 0
+                              : static_cast<int>(funcDef->params.size());
     symbolTable_.defineFunction(name, sym);
 
     if (name == "main") {
@@ -309,6 +320,13 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     sym.type = nullptr;
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = true;
+    if (decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) {
+        sym.isVariadic = decl->declarator->function.isVariadic;
+        const auto& dparams = decl->declarator->function.params;
+        sym.namedParamCount = isVoidParamList(dparams)
+                                  ? 0
+                                  : static_cast<int>(dparams.size());
+    }
     symbolTable_.defineFunction(name, sym);
 }
 
