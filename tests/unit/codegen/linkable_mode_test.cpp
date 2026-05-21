@@ -75,6 +75,8 @@ int main() {
            "linkable mode imports env.__stack_memory");
     EXPECT(has_env_import(m, "__stack_pointer"),
            "linkable mode imports env.__stack_pointer");
+    EXPECT(has_env_import(m, "__heap_base"),
+           "linkable mode imports env.__heap_base (M2-G)");
     EXPECT(m.mems.empty(),
            "linkable mode defines no local memories");
     EXPECT(m.globals.empty(),
@@ -94,6 +96,42 @@ int main() {
            "linkable mode imports env.__indirect_function_table");
     EXPECT(m2.tables.empty(),
            "linkable mode defines no local table when imports are present");
+
+    // Freestanding: __heap_base is defined locally as a const i64 global
+    // initialized to the post-data boundary. Re-exercise by forcing the
+    // mode.
+    {
+        std::ofstream ofs("tmp_linkable_fs.c");
+        ofs << "const char *s = \"abc\";\nint main(void) { return 0; }\n";
+    }
+    Preprocessor fpp;
+    fpp.open("tmp_linkable_fs.c");
+    Lexer flex(fpp);
+    Parser fparser(flex);
+    auto ftu = fparser.parseTranslationUnit();
+    Semantic fsem(ftu, false);
+    fsem.run(fparser.getDiagnosticsRef());
+    ModuleCodegen fcg(fsem);
+    fcg.setCompileMode(CompileMode::Freestanding);
+    auto mf = fcg.generate(ftu);
+    std::remove("tmp_linkable_fs.c");
+
+    // Globals: [0]=$__stack_pointer (mut i64), [1]=__heap_base (const i64).
+    EXPECT(mf.globals.size() >= 2, "freestanding: two globals (sp + heap_base)");
+    if (mf.globals.size() >= 2) {
+        const auto& hb = mf.globals[1];
+        EXPECT(hb.type.mut == WasmVM::GlobalType::constant,
+               "freestanding: __heap_base is const");
+        EXPECT(hb.type.type == WasmVM::ValueType::i64,
+               "freestanding: __heap_base is i64");
+        // Init must be > 0 (the string literal pushes data past the sentinel).
+        bool initIsPositive = false;
+        if (std::holds_alternative<WasmVM::Instr::I64_const>(hb.init)) {
+            initIsPositive =
+                std::get<WasmVM::Instr::I64_const>(hb.init).value > 0;
+        }
+        EXPECT(initIsPositive, "freestanding: __heap_base init is > 0");
+    }
 
     if (failures == 0) {
         std::cout << "all linkable-mode tests passed\n";

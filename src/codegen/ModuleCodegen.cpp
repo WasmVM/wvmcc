@@ -41,6 +41,10 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     secondPass(tu);
     symbolTable_.popScope();
 
+    if (compileMode_ == CompileMode::Freestanding) {
+        finalizeFreestandingHeapBase();
+    }
+
     if (emitWrapperHere) {
         emitStartWrapper();
     }
@@ -70,6 +74,18 @@ WasmVM::index_t ModuleCodegen::allocateGuardGlobal() {
 
 size_t ModuleCodegen::allocateStaticStorage(size_t size, size_t align) {
     return dataAllocator_.allocate(size, align);
+}
+
+void ModuleCodegen::finalizeFreestandingHeapBase() {
+    // Round up the post-data top to 8 bytes so callers can rely on
+    // __heap_base being i64-aligned.
+    size_t top = dataAllocator_.currentTop();
+    top = (top + 7u) & ~size_t{7};
+    WasmVM::WasmGlobal heapBase;
+    heapBase.type = WasmVM::GlobalType{WasmVM::GlobalType::constant,
+                                       WasmVM::ValueType::i64};
+    heapBase.init = WasmVM::Instr::I64_const{(WasmVM::i64_t)top};
+    module_.globals.push_back(heapBase);
 }
 
 void ModuleCodegen::setupMemory() {
@@ -103,19 +119,29 @@ void ModuleCodegen::setupMemory() {
 
 void ModuleCodegen::setupGlobals() {
     WasmVM::GlobalType spType{WasmVM::GlobalType::variable, WasmVM::ValueType::i64};
+    WasmVM::GlobalType heapBaseType{WasmVM::GlobalType::constant, WasmVM::ValueType::i64};
 
     if (compileMode_ == CompileMode::Linkable) {
-        // Linkable mode: import $__stack_pointer from env. Its initial value
-        // is set by crt0 once the merged memory layout is known.
+        // Linkable mode: import $__stack_pointer (mut i64) and $__heap_base
+        // (const i64) from env. Both initial values are set by the linker's
+        // crt0 (M2-L6) after the merged memory layout is known.
         WasmVM::WasmImport spImp;
         spImp.module = "env";
         spImp.name = "__stack_pointer";
         spImp.desc = spType;
         module_.imports.push_back(spImp);
+
+        WasmVM::WasmImport hbImp;
+        hbImp.module = "env";
+        hbImp.name = "__heap_base";
+        hbImp.desc = heapBaseType;
+        module_.imports.push_back(hbImp);
         return;
     }
 
-    // Freestanding: define the global locally with M1's standalone init value.
+    // Freestanding: define the stack pointer locally with M1's standalone
+    // init value. __heap_base is defined after secondPass once the data
+    // segment layout is finalized — see finalizeFreestandingHeapBase().
     WasmVM::WasmGlobal stackPointerGlobal;
     stackPointerGlobal.type = spType;
     stackPointerGlobal.init = WasmVM::Instr::I64_const{0x10000};

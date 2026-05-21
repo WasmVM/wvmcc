@@ -101,6 +101,10 @@ private:
 
     void setupMemory();
     void setupGlobals();
+    // Freestanding mode only: append `__heap_base` as a const i64 global
+    // initialized to round_up_to_8(dataAllocator_.currentTop()). Called
+    // after secondPass so the data layout is finalized.
+    void finalizeFreestandingHeapBase();
     void firstPass(const wvmcc::parser::TranslationUnitPtr& tu);
     // Walk every function body to collect &funcname expressions; allocate
     // table slots and emit a funcref table + element segment.
