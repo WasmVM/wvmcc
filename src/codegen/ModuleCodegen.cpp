@@ -349,6 +349,30 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     if (name == "main") {
         mainFuncIndex_ = sym.funcIndex;
     }
+
+    // M2-C: explicit export opt-in via GNU attributes. `static` functions
+    // are always internal (C standard); for other functions, exports are
+    // additive — neither this nor `main`'s start-wrapper export conflict.
+    const bool isStatic = funcDef->specifiers.hasStorage(
+        wvmcc::parser::StorageClass::Static);
+    if (!isStatic) {
+        std::optional<std::string> exportName;
+        for (const auto& attr : funcDef->gnuAttributes) {
+            if (attr.name == "export_name" && !attr.stringArgs.empty()) {
+                exportName = attr.stringArgs[0];
+            } else if (attr.name == "visibility" && !attr.stringArgs.empty()
+                       && attr.stringArgs[0] == "default") {
+                if (!exportName) exportName = name;
+            }
+        }
+        if (exportName) {
+            WasmVM::WasmExport ex;
+            ex.name = *exportName;
+            ex.desc = WasmVM::WasmExport::DescType::func;
+            ex.index = (WasmVM::index_t)sym.funcIndex;
+            module_.exports.push_back(ex);
+        }
+    }
 }
 
 void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::DeclarationPtr& decl) {

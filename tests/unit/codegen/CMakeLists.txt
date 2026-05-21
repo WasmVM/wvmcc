@@ -72,3 +72,9 @@ target_include_directories(wvmcc-linkable-mode-test PRIVATE ${WASMVM_INCLUDE_DIR
 target_link_directories(wvmcc-linkable-mode-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-linkable-mode-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME linkable-mode COMMAND wvmcc-linkable-mode-test)
+
+add_executable(wvmcc-export-visibility-test export_visibility_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-export-visibility-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-export-visibility-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-export-visibility-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME export-visibility COMMAND wvmcc-export-visibility-test)
