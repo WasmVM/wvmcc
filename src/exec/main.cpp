@@ -304,6 +304,11 @@ int main(int argc, char** argv) {
     }
 
     wvmcc::codegen::ModuleCodegen codegen(sem);
+    // M2-F: pass the explicit -ffreestanding flag down to codegen. Default
+    // mode is Freestanding for now; M2-D will flip the default to Linkable.
+    if (args.freestanding) {
+        codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
+    }
     auto module = codegen.generate(main_translation_unit);
     if (auto err = WasmVM::module_validate(module)) {
         std::cerr << "error: module validation failed: " << err->what() << std::endl;

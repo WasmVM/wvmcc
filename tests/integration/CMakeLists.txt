@@ -27,12 +27,17 @@ set(INTEGRATION_TEST_DIR ${CMAKE_CURRENT_BINARY_DIR})
 #   module path — `wasmvm out.wasm foo bar` (was `--args foo bar`). Module
 #   search paths moved to `--extra/-e`. Tests here pass no args, so the
 #   invocation is the same under both old and new CLIs.
+#   M2-F: every e2e test passes `-ffreestanding` so it gets a self-contained
+#   module (own memories, own stack pointer, start-wrapper around main). Once
+#   M2-D flips the default to linkable-object mode, the flag becomes load-
+#   bearing — until the linker (M2-L1..L10) lands, only `-ffreestanding`
+#   modules can be run standalone under wasmvm.
 function(add_e2e_test name source)
     set(wasm_out ${INTEGRATION_TEST_DIR}/${name}.wasm)
     add_test(
         NAME e2e-${name}
         COMMAND ${CMAKE_COMMAND} -E env
-            sh -c "$<TARGET_FILE:wvmcc> '${source}' -o '${wasm_out}' && '${WASMVM_EXECUTABLE}' '${wasm_out}'"
+            sh -c "$<TARGET_FILE:wvmcc> -ffreestanding '${source}' -o '${wasm_out}' && '${WASMVM_EXECUTABLE}' '${wasm_out}'"
     )
     set_tests_properties(e2e-${name} PROPERTIES TIMEOUT 10)
 endfunction()

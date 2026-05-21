@@ -3,6 +3,7 @@ set(SRC ${PROJECT_SOURCE_DIR}/src)
 set(CODEGEN_SRCS
     ${SRC}/codegen/FunctionCodegen.cpp
     ${SRC}/codegen/ModuleCodegen.cpp
+    ${SRC}/codegen/StartWrapper.cpp
     ${SRC}/codegen/TypeMap.cpp
     ${SRC}/codegen/SymbolTable.cpp
     ${SRC}/codegen/LayoutEngine.cpp

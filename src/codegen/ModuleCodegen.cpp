@@ -1,6 +1,7 @@
 #include "ModuleCodegen.hpp"
 #include "FunctionCodegen.hpp"
 #include "AddressTakenAnalyzer.hpp"
+#include "StartWrapper.hpp"
 #include <stdexcept>
 
 namespace wvmcc::codegen {
@@ -21,10 +22,16 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     setupMemory();
     setupGlobals();
 
-    // Detect main() and inject sys_proc imports before any user functions are
-    // registered, so the sys_proc imports occupy function indices 0..3.
+    // Detect main() and (in freestanding mode) inject sys_proc imports before
+    // any user functions are registered, so the sys_proc imports occupy
+    // function indices 0..3.
+    //
+    // In linkable mode (M2-D) the start wrapper is synthesized by the
+    // linker's crt0 — this TU just emits its own functions and lets the
+    // linker discover `main` by name.
     scanForMain(tu);
-    if (hasMain_) {
+    const bool emitWrapperHere = hasMain_ && compileMode_ == CompileMode::Freestanding;
+    if (emitWrapperHere) {
         injectSysProcImports();
     }
 
@@ -34,7 +41,7 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     secondPass(tu);
     symbolTable_.popScope();
 
-    if (hasMain_) {
+    if (emitWrapperHere) {
         emitStartWrapper();
     }
 
@@ -458,146 +465,25 @@ void ModuleCodegen::scanForMain(const wvmcc::parser::TranslationUnitPtr& tu) {
 }
 
 void ModuleCodegen::injectSysProcImports() {
-    auto registerImport = [&](const std::string& name,
-                              std::vector<WasmVM::ValueType> params,
-                              std::vector<WasmVM::ValueType> results) -> int {
-        WasmVM::FuncType ft;
-        ft.params = std::move(params);
-        ft.results = std::move(results);
-        WasmVM::index_t typeidx = internFuncType(ft);
-        WasmVM::WasmImport imp;
-        imp.module = "sys_proc";
-        imp.name = name;
-        imp.desc = typeidx;
-        module_.imports.push_back(imp);
-        int idx = nextFuncIndex_++;
-        return idx;
-    };
-
-    sysProcArgcIdx_    = registerImport("argc",     {},                                                   {WasmVM::ValueType::i32});
-    sysProcArgvLenIdx_ = registerImport("argv_len", {WasmVM::ValueType::i32},                             {WasmVM::ValueType::i32});
-    sysProcArgvIdx_    = registerImport("argv",     {WasmVM::ValueType::i32, WasmVM::ValueType::i64,
-                                                     WasmVM::ValueType::i64},                            {WasmVM::ValueType::i32});
-    sysProcExitIdx_    = registerImport("exit",     {WasmVM::ValueType::i32},                             {});
+    auto imports = startwrapper::injectSysProcImports(module_, nextFuncIndex_);
+    sysProcArgcIdx_    = (int)imports.argc;
+    sysProcArgvLenIdx_ = (int)imports.argvLen;
+    sysProcArgvIdx_    = (int)imports.argv;
+    sysProcExitIdx_    = (int)imports.exit;
 }
 
 void ModuleCodegen::emitStartWrapper() {
     if (mainFuncIndex_ < 0) return;
-
-    // FuncType: () -> ()
-    WasmVM::FuncType ft;
-    WasmVM::index_t wrapperType = internFuncType(ft);
-
-    // Stack pointer global is module_.globals[0] (see setupGlobals()).
-    constexpr WasmVM::index_t kSpGlobal = 0;
-
-    WasmVM::WasmFunc wrapper;
-    wrapper.typeidx = wrapperType;
-    auto& body = wrapper.body;
-
-    if (mainHasArgv_) {
-        // Locals: [argc:i32, i:i32, len:i32, argv_base:i64, sp_save:i64]
-        wrapper.locals = {
-            WasmVM::ValueType::i32, // 0: argc
-            WasmVM::ValueType::i32, // 1: i
-            WasmVM::ValueType::i32, // 2: len
-            WasmVM::ValueType::i64, // 3: argv_base
-            WasmVM::ValueType::i64, // 4: sp_save
-        };
-
-        // argc = sys_proc.argc()
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcArgcIdx_});
-        body.push_back(WasmVM::Instr::Local_set{0});
-        // sp_save = sp
-        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
-        body.push_back(WasmVM::Instr::Local_set{4});
-        // argv_base = sp - argc * 8;  sp = argv_base
-        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
-        body.push_back(WasmVM::Instr::Local_get{0});
-        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
-        body.push_back(WasmVM::Instr::I64_const{8});
-        body.push_back(WasmVM::Instr::I64_mul{});
-        body.push_back(WasmVM::Instr::I64_sub{});
-        body.push_back(WasmVM::Instr::Local_tee{3});
-        body.push_back(WasmVM::Instr::Global_set{kSpGlobal});
-        // i = 0
-        body.push_back(WasmVM::Instr::I32_const{0});
-        body.push_back(WasmVM::Instr::Local_set{1});
-        // Block / Loop
-        body.push_back(WasmVM::Instr::Block{std::nullopt});
-        body.push_back(WasmVM::Instr::Loop{std::nullopt});
-        // if (i >= argc) br outer (label index 1 from inside Loop)
-        body.push_back(WasmVM::Instr::Local_get{1});
-        body.push_back(WasmVM::Instr::Local_get{0});
-        body.push_back(WasmVM::Instr::I32_ge_s{});
-        body.push_back(WasmVM::Instr::Br_if{1});
-        // len = sys_proc.argv_len(i)
-        body.push_back(WasmVM::Instr::Local_get{1});
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcArgvLenIdx_});
-        body.push_back(WasmVM::Instr::Local_set{2});
-        // sp -= (len + 8) & ~7
-        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
-        body.push_back(WasmVM::Instr::Local_get{2});
-        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
-        body.push_back(WasmVM::Instr::I64_const{8});
-        body.push_back(WasmVM::Instr::I64_add{});
-        body.push_back(WasmVM::Instr::I64_const{-8});
-        body.push_back(WasmVM::Instr::I64_and{});
-        body.push_back(WasmVM::Instr::I64_sub{});
-        body.push_back(WasmVM::Instr::Global_set{kSpGlobal});
-        // argv_base[i] = sp  (store i64 pointer, mem 0)
-        body.push_back(WasmVM::Instr::Local_get{3});
-        body.push_back(WasmVM::Instr::Local_get{1});
-        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
-        body.push_back(WasmVM::Instr::I64_const{8});
-        body.push_back(WasmVM::Instr::I64_mul{});
-        body.push_back(WasmVM::Instr::I64_add{});
-        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
-        // 8-byte aligned: argv_base is computed from an 8-aligned stack pointer
-        // and indexed by i*8 (align hint log2(8) = 3).
-        body.push_back(WasmVM::Instr::I64_store{0, 0, 3});
-        // sys_proc.argv(i, sp, (i64)(len + 1))
-        body.push_back(WasmVM::Instr::Local_get{1});
-        body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
-        body.push_back(WasmVM::Instr::Local_get{2});
-        body.push_back(WasmVM::Instr::I32_const{1});
-        body.push_back(WasmVM::Instr::I32_add{});
-        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcArgvIdx_});
-        body.push_back(WasmVM::Instr::Drop{});
-        // ++i
-        body.push_back(WasmVM::Instr::Local_get{1});
-        body.push_back(WasmVM::Instr::I32_const{1});
-        body.push_back(WasmVM::Instr::I32_add{});
-        body.push_back(WasmVM::Instr::Local_set{1});
-        // br loop (label 0)
-        body.push_back(WasmVM::Instr::Br{0});
-        body.push_back(WasmVM::Instr::End{}); // end loop
-        body.push_back(WasmVM::Instr::End{}); // end block
-        // call main(argc, argv_base) -> i32, then sys_proc.exit
-        body.push_back(WasmVM::Instr::Local_get{0});
-        body.push_back(WasmVM::Instr::Local_get{3});
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)mainFuncIndex_});
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcExitIdx_});
-        body.push_back(WasmVM::Instr::Unreachable{});
-    } else {
-        // main(void) wrapper: call main; pass result to exit
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)mainFuncIndex_});
-        body.push_back(WasmVM::Instr::Call{(WasmVM::index_t)sysProcExitIdx_});
-        body.push_back(WasmVM::Instr::Unreachable{});
-    }
-    body.push_back(WasmVM::Instr::End{});
-
-    WasmVM::index_t wrapperIdx =
-        (WasmVM::index_t)(module_.imports.size() + module_.funcs.size());
-    module_.funcs.push_back(std::move(wrapper));
-    module_.start = wrapperIdx;
-
-    WasmVM::WasmExport ex;
-    ex.name = "main";
-    ex.desc = WasmVM::WasmExport::DescType::func;
-    ex.index = (WasmVM::index_t)mainFuncIndex_;
-    module_.exports.push_back(ex);
+    startwrapper::SysProcImports imports{
+        (WasmVM::index_t)sysProcArgcIdx_,
+        (WasmVM::index_t)sysProcArgvLenIdx_,
+        (WasmVM::index_t)sysProcArgvIdx_,
+        (WasmVM::index_t)sysProcExitIdx_,
+    };
+    startwrapper::emitStartWrapper(module_,
+                                   imports,
+                                   (WasmVM::index_t)mainFuncIndex_,
+                                   mainHasArgv_);
 }
 
 } // namespace wvmcc::codegen

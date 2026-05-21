@@ -14,9 +14,24 @@
 
 namespace wvmcc::codegen {
 
+// Compile mode controls how each TU is emitted. Freestanding produces a
+// self-contained module (M1-style: own memories, own stack pointer, start
+// wrapper around main calling sys_proc.exit). Linkable (M2-D) produces an
+// object suitable for the integrated linker — imports `env.__*` runtime
+// state and emits no start wrapper.
+enum class CompileMode {
+    Freestanding,
+    Linkable,
+};
+
 class ModuleCodegen {
 public:
     ModuleCodegen(const wvmcc::parser::Semantic& semantic);
+
+    // Set the compile mode. Default is Freestanding (M2-F-era; M2-D flips
+    // this to Linkable by default).
+    void setCompileMode(CompileMode mode) { compileMode_ = mode; }
+    CompileMode getCompileMode() const { return compileMode_; }
 
     // Generate a Wasm module from a translation unit
     WasmVM::WasmModule generate(const wvmcc::parser::TranslationUnitPtr& tu);
@@ -35,6 +50,7 @@ public:
 
 private:
     const wvmcc::parser::Semantic& semantic_;
+    CompileMode compileMode_ = CompileMode::Freestanding;
 
     // Code generation components
     TypeMap typeMap_;
