@@ -5,6 +5,7 @@
 #include "SymbolResolver.hpp"
 #include "LinkDiagnostics.hpp"
 #include "RelocApply.hpp"
+#include "DeadCodeEliminator.hpp"
 
 #include <sstream>
 #include <utility>
@@ -70,9 +71,10 @@ void phaseResolveImports(LinkContext& ctx) {
     resolve::resolveImports(ctx);
 }
 
-// M2-L5: mark-and-sweep DCE across the merged output. Stub for L1.
+// M2-L5: mark-and-sweep DCE across the merged output.
 void phaseDeadCodeElim(LinkContext& ctx) {
-    ctx.note("phase: dce (stub)");
+    ctx.note("phase: dce");
+    dce::eliminate(ctx);
 }
 
 // M2-L9: report unresolved imports outside the host-runtime allow-list.

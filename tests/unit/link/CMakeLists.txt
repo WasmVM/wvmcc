@@ -5,6 +5,7 @@ set(LINK_SRCS
     ${SRC_ROOT}/link/SymbolResolver.cpp
     ${SRC_ROOT}/link/LinkDiagnostics.cpp
     ${SRC_ROOT}/link/RelocApply.cpp
+    ${SRC_ROOT}/link/DeadCodeEliminator.cpp
     ${SRC_ROOT}/codegen/StartWrapper.cpp
 )
 
@@ -28,3 +29,10 @@ target_include_directories(wvmcc-symbol-resolver-test PRIVATE
 target_link_directories(wvmcc-symbol-resolver-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-symbol-resolver-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME symbol-resolver COMMAND wvmcc-symbol-resolver-test)
+
+add_executable(wvmcc-dce-test dce_test.cpp ${LINK_SRCS})
+target_include_directories(wvmcc-dce-test PRIVATE
+    ${SRC_ROOT} ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-dce-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-dce-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME dce COMMAND wvmcc-dce-test)
