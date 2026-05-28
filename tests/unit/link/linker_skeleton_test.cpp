@@ -46,6 +46,7 @@ int main() {
 
         LinkOptions opts;
         opts.verbose = true;
+        opts.no_stdlib = true; // mini module has no `main`; skip crt0.
         auto r = link(std::move(inputs), opts);
 
         EXPECT(r.ok, "single-module link succeeds");
@@ -87,7 +88,9 @@ int main() {
         std::vector<LinkInput> inputs;
         inputs.push_back(std::move(ia));
         inputs.push_back(std::move(ib));
-        auto r = link(std::move(inputs), LinkOptions{});
+        LinkOptions o;
+        o.no_stdlib = true;
+        auto r = link(std::move(inputs), o);
         EXPECT(!r.ok, "duplicate export 'answer' across modules → error");
     }
 

@@ -1,6 +1,8 @@
 set(LINK_SRCS
     ${SRC_ROOT}/link/Linker.cpp
     ${SRC_ROOT}/link/ModuleMerge.cpp
+    ${SRC_ROOT}/link/Crt0Synth.cpp
+    ${SRC_ROOT}/codegen/StartWrapper.cpp
 )
 
 add_executable(wvmcc-linker-skeleton-test linker_skeleton_test.cpp ${LINK_SRCS})

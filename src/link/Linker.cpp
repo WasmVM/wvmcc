@@ -1,6 +1,7 @@
 #include "Linker.hpp"
 #include "LinkContext.hpp"
 #include "ModuleMerge.hpp"
+#include "Crt0Synth.hpp"
 
 #include <sstream>
 #include <utility>
@@ -52,10 +53,12 @@ void phaseRelocApply(LinkContext& ctx) {
     ctx.note("phase: reloc-apply (stub)");
 }
 
-// M2-L6: synthesize crt0 (env.__* exports + start wrapper). Stub for L1 —
-// the output therefore still has unresolved env.__* imports until L6.
+// M2-L6: synthesize crt0 — drop env.__* imports, replace with local defs
+// at the same index positions, prepend sys_proc imports (shifting func
+// indices by +4), and emit the start wrapper.
 void phaseCrt0(LinkContext& ctx) {
-    ctx.note("phase: crt0-synth (stub)");
+    ctx.note("phase: crt0-synth");
+    crt0::synthesize(ctx);
 }
 
 // M2-L3: resolve imports against the merged + crt0 exports. Stub for L1.

@@ -348,6 +348,16 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
 
     if (name == "main") {
         mainFuncIndex_ = sym.funcIndex;
+        // M2-L6: linkable-mode TUs export `main` as a hint to the linker,
+        // which uses it to wire the crt0 start function. Freestanding mode
+        // exports main via the start wrapper instead.
+        if (compileMode_ == CompileMode::Linkable) {
+            WasmVM::WasmExport ex;
+            ex.name = "main";
+            ex.desc = WasmVM::WasmExport::DescType::func;
+            ex.index = (WasmVM::index_t)sym.funcIndex;
+            module_.exports.push_back(ex);
+        }
     }
 
     // M2-C: explicit export opt-in via GNU attributes. `static` functions
