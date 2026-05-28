@@ -76,7 +76,8 @@ int main() {
         EXPECT(!r.ok, "archive input fails (M2-L4 deferred)");
     }
 
-    // Multi-module link fails today (M2-L2 deferred).
+    // Multi-module link succeeds (M2-L2): two modules with the same single
+    // export name should collide.
     {
         LinkInput::InMemoryModule a{m, "a.c"};
         LinkInput::InMemoryModule b{m, "b.c"};
@@ -87,7 +88,7 @@ int main() {
         inputs.push_back(std::move(ia));
         inputs.push_back(std::move(ib));
         auto r = link(std::move(inputs), LinkOptions{});
-        EXPECT(!r.ok, "multi-module link fails until M2-L2 lands");
+        EXPECT(!r.ok, "duplicate export 'answer' across modules → error");
     }
 
     if (failures == 0) {

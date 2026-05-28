@@ -1,5 +1,6 @@
 #include "Linker.hpp"
 #include "LinkContext.hpp"
+#include "ModuleMerge.hpp"
 
 #include <sstream>
 #include <utility>
@@ -15,38 +16,28 @@ namespace wvmcc::link {
 namespace {
 
 // M2-L2: merge each input WasmModule into ctx.output (type dedup + index
-// remap + import/export concatenation). For L1 we implement a degenerate
-// "first module wins" merge so single-input default-mode compiles still
-// produce a valid wasm file. Multi-input merges are deferred.
+// remap + import/export concatenation). Archive inputs error here until
+// M2-L4 lands.
 void phaseMerge(LinkContext& ctx) {
     ctx.note("phase: merge");
     if (ctx.inputs.empty()) {
         ctx.error("link: no inputs");
         return;
     }
-    int inMemoryCount = 0;
     for (const auto& in : ctx.inputs) {
-        if (std::holds_alternative<LinkInput::InMemoryModule>(in.source)) {
-            ++inMemoryCount;
+        if (auto* mm = std::get_if<LinkInput::InMemoryModule>(&in.source)) {
+            merge::mergeOne(ctx, mm->module, mm->origin);
+            if (ctx.hasErrors()) return;
+            std::ostringstream ss;
+            ss << "  merged " << mm->origin
+               << " (" << mm->module.funcs.size() << " func defs, "
+               << mm->module.types.size() << " types)";
+            ctx.note(ss.str());
         } else {
             ctx.error("link: archive inputs not yet supported (M2-L4 deferred until libc.a exists)");
+            return;
         }
     }
-    if (ctx.hasErrors()) return;
-
-    if (inMemoryCount > 1) {
-        // Full multi-input merge lands in M2-L2. For now, refuse so callers
-        // get a clear message instead of silently picking the first module.
-        ctx.error("link: multi-module merge not yet implemented (M2-L2)");
-        return;
-    }
-
-    // Degenerate pass-through for the single-input case.
-    const auto& first = std::get<LinkInput::InMemoryModule>(ctx.inputs[0].source);
-    ctx.output = first.module;
-    std::ostringstream ss;
-    ss << "  merged 1 module (" << first.origin << ")";
-    ctx.note(ss.str());
 }
 
 // M2-L7: rewrite per-TU funcref element segments into the merged shared
