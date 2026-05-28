@@ -444,45 +444,12 @@ void ModuleCodegen::analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnit
         tableFuncs.emplace_back(name, sym->funcIndex);
     }
 
+    // M2-L7: function pointers now flow as funcref values via ref.func /
+    // call_ref, so no per-TU funcref table is needed and the
+    // __indirect_function_table import is dropped. The
+    // analyzeFuncAddressTaken pass still runs (to populate funcTableSlots_
+    // which a few tests inspect), but emits no table or element segment.
     if (tableFuncs.empty()) return;
-
-    if (compileMode_ == CompileMode::Linkable) {
-        // Linkable mode: import the shared funcref table from env.
-        // The linker (M2-L7) merges per-TU element segments and renumbers
-        // slots to match the merged table layout.
-        WasmVM::TableType tImp;
-        tImp.limits.min = 0;
-        tImp.limits.max = std::nullopt;
-        tImp.limits.is64 = false;
-        tImp.reftype = WasmVM::RefType::funcref;
-        WasmVM::WasmImport tableImp;
-        tableImp.module = "env";
-        tableImp.name = "__indirect_function_table";
-        tableImp.desc = tImp;
-        module_.imports.push_back(tableImp);
-    } else {
-        // Freestanding: define our own funcref table sized to fit slots.
-        WasmVM::TableType t;
-        t.limits.min = (WasmVM::offset_t)tableFuncs.size();
-        t.limits.max = (WasmVM::offset_t)tableFuncs.size();
-        t.limits.is64 = false;
-        t.reftype = WasmVM::RefType::funcref;
-        module_.tables.push_back(t);
-    }
-
-    // Active element segment: populate table 0 at offset 0. In linkable mode
-    // the offset (and possibly which slots go where) is rewritten by the
-    // linker; the segment still records this TU's logical slot ordering.
-    WasmVM::WasmElem elem;
-    elem.type = WasmVM::RefType::funcref;
-    elem.mode.type = WasmVM::WasmElem::ElemMode::Mode::active;
-    elem.mode.tableidx = 0;
-    elem.mode.offset = WasmVM::Instr::I32_const{0};
-    for (const auto& [name, funcIdx] : tableFuncs) {
-        (void)name;
-        elem.elemlist.push_back(WasmVM::Instr::Ref_func{(WasmVM::index_t)funcIdx});
-    }
-    module_.elems.push_back(std::move(elem));
 }
 
 // ---------------------------------------------------------------------------

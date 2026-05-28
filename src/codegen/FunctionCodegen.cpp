@@ -380,10 +380,13 @@ void FunctionCodegen::emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr) 
 void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue) {
     auto symbolInfo = symbolTable_.lookup(expr.name);
     if (!symbolInfo) {
-        // Bare function-name in value context decays to a pointer (table slot).
-        if (moduleCg_ && !needLValue) {
-            if (auto slot = moduleCg_->getFuncTableSlot(expr.name)) {
-                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)*slot});
+        // M2-L7: bare function name in value context decays to a funcref via
+        // ref.func, so the linker can renumber function indices without
+        // rewriting hardcoded slot constants in user code.
+        if (!needLValue) {
+            auto funcSym = symbolTable_.lookupFunction(expr.name);
+            if (funcSym) {
+                emit(WasmVM::Instr::Ref_func{(WasmVM::index_t)funcSym->funcIndex});
                 return;
             }
         }
@@ -640,14 +643,14 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
 void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue) {
     // Address-of: emit the inner expression as an lvalue (leaves i64 address on stack)
     if (expr.op == "&") {
-        // &funcname → push the function's table slot index as an i64 pointer value.
+        // M2-L7: &funcname produces a funcref via ref.func. The linker
+        // remaps the funcidx (no hardcoded slot indices in user code).
         if (expr.rhs && expr.rhs->kind == wvmcc::parser::Expr::Kind::Ident) {
             const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.rhs);
-            if (moduleCg_) {
-                if (auto slot = moduleCg_->getFuncTableSlot(id.name)) {
-                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)*slot});
-                    return;
-                }
+            auto funcSym = symbolTable_.lookupFunction(id.name);
+            if (funcSym) {
+                emit(WasmVM::Instr::Ref_func{(WasmVM::index_t)funcSym->funcIndex});
+                return;
             }
         }
         emitExpr(expr.rhs, true);
@@ -935,8 +938,9 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     };
 
     auto emitIndirectCall = [&]() {
-        emitExpr(expr.callee, false);            // pointer value (i64)
-        emit(WasmVM::Instr::I32_wrap_i64{});     // call_indirect expects i32 index
+        // M2-L7: function pointers are funcref values. Push the funcref and
+        // use call_ref <typeidx>; no table indirection is needed.
+        emitExpr(expr.callee, false);
 
         std::optional<WasmVM::index_t> typeIdx;
         auto calleeType = getExprTypeNode(expr.callee);
@@ -975,7 +979,7 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
             return;
         }
 
-        emit(WasmVM::Instr::Call_indirect{0, *typeIdx});
+        emit(WasmVM::Instr::Call_ref{*typeIdx});
     };
 
     if (!calleeIsVariadic) {
@@ -2139,19 +2143,17 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         }
         if (u.op == "&") {
             auto rhsType = getExprTypeNode(u.rhs);
-            // Function names with no scalar symbol decay to function pointers
-            // (i64). Synthesize a pointer-to-void TypeNode as a placeholder.
-            if (!rhsType && u.rhs && u.rhs->kind == wvmcc::parser::Expr::Kind::Ident
-                && moduleCg_) {
+            // M2-L7: `&funcname` decays to a pointer-to-function. With the
+            // funcref switch, `toWasmType(Pointer{Function})` is funcref, so
+            // synthesize that TypeNode here.
+            if (!rhsType && u.rhs && u.rhs->kind == wvmcc::parser::Expr::Kind::Ident) {
                 const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*u.rhs);
                 if (symbolTable_.lookupFunction(id.name).has_value()) {
-                    auto voidTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
-                    voidTn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
-                    voidTn->simple.push_back(
-                        wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
+                    auto fnTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    fnTn->kind = wvmcc::parser::TypeNode::Kind::Function;
                     auto ptr = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
                     ptr->kind = wvmcc::parser::TypeNode::Kind::Pointer;
-                    ptr->pointee = voidTn;
+                    ptr->pointee = fnTn;
                     return ptr;
                 }
             }

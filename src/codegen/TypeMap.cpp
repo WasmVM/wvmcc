@@ -32,7 +32,14 @@ WasmVM::ValueType TypeMap::toWasmType(const wvmcc::parser::TypeNodePtr& type) co
             return WasmVM::ValueType::i32;
         }
         case wvmcc::parser::TypeNode::Kind::Pointer: {
-            // Pointers are i64 in Wasm64
+            // M2-L7: pointer-to-function uses Wasm's funcref reference type
+            // (via ref.func / call_ref) so the linker can renumber function
+            // indices when merging without needing to rewrite hardcoded slot
+            // numbers in user code. Other pointers stay i64 (wasm64).
+            if (type->pointee &&
+                type->pointee->kind == wvmcc::parser::TypeNode::Kind::Function) {
+                return WasmVM::ValueType::funcref;
+            }
             return WasmVM::ValueType::i64;
         }
         case wvmcc::parser::TypeNode::Kind::Array: {
@@ -40,8 +47,9 @@ WasmVM::ValueType TypeMap::toWasmType(const wvmcc::parser::TypeNodePtr& type) co
             return WasmVM::ValueType::i64;
         }
         case wvmcc::parser::TypeNode::Kind::Function: {
-            // Functions are represented by i64 addresses in Wasm64
-            return WasmVM::ValueType::i64;
+            // M2-L7: bare function "type" decays to funcref in value context
+            // (matches the pointer-to-function case above).
+            return WasmVM::ValueType::funcref;
         }
         case wvmcc::parser::TypeNode::Kind::Struct:
         case wvmcc::parser::TypeNode::Kind::Union: {

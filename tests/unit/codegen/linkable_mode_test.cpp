@@ -86,16 +86,18 @@ int main() {
     EXPECT(!m.start.has_value(),
            "linkable mode emits no start section (linker provides crt0)");
 
-    // Program that takes a function pointer — linkable mode imports the
-    // shared funcref table from env.
+    // Program that takes a function pointer — M2-L7 switched to funcref/
+    // ref.func/call_ref, so no table is needed at all.
     auto m2 = compile_linkable(
         "int helper(int x) { return x + 1; }\n"
         "int main(void) { int (*p)(int) = &helper; return p(3); }\n",
         "tmp_linkable_funcptr.c");
-    EXPECT(has_env_import(m2, "__indirect_function_table"),
-           "linkable mode imports env.__indirect_function_table");
+    EXPECT(!has_env_import(m2, "__indirect_function_table"),
+           "M2-L7: no funcref table import (function pointers use ref.func/call_ref)");
     EXPECT(m2.tables.empty(),
-           "linkable mode defines no local table when imports are present");
+           "no local table either");
+    EXPECT(m2.elems.empty(),
+           "no element segments either");
 
     // Freestanding: __heap_base is defined locally as a const i64 global
     // initialized to the post-data boundary. Re-exercise by forcing the
