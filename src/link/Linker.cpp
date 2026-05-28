@@ -2,6 +2,7 @@
 #include "LinkContext.hpp"
 #include "ModuleMerge.hpp"
 #include "Crt0Synth.hpp"
+#include "SymbolResolver.hpp"
 
 #include <sstream>
 #include <utility>
@@ -61,9 +62,10 @@ void phaseCrt0(LinkContext& ctx) {
     crt0::synthesize(ctx);
 }
 
-// M2-L3: resolve imports against the merged + crt0 exports. Stub for L1.
+// M2-L3: resolve cross-module imports against the merged + crt0 exports.
 void phaseResolveImports(LinkContext& ctx) {
-    ctx.note("phase: import-resolution (stub)");
+    ctx.note("phase: import-resolution");
+    resolve::resolveImports(ctx);
 }
 
 // M2-L5: mark-and-sweep DCE across the merged output. Stub for L1.

@@ -2,6 +2,7 @@ set(LINK_SRCS
     ${SRC_ROOT}/link/Linker.cpp
     ${SRC_ROOT}/link/ModuleMerge.cpp
     ${SRC_ROOT}/link/Crt0Synth.cpp
+    ${SRC_ROOT}/link/SymbolResolver.cpp
     ${SRC_ROOT}/codegen/StartWrapper.cpp
 )
 
@@ -18,3 +19,10 @@ target_include_directories(wvmcc-module-merge-test PRIVATE
 target_link_directories(wvmcc-module-merge-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-module-merge-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME module-merge COMMAND wvmcc-module-merge-test)
+
+add_executable(wvmcc-symbol-resolver-test symbol_resolver_test.cpp ${LINK_SRCS})
+target_include_directories(wvmcc-symbol-resolver-test PRIVATE
+    ${SRC_ROOT} ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-symbol-resolver-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-symbol-resolver-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME symbol-resolver COMMAND wvmcc-symbol-resolver-test)
