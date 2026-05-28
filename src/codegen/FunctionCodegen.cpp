@@ -433,7 +433,16 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
 }
 
 void FunctionCodegen::emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr) {
-    if (expr.value >= std::numeric_limits<int32_t>::min() && expr.value <= std::numeric_limits<int32_t>::max()) {
+    // Honor explicit L/LL suffix in the source — `0ULL`, `1L` etc. must
+    // emit as i64.const even though the *value* fits in i32. Otherwise
+    // mixed-width comparisons (`acc > ULONG_MAX`) fail validation.
+    bool forceLong = false;
+    for (char c : expr.raw) {
+        if (c == 'l' || c == 'L') { forceLong = true; break; }
+    }
+    bool fitsI32 = expr.value >= std::numeric_limits<int32_t>::min()
+                   && expr.value <= std::numeric_limits<int32_t>::max();
+    if (!forceLong && fitsI32) {
         emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)expr.value});
     } else {
         emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)expr.value});
@@ -2262,7 +2271,23 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
             : wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double);
         return tn;
     }
-    case K::Integer:
+    case K::Integer: {
+        // Match emitIntegerLiteral's encoding: values outside int32 range
+        // get an i64.const, so the *type* should be long. The L/LL/U
+        // suffix in raw is also honored.
+        const auto& il = static_cast<const wvmcc::parser::IntegerLiteral&>(*expr);
+        bool isLong = (il.value > std::numeric_limits<int32_t>::max()
+                       || il.value < std::numeric_limits<int32_t>::min());
+        for (char c : il.raw) {
+            if (c == 'l' || c == 'L') { isLong = true; break; }
+        }
+        auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        tn->simple.push_back(isLong
+            ? wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long
+            : wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+        return tn;
+    }
     case K::Char: {
         auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
         tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;

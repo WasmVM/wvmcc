@@ -34,6 +34,7 @@ set(RUNTIME_SOURCES
     src/errno.c
     src/string.c
     src/unistd_fcntl.c
+    src/stdlib_core.c
 )
 
 set(RUNTIME_OBJECTS)
