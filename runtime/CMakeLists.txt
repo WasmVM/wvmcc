@@ -38,6 +38,7 @@ set(RUNTIME_SOURCES
     src/malloc.c
     src/time.c
     src/assert.c
+    src/math.c
 )
 
 set(RUNTIME_OBJECTS)
