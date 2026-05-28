@@ -36,6 +36,8 @@ set(RUNTIME_SOURCES
     src/unistd_fcntl.c
     src/stdlib_core.c
     src/malloc.c
+    src/time.c
+    src/assert.c
 )
 
 set(RUNTIME_OBJECTS)
