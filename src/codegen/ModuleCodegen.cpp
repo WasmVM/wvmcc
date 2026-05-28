@@ -192,14 +192,26 @@ static wvmcc::parser::TypeNodePtr buildReturnTypeNode(
 
     auto baseType = semantic.buildTypeFromDeclaration(specs, nullptr);
 
-    // Walk the declarator chain: collect Pointer/Array nodes that sit BEFORE the
-    // Function (or Identifier) node.  These qualify the return type.
+    // The parser builds the declarator chain outer→inner as
+    //   [trailing-suffix(Function/Array)] → Identifier → [leading `*`s]
+    // For a function definition the outermost layer is Function and the
+    // pointer/array qualifiers that decorate the RETURN TYPE sit BELOW the
+    // Identifier (they came from the `*` prefix that the parser consumed
+    // before the identifier). Walk to the identifier, then collect
+    // everything after it.
     std::vector<wvmcc::parser::Declarator::Kind> quals;
+    bool sawIdentifier = false;
     for (auto cur = decl; cur;
          cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
-        if (cur->kind == wvmcc::parser::Declarator::Kind::Function
-            || cur->kind == wvmcc::parser::Declarator::Kind::Identifier) break;
-        quals.push_back(cur->kind);
+        if (sawIdentifier) {
+            if (cur->kind == wvmcc::parser::Declarator::Kind::Pointer
+                || cur->kind == wvmcc::parser::Declarator::Kind::Array) {
+                quals.push_back(cur->kind);
+            }
+        }
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier) {
+            sawIdentifier = true;
+        }
     }
     // Apply qualifiers from innermost-to-outermost.
     for (auto it = quals.rbegin(); it != quals.rend(); ++it) {
@@ -307,7 +319,28 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDecl(const wvmcc::parser::Decla
 
 void ModuleCodegen::firstPass(const wvmcc::parser::TranslationUnitPtr& tu) {
     if (!tu) return;
+    // Pre-scan: collect names of functions DEFINED in this TU. A bare
+    // prototype for a name that's defined later in the same TU must not
+    // become an import — otherwise the resulting module both imports and
+    // exports the function under the same name, which the linker (and
+    // any sensible reader) chokes on.
+    std::unordered_set<std::string> definedInTU;
     for (const auto& external : tu->externals) {
+        if (!external) continue;
+        if (auto fd = std::get_if<wvmcc::parser::FunctionDefPtr>(&external->decl)) {
+            if (*fd) definedInTU.insert(getFuncName((*fd)->declarator));
+        }
+    }
+    for (const auto& external : tu->externals) {
+        if (!external) continue;
+        // Skip prototype declarations for names defined later in this TU.
+        if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
+            if (*d && (*d)->declarator
+                && (*d)->declarator->kind == wvmcc::parser::Declarator::Kind::Function
+                && definedInTU.count(getFuncName((*d)->declarator))) {
+                continue;
+            }
+        }
         registerExternalDecl(external);
     }
 }
@@ -344,6 +377,13 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     sym.namedParamCount = isVoidParamList(funcDef->params)
                               ? 0
                               : static_cast<int>(funcDef->params.size());
+    if (!isVoidParamList(funcDef->params)) {
+        for (const auto& p : funcDef->params) {
+            auto pt = semantic_.buildTypeFromDeclaration(p.specifiers, p.declarator);
+            sym.paramTypes.push_back(
+                pt ? typeMap_.toWasmType(pt) : WasmVM::ValueType::i32);
+        }
+    }
     symbolTable_.defineFunction(name, sym);
 
     if (name == "main") {
@@ -374,6 +414,14 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
                        && attr.stringArgs[0] == "default") {
                 if (!exportName) exportName = name;
             }
+        }
+        // M2-L*: linkable mode auto-exports every non-static function so the
+        // linker's name-based resolver can wire cross-TU calls. Without this,
+        // the only externally-visible names would be those tagged with
+        // export_name/visibility attributes — which is fine for freestanding
+        // but useless when this object is destined for libc.a.
+        if (!exportName && compileMode_ == CompileMode::Linkable && name != "main") {
+            exportName = name;
         }
         if (exportName) {
             WasmVM::WasmExport ex;
@@ -411,7 +459,11 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     module_.imports.push_back(imp);
 
     FuncSymbol sym;
-    sym.type = nullptr;
+    // Carry the structured return type so call-site type queries
+    // (getExprTypeNode for K::Call) see the real `void *`/etc., not the
+    // i32 fallback that was used before — that fallback corrupted casts
+    // applied to imported-function return values.
+    sym.type = buildReturnTypeNode(decl->specifiers, decl->declarator, semantic_);
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = true;
     if (decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) {
@@ -420,6 +472,16 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
         sym.namedParamCount = isVoidParamList(dparams)
                                   ? 0
                                   : static_cast<int>(dparams.size());
+        // Wasm value types for each named C parameter — drives call-site
+        // argument coercion (i32 → i64, etc.) so we don't trip validation
+        // when an `int` literal is passed where the callee expects i64.
+        if (!isVoidParamList(dparams)) {
+            for (const auto& p : dparams) {
+                auto pt = semantic_.buildTypeFromDeclaration(p.specifiers, p.declarator);
+                sym.paramTypes.push_back(
+                    pt ? typeMap_.toWasmType(pt) : WasmVM::ValueType::i32);
+            }
+        }
     }
     symbolTable_.defineFunction(name, sym);
 }

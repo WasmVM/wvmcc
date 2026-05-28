@@ -96,6 +96,10 @@ private:
     std::vector<std::pair<std::string, SourceSpan>> gotos_in_current_function{};
     // current function's declaration specifiers while parsing body
     std::optional<DeclarationSpecifiers> current_function_specs{};
+    // true if the current function's declarator wraps its return type in
+    // one or more pointer layers (so a `void` simple specifier really means
+    // `void *…` and bare `return expr;` is fine).
+    bool current_function_returns_pointer{false};
     // context stack to track whether we're inside loops/switches for continue/break
     std::vector<Stmt::Kind> stmt_context_stack{};
 };

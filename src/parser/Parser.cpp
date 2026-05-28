@@ -1012,11 +1012,22 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     gotos_in_current_function.clear();
     stmt_context_stack.clear();
     current_function_specs = specs;
+    // Walk the declarator chain: any Pointer layer between the outer Function
+    // layer and the inner Identifier means the return type is a pointer.
+    current_function_returns_pointer = false;
+    for (auto cur = f->declarator; cur; cur = cur->inner.value_or(nullptr)) {
+        if (cur->kind == Declarator::Kind::Pointer) {
+            current_function_returns_pointer = true;
+            break;
+        }
+        if (!cur->inner.has_value()) break;
+    }
     f->body = parseCompoundBody();
     // validate gotos: each goto must name an existing label in this function
     // (defer reporting to Semantic pass)
     // clear current function speculative state
     current_function_specs.reset();
+    current_function_returns_pointer = false;
     return f;
 }
 
@@ -1139,6 +1150,8 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                         }
                     }
                 }
+                // `void *f(...)` returns a pointer-to-void, not void.
+                if (current_function_returns_pointer) funcVoid = false;
                 if (rs->value.has_value() && funcVoid) {
                     wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "return with expression in function returning void"; d.span = rs->span; diagnostics.push_back(std::move(d));
                 }
@@ -2329,7 +2342,10 @@ ExprPtr Parser::parseCastExpression() {
             if (t->kind() == TokenKind::Keyword) {
                 static const std::unordered_set<std::string> types = {
                     "void","char","short","int","long","float","double","signed","unsigned",
-                    "_Bool","_Complex","_Imaginary","struct","union","enum"
+                    "_Bool","_Complex","_Imaginary","struct","union","enum",
+                    // Type qualifiers can lead a type-name in a cast:
+                    //   (const unsigned char *)p
+                    "const","volatile","restrict","_Atomic"
                 };
                 if (types.count(t->lexeme())) isTypeNameStart = true;
             } else if (t->kind() == TokenKind::Identifier) {
@@ -2340,7 +2356,22 @@ ExprPtr Parser::parseCastExpression() {
         if (isTypeNameStart) {
             // parse type-name (using declaration specifiers as heuristic)
             auto specs = parseDeclarationSpecifiers();
-            // abstract-declarator not implemented; skip
+            // Minimal abstract-declarator support: count leading `*`s so we
+            // can recognise pointer casts like `(unsigned char *)p`. We don't
+            // attempt array/function abstract declarators yet — they aren't
+            // needed by libc's cast usage and only show up in odd corners.
+            int castPointerDepth = 0;
+            while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator
+                   && lex.peek()->lexeme() == "*") {
+                lex.next();
+                castPointerDepth++;
+                // Skip any qualifier tokens (const/volatile/restrict) after `*`.
+                while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+                    const auto &kw = lex.peek()->lexeme();
+                    if (kw == "const" || kw == "volatile" || kw == "restrict") lex.next();
+                    else break;
+                }
+            }
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
                 if (lex.peek()) {
                     wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in cast"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
@@ -2381,6 +2412,13 @@ ExprPtr Parser::parseCastExpression() {
                 else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
                 else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
             } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+            // Wrap in Pointer layers for each `*` in the abstract declarator.
+            for (int i = 0; i < castPointerDepth; ++i) {
+                auto wrap = make_ast<TypeNode>();
+                wrap->kind = TypeNode::Kind::Pointer;
+                wrap->pointee = tn;
+                tn = wrap;
+            }
             ce->type = tn;
             ce->span = ce->expr ? ce->expr->span : SourceSpan{};
             return ce;

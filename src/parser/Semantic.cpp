@@ -1064,6 +1064,12 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
 void Semantic::onDeclaration(const DeclarationPtr &d) {
     if (!d) return;
     (void)d;
+    // All the file-scope bookkeeping below — signature compatibility,
+    // declared-type tracking, def-counting for "multiple external
+    // definitions" — only applies at file scope. Inside a function,
+    // local declarations have their own scope and must not collide with
+    // file-scope (or each-other-across-functions) names.
+    if (functionDepth > 0) return;
     // perform a simple declaration compatibility check based on compact signature
     if (d->declarator) {
         std::string name = declaratorName(d->declarator);
@@ -1136,6 +1142,14 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             bool isDef = false;
             if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern) && d->initializer.has_value()) isDef = true;
             if (!d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) isDef = true;
+            // A bodyless function declaration (prototype) is NOT a definition,
+            // even though it has no `extern`. Only function definitions (with
+            // a compound-statement body) reach this code path through
+            // onFunctionDef — a Declaration whose outermost declarator layer
+            // is Function is always a prototype here.
+            if (d->declarator && d->declarator->kind == Declarator::Kind::Function) {
+                isDef = false;
+            }
             // Compute canonical alignment and numeric value (if possible)
             auto [maybeVal, canon] = computeAlignFromSpecsTU(d->specifiers);
             std::string alignStr = canon;

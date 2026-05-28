@@ -32,6 +32,7 @@ endif()
 # TUs that have actually been written. Add new entries as M2-7..M2-17 land.
 set(RUNTIME_SOURCES
     src/errno.c
+    src/string.c
 )
 
 set(RUNTIME_OBJECTS)

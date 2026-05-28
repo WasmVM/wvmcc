@@ -2,9 +2,13 @@
 #ifndef _WVMCC_STDDEF_H
 #define _WVMCC_STDDEF_H
 
-typedef unsigned long size_t;    // wasm64: 8 bytes (matches sizeof(void*))
-typedef long          ptrdiff_t;
-typedef int           wchar_t;   // placeholder — wvmcc has no wide-char support
+// NOTE: must be #define, not typedef — wvmcc's codegen has a known
+// gap where typedef-name resolution doesn't propagate to the WasmVM
+// value-type mapping, so `typedef unsigned long size_t;` ends up
+// sizing `size_t` as i32 rather than i64. Same story for ptrdiff_t.
+#define size_t    unsigned long   // wasm64: 8 bytes (matches sizeof(void*))
+#define ptrdiff_t long
+#define wchar_t   int             // placeholder — wvmcc has no wide-char support
 
 #define NULL ((void*)0)
 

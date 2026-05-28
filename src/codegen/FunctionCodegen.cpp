@@ -1102,8 +1102,32 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
 
     if (!calleeIsVariadic) {
         // Non-variadic path: push args in order, call.
-        for (const auto& arg : expr.args) {
-            emitExpr(arg);
+        // Coerce each argument to the parameter's Wasm value type so
+        // passing e.g. an `int` literal (i32) to a `size_t` (i64)
+        // parameter doesn't break validation. Only direct calls have a
+        // resolved paramTypes vector available.
+        std::vector<WasmVM::ValueType> paramTypes;
+        if (isDirect) {
+            auto funcSym = symbolTable_.lookupFunction(directName);
+            if (funcSym) paramTypes = funcSym->paramTypes;
+        }
+        for (size_t i = 0; i < expr.args.size(); ++i) {
+            emitExpr(expr.args[i]);
+            if (i < paramTypes.size()) {
+                auto srcVt = getExprType(expr.args[i]);
+                auto dstVt = paramTypes[i];
+                if (srcVt != dstVt) {
+                    if (srcVt == WasmVM::ValueType::i32
+                        && dstVt == WasmVM::ValueType::i64) {
+                        emit(WasmVM::Instr::I64_extend_i32_s{});
+                    } else if (srcVt == WasmVM::ValueType::i64
+                               && dstVt == WasmVM::ValueType::i32) {
+                        emit(WasmVM::Instr::I32_wrap_i64{});
+                    }
+                    // Other coercions (int↔float etc.) intentionally
+                    // omitted — they don't show up at libc call sites yet.
+                }
+            }
         }
         if (isDirect) {
             emitDirectCall();
@@ -1828,6 +1852,13 @@ void FunctionCodegen::emitCompoundStmt(const wvmcc::parser::CompoundStmt& stmt) 
 
 void FunctionCodegen::emitIfStmt(const wvmcc::parser::IfStmt& stmt) {
     emitExpr(stmt.cond);
+    // Wasm's `if` consumes an i32 condition. If the C condition is an i64
+    // (pointer, long), collapse it to a 0/1 i32 via two `eqz`s — simpler
+    // than emitting an explicit compare-with-zero and reads the same way.
+    if (getExprType(stmt.cond) == WasmVM::ValueType::i64) {
+        emit(WasmVM::Instr::I64_eqz{});
+        emit(WasmVM::Instr::I32_eqz{});
+    }
     emit(WasmVM::Instr::If{std::nullopt});
     emitStmt(stmt.thenStmt);
     if (stmt.elseStmt) {
