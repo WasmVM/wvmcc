@@ -1610,6 +1610,17 @@ ExprPtr Parser::parsePrimary() {
         il->kind = Expr::Kind::Integer;
         return il;
     }
+    if (t->kind() == TokenKind::CharacterConstant) {
+        auto tok = *lex.next();
+        auto cl = make_ast<CharLiteral>();
+        cl->span = tok.span;
+        // Extract the decoded numeric value out of the CharacterToken variant.
+        if (auto* ct = std::get_if<CharacterToken>(&tok.v)) {
+            cl->value = (char)(ct->info.value & 0xff);
+        }
+        cl->kind = Expr::Kind::Char;
+        return cl;
+    }
     if (t->kind() == TokenKind::FloatingConstant) {
         auto tok = *lex.next();
         auto fl = make_ast<FloatLiteral>();

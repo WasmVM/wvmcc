@@ -351,6 +351,46 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
     case K::CompoundLiteral:
         emitCompoundLiteralExpr(static_cast<const wvmcc::parser::CompoundLiteral&>(*expr));
         break;
+    case K::Ternary: {
+        const auto& t = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);
+        if (!moduleCg_) { emit(WasmVM::Instr::Unreachable{}); break; }
+
+        // Result type: common arithmetic of the two branches. Use
+        // typed if-else returning that type.
+        auto thenVt = getExprType(t.thenExpr);
+        auto elseVt = getExprType(t.elseExpr);
+        // Pick the wider type.
+        auto common = (thenVt == WasmVM::ValueType::f64 || elseVt == WasmVM::ValueType::f64) ? WasmVM::ValueType::f64
+                    : (thenVt == WasmVM::ValueType::f32 || elseVt == WasmVM::ValueType::f32) ? WasmVM::ValueType::f32
+                    : (thenVt == WasmVM::ValueType::i64 || elseVt == WasmVM::ValueType::i64) ? WasmVM::ValueType::i64
+                    :                                                                          WasmVM::ValueType::i32;
+
+        WasmVM::FuncType ifTy;
+        ifTy.results.push_back(common);
+        WasmVM::index_t ifTyIdx = moduleCg_->internFuncType(ifTy);
+
+        // Emit cond, normalize to i32, then typed if.
+        emitExpr(t.cond, false);
+        auto condVt = getExprType(t.cond);
+        if (condVt == WasmVM::ValueType::i64) {
+            emit(WasmVM::Instr::I64_const{0});
+            emit(WasmVM::Instr::I64_ne{});
+        } else if (condVt == WasmVM::ValueType::f32) {
+            emit(WasmVM::Instr::F32_const{0.0f});
+            emit(WasmVM::Instr::F32_ne{});
+        } else if (condVt == WasmVM::ValueType::f64) {
+            emit(WasmVM::Instr::F64_const{0.0});
+            emit(WasmVM::Instr::F64_ne{});
+        }
+        emit(WasmVM::Instr::If{ifTyIdx});
+        emitExpr(t.thenExpr, false);
+        emitConvert(this, thenVt, common);
+        emit(WasmVM::Instr::Else{});
+        emitExpr(t.elseExpr, false);
+        emitConvert(this, elseVt, common);
+        emit(WasmVM::Instr::End{});
+        break;
+    }
     default:
         emit(WasmVM::Instr::Unreachable{});
         break;
@@ -506,6 +546,84 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         auto lhsTypeNode = getExprTypeNode(expr.lhs);
         emit(typeMap_.makeStore(lhsTypeNode, useHeap ? 0 : 1));
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
+        return;
+    }
+
+    // --- Short-circuit logical operators ---
+    // `lhs && rhs`: if lhs == 0 → 0; else (rhs != 0).
+    // `lhs || rhs`: if lhs != 0 → 1; else (rhs != 0).
+    // Lowered via a typed `if (block-type result i32)` over the lhs result.
+    if ((expr.op == "&&" || expr.op == "||") && moduleCg_) {
+        const bool isAnd = (expr.op == "&&");
+
+        // Intern the block type `() -> i32` so the `if` can produce a value.
+        WasmVM::FuncType ifTy;
+        ifTy.results.push_back(WasmVM::ValueType::i32);
+        WasmVM::index_t ifTyIdx = moduleCg_->internFuncType(ifTy);
+
+        // Normalize lhs to i32 0/1 before the branch.
+        emitExpr(expr.lhs, false);
+        auto lhsVt = getExprType(expr.lhs);
+        if (lhsVt == WasmVM::ValueType::i64) {
+            emit(WasmVM::Instr::I64_const{0});
+            emit(WasmVM::Instr::I64_ne{});
+        } else if (lhsVt == WasmVM::ValueType::f32) {
+            emit(WasmVM::Instr::F32_const{0.0f});
+            emit(WasmVM::Instr::F32_ne{});
+        } else if (lhsVt == WasmVM::ValueType::f64) {
+            emit(WasmVM::Instr::F64_const{0.0});
+            emit(WasmVM::Instr::F64_ne{});
+        } else {
+            // i32 already; squash to 0/1.
+            emit(WasmVM::Instr::I32_const{0});
+            emit(WasmVM::Instr::I32_ne{});
+        }
+
+        emit(WasmVM::Instr::If{ifTyIdx});
+        if (isAnd) {
+            // lhs true → evaluate rhs, normalize.
+            emitExpr(expr.rhs, false);
+            auto rhsVt = getExprType(expr.rhs);
+            if (rhsVt == WasmVM::ValueType::i64) {
+                emit(WasmVM::Instr::I64_const{0});
+                emit(WasmVM::Instr::I64_ne{});
+            } else if (rhsVt == WasmVM::ValueType::f32) {
+                emit(WasmVM::Instr::F32_const{0.0f});
+                emit(WasmVM::Instr::F32_ne{});
+            } else if (rhsVt == WasmVM::ValueType::f64) {
+                emit(WasmVM::Instr::F64_const{0.0});
+                emit(WasmVM::Instr::F64_ne{});
+            } else {
+                emit(WasmVM::Instr::I32_const{0});
+                emit(WasmVM::Instr::I32_ne{});
+            }
+        } else {
+            // lhs true → result is 1 (short circuit).
+            emit(WasmVM::Instr::I32_const{1});
+        }
+        emit(WasmVM::Instr::Else{});
+        if (isAnd) {
+            // lhs false → result is 0.
+            emit(WasmVM::Instr::I32_const{0});
+        } else {
+            // lhs false → evaluate rhs, normalize.
+            emitExpr(expr.rhs, false);
+            auto rhsVt = getExprType(expr.rhs);
+            if (rhsVt == WasmVM::ValueType::i64) {
+                emit(WasmVM::Instr::I64_const{0});
+                emit(WasmVM::Instr::I64_ne{});
+            } else if (rhsVt == WasmVM::ValueType::f32) {
+                emit(WasmVM::Instr::F32_const{0.0f});
+                emit(WasmVM::Instr::F32_ne{});
+            } else if (rhsVt == WasmVM::ValueType::f64) {
+                emit(WasmVM::Instr::F64_const{0.0});
+                emit(WasmVM::Instr::F64_ne{});
+            } else {
+                emit(WasmVM::Instr::I32_const{0});
+                emit(WasmVM::Instr::I32_ne{});
+            }
+        }
+        emit(WasmVM::Instr::End{});
         return;
     }
 
@@ -2115,6 +2233,16 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     case K::Cast: {
         const auto& c = static_cast<const wvmcc::parser::CastExpr&>(*expr);
         return c.type;
+    }
+    case K::Ternary: {
+        const auto& t = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);
+        // Result is the common-arithmetic type of the two branches; we
+        // approximate by returning the "then" branch's type when both are
+        // available (matches the common case where both branches yield the
+        // same C type).
+        auto th = getExprTypeNode(t.thenExpr);
+        if (th) return th;
+        return getExprTypeNode(t.elseExpr);
     }
     case K::Call: {
         const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*expr);
