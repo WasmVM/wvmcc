@@ -6,6 +6,7 @@
 #include "LinkDiagnostics.hpp"
 #include "RelocApply.hpp"
 #include "DeadCodeEliminator.hpp"
+#include "MapWriter.hpp"
 
 #include <sstream>
 #include <utility>
@@ -83,10 +84,11 @@ void phaseDiagnostics(LinkContext& ctx) {
     diag::emitUnresolvedDiagnostics(ctx);
 }
 
-// M2-L10: write --map=<path> output. Stub for L1.
+// M2-L10: write --map=<path> output.
 void phaseMapOutput(LinkContext& ctx) {
     if (ctx.opts.map_path.empty()) return;
-    ctx.note("phase: map-output (stub)");
+    ctx.note("phase: map-output");
+    map::writeMap(ctx);
 }
 
 } // namespace

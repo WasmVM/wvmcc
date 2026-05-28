@@ -6,6 +6,7 @@ set(LINK_SRCS
     ${SRC_ROOT}/link/LinkDiagnostics.cpp
     ${SRC_ROOT}/link/RelocApply.cpp
     ${SRC_ROOT}/link/DeadCodeEliminator.cpp
+    ${SRC_ROOT}/link/MapWriter.cpp
     ${SRC_ROOT}/codegen/StartWrapper.cpp
 )
 
