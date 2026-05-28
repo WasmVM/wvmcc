@@ -47,12 +47,17 @@ char SourceBuffer::trigraph_at(std::size_t idx) const {
 
 bool SourceBuffer::handlePendingSpace() {
     if (!pendingSpace) return false;
+    pendingSpace = false;
     if (!lastOutputWasWhitespace) {
         charBuf.push_back(' ');
         lastOutputWasWhitespace = true;
+        // Pushed a real char — caller may break and return it.
+        return true;
     }
-    pendingSpace = false;
-    return true;
+    // Suppressed (previous output was already whitespace) — keep looping
+    // so the outer fill_buffer doesn't return with an empty charBuf and
+    // make the tokenizer think the input ended after the comment.
+    return false;
 }
 
 bool SourceBuffer::handleCarriageReturn() {

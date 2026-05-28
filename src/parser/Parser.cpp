@@ -1138,7 +1138,11 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             lex.next();
             auto rs = make_ast<ReturnStmt>();
             rs->span = p->span;
-            rs->value = parseExpression();
+            auto returnExpr = parseExpression();
+            // `return;` (no expression) leaves parseExpression with nullptr.
+            // Don't wrap nullptr in the optional or downstream checks will
+            // think we have an expression that's been silently lost.
+            if (returnExpr) rs->value = returnExpr;
             if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
             // validate return vs function return type if available
             if (current_function_specs.has_value()) {
@@ -1824,7 +1828,22 @@ ExprPtr Parser::parsePrimary() {
         return inner;
     }
 
-    // fallback: consume token and produce identifier-like node
+    // No valid primary here. Return nullptr so callers (parseExpression,
+    // parseAssignmentExpression, etc.) can report "no expression" — letting
+    // `return;` correctly produce a value-less return, for instance.
+    // Statement-terminator punctuators in particular must NEVER be consumed
+    // by the expression parser.
+    if (auto tok = lex.peek()) {
+        if (tok->kind() == TokenKind::Punctuator) {
+            const auto& lx = tok->lexeme();
+            if (lx == ";" || lx == ")" || lx == "}" || lx == "]" || lx == ",") {
+                return nullptr;
+            }
+        }
+    }
+    // Last-resort fallback for genuinely unrecognized tokens — produce a
+    // synthetic identifier so the rest of the parser can recover. Skipping
+    // this would drop user code from the AST silently.
     auto tok = *lex.next();
     auto id = make_ast<IdentifierExpr>();
     id->span = tok.span;
