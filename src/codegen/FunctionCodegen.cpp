@@ -87,6 +87,41 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     }
     bool isStructRet = returnTypeNode_ != nullptr;
 
+    // Compute the Wasm result type so emitReturnStmt can coerce the
+    // returned expression to match the function signature (e.g. `int`
+    // → i64 when the function returns `ssize_t`).
+    if (!isStructRet && semantic_) {
+        // Mirror ModuleCodegen::buildReturnTypeNode (walk past the
+        // Identifier, collect Pointer/Array wraps).
+        auto baseType = semantic_->buildTypeFromDeclaration(
+            funcDef->specifiers, nullptr);
+        std::vector<wvmcc::parser::Declarator::Kind> quals;
+        bool sawId = false;
+        for (auto cur = funcDef->declarator; cur;
+             cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+            if (sawId && (cur->kind == wvmcc::parser::Declarator::Kind::Pointer
+                          || cur->kind == wvmcc::parser::Declarator::Kind::Array)) {
+                quals.push_back(cur->kind);
+            }
+            if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier) sawId = true;
+        }
+        for (auto it = quals.rbegin(); it != quals.rend(); ++it) {
+            if (*it == wvmcc::parser::Declarator::Kind::Pointer) {
+                auto p = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                p->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                p->pointee = baseType;
+                baseType = p;
+            }
+        }
+        if (baseType) {
+            bool isVoid = baseType->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                          && !baseType->simple.empty()
+                          && baseType->simple[0]
+                             == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
+            if (!isVoid) returnWasmType_ = typeMap_.toWasmType(baseType);
+        }
+    }
+
     // Parameters occupy local indices 0..n-1 and are not in func.locals.
     symbolTable_.pushScope();
     int paramIdx = 0;
@@ -1697,6 +1732,23 @@ void FunctionCodegen::emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt) {
         }
     } else if (stmt.value) {
         emitExpr(*stmt.value);
+        // Coerce to the function's return Wasm type — `return r;` where
+        // `r` is `int` (i32) but the signature returns `long`/`ssize_t`
+        // (i64) needs an explicit extend, otherwise the validator
+        // (correctly) rejects the mismatch.
+        if (returnWasmType_.has_value()) {
+            auto srcVt = getExprType(*stmt.value);
+            auto dstVt = *returnWasmType_;
+            if (srcVt != dstVt) {
+                if (srcVt == WasmVM::ValueType::i32
+                    && dstVt == WasmVM::ValueType::i64) {
+                    emit(WasmVM::Instr::I64_extend_i32_s{});
+                } else if (srcVt == WasmVM::ValueType::i64
+                           && dstVt == WasmVM::ValueType::i32) {
+                    emit(WasmVM::Instr::I32_wrap_i64{});
+                }
+            }
+        }
     }
     if (framePointerLocal_ != -1 && frameSize_ > 0) {
         generateEpilogue();
@@ -2299,6 +2351,19 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
             auto rhsType = getExprTypeNode(u.rhs);
             if (rhsType && rhsType->kind == wvmcc::parser::TypeNode::Kind::Pointer)
                 return rhsType->pointee;
+        }
+        // Arithmetic / bitwise unary ops (+ - ~) preserve the operand type;
+        // logical-not yields int.
+        if (u.op == "-" || u.op == "+" || u.op == "~"
+            || u.op == "++" || u.op == "--") {
+            return getExprTypeNode(u.rhs);
+        }
+        if (u.op == "!") {
+            auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+            tn->simple.push_back(
+                wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+            return tn;
         }
         if (u.op == "&") {
             auto rhsType = getExprTypeNode(u.rhs);

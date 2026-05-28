@@ -119,6 +119,10 @@ private:
     int vaArgsPtrLocal_ = -1;
     // C return type when function returns a struct (used by emitReturnStmt)
     wvmcc::parser::TypeNodePtr returnTypeNode_;
+    // Wasm result type so emitReturnStmt can coerce e.g. an `int` value
+    // to i64 when the function signature says ssize_t/long. Unset for
+    // void-returning functions (no return value to coerce).
+    std::optional<WasmVM::ValueType> returnWasmType_;
 
     std::unordered_set<std::string> addressTakenNames_;
 
