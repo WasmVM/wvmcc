@@ -39,6 +39,14 @@ target_link_libraries(wvmcc PRIVATE ${WASMVM_LIBRARY})
 install(TARGETS wvmcc RUNTIME DESTINATION bin)
 
 # ============================================
+# Runtime (libc) — M2-18
+# ============================================
+option(WVMCC_BUILD_RUNTIME "Build the libc runtime" ON)
+if(WVMCC_BUILD_RUNTIME)
+    add_subdirectory(runtime)
+endif()
+
+# ============================================
 # Code Complexity Monitoring
 # ============================================
 
