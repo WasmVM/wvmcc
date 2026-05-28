@@ -459,17 +459,14 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
 
 StructDeclarator Parser::parseStructDeclarator() {
     StructDeclarator sd;
-    // optional declarator
-    if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || lex.peek()->kind() == TokenKind::Punctuator)) {
-        // accept identifier as declarator-id
-        if (lex.peek()->kind() == TokenKind::Identifier) {
-            auto id = make_ast<Declarator>();
-            id->id.name = lex.peek()->lexeme();
-            sd.declarator = id;
-            lex.next();
-        } else {
-            // other declarator forms (not fully implemented): leave declarator null and continue
-        }
+    // optional declarator. A struct-declarator may omit the declarator only
+    // for an anonymous bit-field (`: width`); otherwise parse a full
+    // declarator so pointer / array / function members are handled (and, in
+    // particular, so the lexer always advances — a `*p` member used to fall
+    // through the old identifier-only path consuming nothing, hanging the
+    // enclosing parseStructDeclarationList loop forever).
+    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+        sd.declarator = parseDeclarator();
     }
 
     // optional bit-field width

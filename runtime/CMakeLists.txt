@@ -39,6 +39,7 @@ set(RUNTIME_SOURCES
     src/time.c
     src/assert.c
     src/math.c
+    src/stdio_core.c
 )
 
 set(RUNTIME_OBJECTS)

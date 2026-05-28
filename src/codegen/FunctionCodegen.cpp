@@ -93,7 +93,7 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     if (!isStructRet && semantic_) {
         // Mirror ModuleCodegen::buildReturnTypeNode (walk past the
         // Identifier, collect Pointer/Array wraps).
-        auto baseType = semantic_->buildTypeFromDeclaration(
+        auto baseType = semantic_->canonicalTypeRepr(
             funcDef->specifiers, nullptr);
         std::vector<wvmcc::parser::Declarator::Kind> quals;
         bool sawId = false;
@@ -157,7 +157,13 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
             if (!pname.empty()) {
                 wvmcc::parser::TypeNodePtr paramType;
                 if (semantic_) {
-                    paramType = semantic_->buildTypeFromDeclaration(param.specifiers, param.declarator);
+                    // Use canonicalTypeRepr so typedef-named parameter types
+                    // (e.g. `FILE *f` where `typedef struct FILE FILE;`)
+                    // resolve to their underlying struct — otherwise member
+                    // access on the parameter can't find field types and a
+                    // pointer field wrongly defaults to i32. Falls back to
+                    // buildTypeFromDeclaration internally when no typedef.
+                    paramType = semantic_->canonicalTypeRepr(param.specifiers, param.declarator);
                 }
                 if (!paramType) {
                     for (const auto& ts : param.specifiers.typeSpecifiers) {
@@ -1592,12 +1598,14 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
             std::string name = declaratorBoundName(v->declarator);
             if (name.empty()) return;
 
-            // Prefer Semantic::buildTypeFromDeclaration (handles pointer-to-function,
-            // arrays, etc.). Fall back to a hand-built TypeNode for tests that don't
-            // wire up a Semantic instance.
+            // Prefer Semantic::canonicalTypeRepr (handles pointer-to-function,
+            // arrays, etc. AND resolves typedef-named types to their underlying
+            // struct/union so member access on locals like `FILE *f` works).
+            // Fall back to a hand-built TypeNode for tests that don't wire up a
+            // Semantic instance.
             wvmcc::parser::TypeNodePtr typeNode;
             if (semantic_) {
-                typeNode = semantic_->buildTypeFromDeclaration(v->specifiers, v->declarator);
+                typeNode = semantic_->canonicalTypeRepr(v->specifiers, v->declarator);
             }
             if (!typeNode) {
                 for (const auto& ts : v->specifiers.typeSpecifiers) {

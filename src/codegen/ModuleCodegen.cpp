@@ -190,7 +190,9 @@ static wvmcc::parser::TypeNodePtr buildReturnTypeNode(
     const wvmcc::parser::DeclaratorPtr& decl,
     const wvmcc::parser::Semantic& semantic) {
 
-    auto baseType = semantic.buildTypeFromDeclaration(specs, nullptr);
+    // canonicalTypeRepr resolves typedef-named base types (e.g. `ssize_t`
+    // → long → i64) so the signature matches the function body's view.
+    auto baseType = semantic.canonicalTypeRepr(specs, nullptr);
 
     // The parser builds the declarator chain outer→inner as
     //   [trailing-suffix(Function/Array)] → Identifier → [leading `*`s]
@@ -255,7 +257,7 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDef(const wvmcc::parser::Functi
 
     if (!isVoidParamList(funcDef->params)) {
         for (const auto& param : funcDef->params) {
-            auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
+            auto paramType = semantic_.canonicalTypeRepr(param.specifiers, param.declarator);
             if (!paramType) {
                 ft.params.push_back(WasmVM::ValueType::i32);
             } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
@@ -294,7 +296,7 @@ WasmVM::FuncType ModuleCodegen::buildFuncTypeFromDecl(const wvmcc::parser::Decla
         const auto& params = decl->declarator->function.params;
         if (!isVoidParamList(params)) {
             for (const auto& param : params) {
-                auto paramType = semantic_.buildTypeFromDeclaration(param.specifiers, param.declarator);
+                auto paramType = semantic_.canonicalTypeRepr(param.specifiers, param.declarator);
                 if (!paramType) {
                     ft.params.push_back(WasmVM::ValueType::i32);
                 } else if (paramType->kind == wvmcc::parser::TypeNode::Kind::Struct
@@ -379,7 +381,7 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
                               : static_cast<int>(funcDef->params.size());
     if (!isVoidParamList(funcDef->params)) {
         for (const auto& p : funcDef->params) {
-            auto pt = semantic_.buildTypeFromDeclaration(p.specifiers, p.declarator);
+            auto pt = semantic_.canonicalTypeRepr(p.specifiers, p.declarator);
             sym.paramTypes.push_back(
                 pt ? typeMap_.toWasmType(pt) : WasmVM::ValueType::i32);
         }
@@ -477,7 +479,7 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
         // when an `int` literal is passed where the callee expects i64.
         if (!isVoidParamList(dparams)) {
             for (const auto& p : dparams) {
-                auto pt = semantic_.buildTypeFromDeclaration(p.specifiers, p.declarator);
+                auto pt = semantic_.canonicalTypeRepr(p.specifiers, p.declarator);
                 sym.paramTypes.push_back(
                     pt ? typeMap_.toWasmType(pt) : WasmVM::ValueType::i32);
             }

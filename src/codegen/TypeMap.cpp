@@ -272,31 +272,82 @@ size_t TypeMap::getFieldOffset(const wvmcc::parser::TypeNodePtr& type, const std
     return 0;
 }
 
+// Walk a declarator chain to its Identifier node, returning the declared
+// name (empty if none). The parser builds the chain outer→inner as
+//   [trailing-suffix(Array/Function)] → Identifier → [leading `*`s]
+static std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl) {
+    for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier
+            || (!cur->id.name.empty()))
+            return cur->id.name;
+    }
+    return std::string();
+}
+
+// Apply the pointer / array layers of a declarator chain on top of a base
+// type, mirroring ModuleCodegen::buildReturnTypeNode. Layers that decorate
+// the member sit both above (trailing array suffixes) and below (leading
+// `*`s) the Identifier; collect them all and wrap from innermost outward.
+static wvmcc::parser::TypeNodePtr applyDeclaratorLayers(
+    wvmcc::parser::TypeNodePtr baseType,
+    const wvmcc::parser::DeclaratorPtr& decl) {
+    std::vector<const wvmcc::parser::Declarator*> belowId; // leading `*`s / arrays under id
+    std::vector<const wvmcc::parser::Declarator*> aboveId; // trailing suffixes over id
+    bool sawId = false;
+    for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier) { sawId = true; continue; }
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Pointer
+            || cur->kind == wvmcc::parser::Declarator::Kind::Array) {
+            if (sawId) belowId.push_back(cur.get());
+            else       aboveId.push_back(cur.get());
+        }
+    }
+    auto wrap = [&](const wvmcc::parser::Declarator* d) {
+        if (d->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+            auto n = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            n->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+            n->pointee = baseType;
+            baseType = n;
+        } else { // Array
+            auto n = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            n->kind = wvmcc::parser::TypeNode::Kind::Array;
+            n->element = baseType;
+            baseType = n;
+        }
+    };
+    // innermost first: the `*`s below the identifier, then trailing suffixes.
+    for (auto it = belowId.rbegin(); it != belowId.rend(); ++it) wrap(*it);
+    for (auto it = aboveId.begin(); it != aboveId.end(); ++it) wrap(*it);
+    return baseType;
+}
+
 wvmcc::parser::TypeNodePtr TypeMap::getFieldType(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const {
     if (!type || !type->su) return nullptr;
     for (const auto& member : type->su->members) {
         for (const auto& sd : member.declarators) {
             if (!sd.declarator) continue;
-            std::string name = sd.declarator->id.name;
-            if (name != fieldName) continue;
+            if (declaratorName(sd.declarator) != fieldName) continue;
+            wvmcc::parser::TypeNodePtr baseType = nullptr;
             for (const auto& ts : member.specifiers.typeSpecifiers) {
                 if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple
                     && !ts.simple.empty()) {
-                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
-                    node->kind = wvmcc::parser::TypeNode::Kind::Builtin;
-                    node->simple = ts.simple;
-                    return node;
+                    baseType = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    baseType->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                    baseType->simple = ts.simple;
+                    break;
                 }
                 if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
                     && ts.su) {
-                    auto node = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
-                    node->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                    baseType = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    baseType->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
                                  ? wvmcc::parser::TypeNode::Kind::Struct
                                  : wvmcc::parser::TypeNode::Kind::Union;
-                    node->su = ts.su;
-                    return node;
+                    baseType->su = ts.su;
+                    break;
                 }
             }
+            if (!baseType) return nullptr;
+            return applyDeclaratorLayers(baseType, sd.declarator);
         }
     }
     return nullptr;

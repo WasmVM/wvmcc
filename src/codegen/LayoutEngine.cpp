@@ -4,6 +4,60 @@
 
 namespace wvmcc::codegen {
 
+// Walk a declarator chain to its Identifier node and return the declared
+// name. Chain shape (outer→inner): [Array/Function suffixes] → Identifier
+// → [leading `*`s].
+static std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl) {
+    for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier
+            || !cur->id.name.empty())
+            return cur->id.name;
+    }
+    return std::string();
+}
+
+// Best-effort constant fold of an array-size expression (integer literal).
+static size_t arrayCount(const wvmcc::parser::Declarator* arr) {
+    if (arr->array.size.has_value() && *arr->array.size) {
+        const auto& e = **arr->array.size;
+        if (e.kind == wvmcc::parser::Expr::Kind::Integer) {
+            auto v = static_cast<const wvmcc::parser::IntegerLiteral&>(e).value;
+            if (v > 0) return static_cast<size_t>(v);
+        }
+    }
+    return 1; // unknown / flexible array → treat as one element
+}
+
+// Given the scalar base size/alignment from the specifiers, apply the
+// pointer/array layers of a member's declarator to obtain the member's
+// in-memory size and alignment. Pointers are 8/8 (wasm64); arrays multiply
+// the element size by the element count.
+static void applyDeclaratorToLayout(const wvmcc::parser::DeclaratorPtr& decl,
+                                    size_t& memberSize, size_t& memberAlignment) {
+    if (!decl) return;
+    // Collect layers in type-application order (innermost → outermost),
+    // matching TypeMap::applyDeclaratorLayers: leading `*`s (reversed) first,
+    // then trailing array/function suffixes.
+    std::vector<const wvmcc::parser::Declarator*> belowId, aboveId;
+    bool sawId = false;
+    for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier) { sawId = true; continue; }
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Pointer
+            || cur->kind == wvmcc::parser::Declarator::Kind::Array) {
+            (sawId ? belowId : aboveId).push_back(cur.get());
+        }
+    }
+    auto step = [&](const wvmcc::parser::Declarator* d) {
+        if (d->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+            memberSize = 8; memberAlignment = 8;
+        } else { // Array
+            memberSize *= arrayCount(d);
+        }
+    };
+    for (auto it = belowId.rbegin(); it != belowId.rend(); ++it) step(*it);
+    for (auto* d : aboveId) step(d);
+}
+
 StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpecifier& structSpec) {
     // Check if we've already computed this layout
     auto cached = getCachedLayout(&structSpec);
@@ -87,6 +141,13 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
             memberAlignment = 8;
         }
         
+        // Apply pointer/array declarator layers (e.g. `char *p` → 8 bytes,
+        // `int a[4]` → 16 bytes). Uses the first declarator of the member.
+        if (!member.declarators.empty() && member.declarators[0].declarator) {
+            applyDeclaratorToLayout(member.declarators[0].declarator,
+                                    memberSize, memberAlignment);
+        }
+
         size_t fieldOffset;
         if (isUnion) {
             // All union members overlay at offset 0.
@@ -100,7 +161,7 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
         }
 
         if (!member.declarators.empty() && member.declarators[0].declarator) {
-            layout.fieldOffsets.emplace_back(member.declarators[0].declarator->id.name, fieldOffset);
+            layout.fieldOffsets.emplace_back(declaratorName(member.declarators[0].declarator), fieldOffset);
         } else {
             layout.fieldOffsets.emplace_back("", fieldOffset);
         }
