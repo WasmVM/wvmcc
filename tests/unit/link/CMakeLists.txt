@@ -4,6 +4,7 @@ set(LINK_SRCS
     ${SRC_ROOT}/link/Crt0Synth.cpp
     ${SRC_ROOT}/link/SymbolResolver.cpp
     ${SRC_ROOT}/link/LinkDiagnostics.cpp
+    ${SRC_ROOT}/link/RelocApply.cpp
     ${SRC_ROOT}/codegen/StartWrapper.cpp
 )
 

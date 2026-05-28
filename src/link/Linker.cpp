@@ -4,6 +4,7 @@
 #include "Crt0Synth.hpp"
 #include "SymbolResolver.hpp"
 #include "LinkDiagnostics.hpp"
+#include "RelocApply.hpp"
 
 #include <sstream>
 #include <utility>
@@ -49,10 +50,10 @@ void phaseIndirectTableMerge(LinkContext& ctx) {
     ctx.note("phase: indirect-table-merge (stub)");
 }
 
-// M2-L8: rebase data segments + apply each TU's reloc.CODE entries. Stub
-// for L1.
+// M2-L8: rebase data segments + apply each TU's reloc.CODE entries.
 void phaseRelocApply(LinkContext& ctx) {
-    ctx.note("phase: reloc-apply (stub)");
+    ctx.note("phase: reloc-apply");
+    reloc::applyRelocations(ctx);
 }
 
 // M2-L6: synthesize crt0 — drop env.__* imports, replace with local defs
