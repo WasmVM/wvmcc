@@ -1064,12 +1064,52 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
 void Semantic::onDeclaration(const DeclarationPtr &d) {
     if (!d) return;
     (void)d;
-    // All the file-scope bookkeeping below — signature compatibility,
-    // declared-type tracking, def-counting for "multiple external
-    // definitions" — only applies at file scope. Inside a function,
-    // local declarations have their own scope and must not collide with
-    // file-scope (or each-other-across-functions) names.
-    if (functionDepth > 0) return;
+    // The signature-compatibility / declared-type / def-counting bookkeeping
+    // below only applies at file scope. Inside a function, local declarations
+    // have their own scope and must not collide with file-scope (or
+    // each-other-across-functions) names. Block-scope declarations still need
+    // their own diagnostics, though, so handle those here before returning.
+    if (functionDepth > 0) {
+        if (curDiagnostics && d->declarator) {
+            // A variably-modified (VLA) type is permitted at block scope but
+            // flagged as a warning.
+            bool vm = false;
+            buildTypeFromDeclaration(d->specifiers, d->declarator, false, &vm);
+            if (vm) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Warning;
+                diag.message = "declaration has variably-modified type";
+                diag.span = d->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+        }
+        if (curDiagnostics) {
+            // Block-scope external-linkage object with an initializer is an
+            // error; block-scope `static` is fine (no linkage, C 6.2.2p6).
+            if (d->initializer.has_value()
+                && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "declaration at block scope with external linkage shall not have an initializer";
+                diag.span = d->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+            // C 6.7.1: a block-scope function declaration shall have no explicit
+            // storage-class specifier other than extern.
+            if (d->declarator && isFunctionDeclarator(d->declarator)
+                && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)
+                && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+                    || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Auto)
+                    || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register))) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "function with block scope shall have no explicit storage-class";
+                diag.span = d->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+        }
+        return;
+    }
     // perform a simple declaration compatibility check based on compact signature
     if (d->declarator) {
         std::string name = declaratorName(d->declarator);
