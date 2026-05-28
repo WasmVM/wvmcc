@@ -3,6 +3,7 @@
 #include "ModuleMerge.hpp"
 #include "Crt0Synth.hpp"
 #include "SymbolResolver.hpp"
+#include "LinkDiagnostics.hpp"
 
 #include <sstream>
 #include <utility>
@@ -73,10 +74,10 @@ void phaseDeadCodeElim(LinkContext& ctx) {
     ctx.note("phase: dce (stub)");
 }
 
-// M2-L9: report unresolved imports outside the allowed host-import list.
-// Stub for L1.
+// M2-L9: report unresolved imports outside the host-runtime allow-list.
 void phaseDiagnostics(LinkContext& ctx) {
-    ctx.note("phase: diagnostics (stub)");
+    ctx.note("phase: diagnostics");
+    diag::emitUnresolvedDiagnostics(ctx);
 }
 
 // M2-L10: write --map=<path> output. Stub for L1.
