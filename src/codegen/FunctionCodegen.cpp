@@ -645,9 +645,15 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         }
 
         // General lvalue assignment (pointer dereference, member access, array index)
+        // Convert the rhs to the lvalue's type up front so the store sees the
+        // right Wasm type (e.g. storing the literal 0 — i32 — into an i64
+        // pointer/size_t field) and the assignment's value has the lvalue type.
+        auto lhsTypeNode = getExprTypeNode(expr.lhs);
         auto rhsWasmType = getExprType(expr.rhs);
-        int tempIdx = allocRawLocal(rhsWasmType);
+        auto lhsWasmType = lhsTypeNode ? typeMap_.toWasmType(lhsTypeNode) : rhsWasmType;
+        int tempIdx = allocRawLocal(lhsWasmType);
         emitExpr(expr.rhs, false);
+        emitConvert(this, rhsWasmType, lhsWasmType);
         emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tempIdx});
 
         emitExpr(expr.lhs, true);  // push lhs address
@@ -658,7 +664,6 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         // follows the base's storage (file-scope global → mem[0], shadow-stack
         // local → mem[1]). Must match emitArrayIndexExpr/emitMemberAccessExpr.
         uint8_t storeMemidx = expr.lhs ? lvalueMemidx(expr.lhs.get()) : 1;
-        auto lhsTypeNode = getExprTypeNode(expr.lhs);
         emit(typeMap_.makeStore(lhsTypeNode, storeMemidx));
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
         return;
@@ -2098,17 +2103,19 @@ void FunctionCodegen::emitWhileStmt(const wvmcc::parser::WhileStmt& stmt) {
 
 void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
     // block $break
-    //   loop $continue
+    //   loop $loop
     //     <cond>; i32.eqz; br_if $break
-    //     <body>
+    //     block $continue
+    //       <body>            ; `continue` => br $continue
+    //     end                 ; falls through to the step
     //     <step>
-    //     br $continue
+    //     br $loop            ; repeat (re-evaluate <cond>)
     //   end
     // end
-    // Note: `continue` re-enters the loop top, skipping any remaining body
-    // statements but also skipping the step. Strict C semantics would require
-    // a nested $continue block above step; this simpler form matches the
-    // existing tests and the Phase 3 issue specification.
+    // C requires `continue` to run the loop's step before re-testing the
+    // condition. The dedicated $continue block makes `continue` land *before*
+    // the step (an earlier version branched to the loop top and skipped the
+    // step, hanging any counting loop that used `continue`).
     symbolTable_.pushScope();
     if (stmt.init) {
         emitBlockItem(*stmt.init);
@@ -2116,22 +2123,25 @@ void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
     emit(WasmVM::Instr::Block{std::nullopt});
     int breakD = currentBlockDepth_;
     emit(WasmVM::Instr::Loop{std::nullopt});
-    int contD = currentBlockDepth_;
-    pushLoop(breakD, contD);
+    int loopD = currentBlockDepth_;
     if (stmt.cond) {
         emitExpr(*stmt.cond);
         emit(WasmVM::Instr::I32_eqz{});
-        emit(WasmVM::Instr::Br_if{breakDepth()});
+        emit(WasmVM::Instr::Br_if{(WasmVM::index_t)(currentBlockDepth_ - breakD)});
     }
+    emit(WasmVM::Instr::Block{std::nullopt});
+    int contD = currentBlockDepth_;
+    pushLoop(breakD, contD);
     emitStmt(stmt.body);
+    popControlFlow();
+    emit(WasmVM::Instr::End{}); // end $continue — `continue` lands here
     if (stmt.step) {
         emitExpr(*stmt.step);
         emit(WasmVM::Instr::Drop{});
     }
-    emit(WasmVM::Instr::Br{continueDepth()});
-    popControlFlow();
-    emit(WasmVM::Instr::End{});
-    emit(WasmVM::Instr::End{});
+    emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - loopD)});
+    emit(WasmVM::Instr::End{}); // end $loop
+    emit(WasmVM::Instr::End{}); // end $break
     symbolTable_.popScope();
 }
 

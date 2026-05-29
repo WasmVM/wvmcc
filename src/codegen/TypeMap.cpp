@@ -327,6 +327,14 @@ wvmcc::parser::TypeNodePtr TypeMap::getFieldType(const wvmcc::parser::TypeNodePt
         for (const auto& sd : member.declarators) {
             if (!sd.declarator) continue;
             if (declaratorName(sd.declarator) != fieldName) continue;
+            // Prefer the semantic resolver: it follows typedef-name chains
+            // (e.g. `FILE *`, `size_t`) and applies all declarator layers,
+            // which the manual reconstruction below cannot.
+            if (semantic_) {
+                if (auto resolved =
+                        semantic_->canonicalTypeRepr(member.specifiers, sd.declarator))
+                    return resolved;
+            }
             wvmcc::parser::TypeNodePtr baseType = nullptr;
             for (const auto& ts : member.specifiers.typeSpecifiers) {
                 if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple

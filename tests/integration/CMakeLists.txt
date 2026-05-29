@@ -66,3 +66,6 @@ add_e2e_test(phase5-variadic-float   ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_vari
 # #77 — file-scope (global) variable codegen: scalar/array/struct globals,
 # initializers (data segments), zero-init, and cross-function mutation.
 add_e2e_test(phase5-globals          ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_globals.c)
+
+# M2-13 prereq — `continue` in a for-loop must run the step (regression).
+add_e2e_test(phase5-for-continue     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_for_continue.c)

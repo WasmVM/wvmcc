@@ -8,7 +8,11 @@
 namespace wvmcc::codegen {
 
 ModuleCodegen::ModuleCodegen(const wvmcc::parser::Semantic& semantic)
-    : semantic_(semantic) {}
+    : semantic_(semantic) {
+    // Let TypeMap resolve typedef-name struct-member types (FILE *, size_t, …)
+    // via the semantic typedef table.
+    typeMap_.setSemantic(&semantic_);
+}
 
 WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitPtr& tu) {
     module_ = WasmVM::WasmModule{};

@@ -4,10 +4,17 @@
 #include "../parser/AST.hpp"
 #include <WasmVM.hpp>
 
+namespace wvmcc::parser { class Semantic; }
+
 namespace wvmcc::codegen {
 
 class TypeMap {
 public:
+    // Optional semantic context used to resolve typedef-name member types
+    // (e.g. `FILE *`, `size_t`) in getFieldType. When unset, getFieldType
+    // falls back to a typedef-unaware reconstruction.
+    void setSemantic(const wvmcc::parser::Semantic* s) { semantic_ = s; }
+
     // Convert a C type node to Wasm type
     WasmVM::ValueType toWasmType(const wvmcc::parser::TypeNodePtr& type) const;
     
@@ -47,6 +54,7 @@ private:
     size_t getSimpleTypeAlignment(const wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier& simpleType) const;
     
     mutable LayoutEngine layoutEngine_;
+    const wvmcc::parser::Semantic* semantic_ = nullptr;
 };
 
 } // namespace wvmcc::codegen

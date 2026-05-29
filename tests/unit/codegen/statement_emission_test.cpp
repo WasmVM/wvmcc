@@ -290,24 +290,30 @@ static int test_for_no_cond() {
 
     codegen.emitStmt(fs);
 
+    // New structure wraps the body in a $continue block so `continue` runs
+    // the step before re-testing: [Block, Loop, Block, I32_const{0}, Return,
+    //                              End, Br{0}, End, End]
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 7) {
-        std::cerr << "test_for_no_cond: expected 7 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 9) {
+        std::cerr << "test_for_no_cond: expected 9 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[0], WasmVM::Opcode::Block))   { std::cerr << "test_for_no_cond: [0] bad\n"; return 2; }
     if (!is(instrs[1], WasmVM::Opcode::Loop))    { std::cerr << "test_for_no_cond: [1] bad\n"; return 3; }
-    if (!asI32Const(instrs[2]))                  { std::cerr << "test_for_no_cond: [2] bad\n"; return 4; }
-    if (!is(instrs[3], WasmVM::Opcode::Return))  { std::cerr << "test_for_no_cond: [3] bad\n"; return 5; }
-    auto br = asOneIdx(instrs[4], WasmVM::Opcode::Br);
-    if (!br || br->index != 0)                   { std::cerr << "test_for_no_cond: [4] bad\n"; return 6; }
+    if (!is(instrs[2], WasmVM::Opcode::Block))   { std::cerr << "test_for_no_cond: [2] bad\n"; return 4; }
+    if (!asI32Const(instrs[3]))                  { std::cerr << "test_for_no_cond: [3] bad\n"; return 5; }
+    if (!is(instrs[4], WasmVM::Opcode::Return))  { std::cerr << "test_for_no_cond: [4] bad\n"; return 6; }
     if (!is(instrs[5], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [5] bad\n"; return 7; }
-    if (!is(instrs[6], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [6] bad\n"; return 8; }
+    auto br = asOneIdx(instrs[6], WasmVM::Opcode::Br);
+    if (!br || br->index != 0)                   { std::cerr << "test_for_no_cond: [6] bad\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [7] bad\n"; return 9; }
+    if (!is(instrs[8], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [8] bad\n"; return 10; }
     return 0;
 }
 
 // for (;1;) return 0;
-// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, I32_const{0}, Return, Br{0}, End, End]
+// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, Block, I32_const{0},
+//     Return, End, Br{0}, End, End]
 static int test_for_with_cond() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -321,8 +327,8 @@ static int test_for_with_cond() {
     codegen.emitStmt(fs);
 
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 10) {
-        std::cerr << "test_for_with_cond: expected 10 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 12) {
+        std::cerr << "test_for_with_cond: expected 12 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[0], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_cond: [0] bad\n"; return 2; }
@@ -331,18 +337,20 @@ static int test_for_with_cond() {
     if (!is(instrs[3], WasmVM::Opcode::I32_eqz))         { std::cerr << "test_for_with_cond: [3] bad\n"; return 5; }
     auto brif = asOneIdx(instrs[4], WasmVM::Opcode::Br_if);
     if (!brif || brif->index != 1)                       { std::cerr << "test_for_with_cond: [4] bad\n"; return 6; }
-    if (!asI32Const(instrs[5]))                          { std::cerr << "test_for_with_cond: [5] bad\n"; return 7; }
-    if (!is(instrs[6], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_cond: [6] bad\n"; return 8; }
-    auto br = asOneIdx(instrs[7], WasmVM::Opcode::Br);
-    if (!br || br->index != 0)                           { std::cerr << "test_for_with_cond: [7] bad\n"; return 9; }
+    if (!is(instrs[5], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_cond: [5] bad\n"; return 7; }
+    if (!asI32Const(instrs[6]))                          { std::cerr << "test_for_with_cond: [6] bad\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_cond: [7] bad\n"; return 9; }
     if (!is(instrs[8], WasmVM::Opcode::End))             { std::cerr << "test_for_with_cond: [8] bad\n"; return 10; }
-    if (!is(instrs[9], WasmVM::Opcode::End))             { std::cerr << "test_for_with_cond: [9] bad\n"; return 11; }
+    auto br = asOneIdx(instrs[9], WasmVM::Opcode::Br);
+    if (!br || br->index != 0)                           { std::cerr << "test_for_with_cond: [9] bad\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::End))            { std::cerr << "test_for_with_cond: [10] bad\n"; return 12; }
+    if (!is(instrs[11], WasmVM::Opcode::End))            { std::cerr << "test_for_with_cond: [11] bad\n"; return 13; }
     return 0;
 }
 
 // for (;1; 5) return 0;
-// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, I32_const{0}, Return,
-//     I32_const{5}, Drop, Br{0}, End, End]
+// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, Block, I32_const{0},
+//     Return, End, I32_const{5}, Drop, Br{0}, End, End]
 static int test_for_with_step() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -357,8 +365,8 @@ static int test_for_with_step() {
     codegen.emitStmt(fs);
 
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 12) {
-        std::cerr << "test_for_with_step: expected 12 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 14) {
+        std::cerr << "test_for_with_step: expected 14 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[0], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_step: [0] bad\n"; return 2; }
@@ -367,15 +375,17 @@ static int test_for_with_step() {
     if (!is(instrs[3], WasmVM::Opcode::I32_eqz))         { std::cerr << "test_for_with_step: [3] bad\n"; return 5; }
     auto brif = asOneIdx(instrs[4], WasmVM::Opcode::Br_if);
     if (!brif || brif->index != 1)                       { std::cerr << "test_for_with_step: [4] bad\n"; return 6; }
-    if (!asI32Const(instrs[5]))                          { std::cerr << "test_for_with_step: [5] bad\n"; return 7; }
-    if (!is(instrs[6], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_step: [6] bad\n"; return 8; }
-    auto stepC = asI32Const(instrs[7]);
-    if (!stepC || stepC->value != 5)                     { std::cerr << "test_for_with_step: [7] bad\n"; return 9; }
-    if (!is(instrs[8], WasmVM::Opcode::Drop))            { std::cerr << "test_for_with_step: [8] bad\n"; return 10; }
-    auto br = asOneIdx(instrs[9], WasmVM::Opcode::Br);
-    if (!br || br->index != 0)                           { std::cerr << "test_for_with_step: [9] bad\n"; return 11; }
-    if (!is(instrs[10], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [10] bad\n"; return 12; }
-    if (!is(instrs[11], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [11] bad\n"; return 13; }
+    if (!is(instrs[5], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_step: [5] bad\n"; return 7; }
+    if (!asI32Const(instrs[6]))                          { std::cerr << "test_for_with_step: [6] bad\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_step: [7] bad\n"; return 9; }
+    if (!is(instrs[8], WasmVM::Opcode::End))             { std::cerr << "test_for_with_step: [8] bad\n"; return 10; }
+    auto stepC = asI32Const(instrs[9]);
+    if (!stepC || stepC->value != 5)                     { std::cerr << "test_for_with_step: [9] bad\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::Drop))           { std::cerr << "test_for_with_step: [10] bad\n"; return 12; }
+    auto br = asOneIdx(instrs[11], WasmVM::Opcode::Br);
+    if (!br || br->index != 0)                           { std::cerr << "test_for_with_step: [11] bad\n"; return 13; }
+    if (!is(instrs[12], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [12] bad\n"; return 14; }
+    if (!is(instrs[13], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [13] bad\n"; return 15; }
     return 0;
 }
 
@@ -459,7 +469,8 @@ static int test_local_decl_then_read() {
 }
 
 // for (int i = 0;; ) return i;
-// →  [I32_const{0}, Local_set{0}, Block, Loop, Local_get{0}, Return, Br{0}, End, End]
+// →  [I32_const{0}, Local_set{0}, Block, Loop, Block, Local_get{0}, Return,
+//     End, Br{0}, End, End]
 static int test_for_with_decl_init() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -477,8 +488,8 @@ static int test_for_with_decl_init() {
     codegen.emitStmt(fs);
 
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 9) {
-        std::cerr << "test_for_with_decl_init: expected 9 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 11) {
+        std::cerr << "test_for_with_decl_init: expected 11 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     auto c = asI32Const(instrs[0]);
@@ -487,13 +498,15 @@ static int test_for_with_decl_init() {
     if (!ls || ls->index != 0) { std::cerr << "test_for_with_decl_init: [1] bad\n"; return 3; }
     if (!is(instrs[2], WasmVM::Opcode::Block)) { std::cerr << "test_for_with_decl_init: [2] bad\n"; return 4; }
     if (!is(instrs[3], WasmVM::Opcode::Loop))  { std::cerr << "test_for_with_decl_init: [3] bad\n"; return 5; }
-    auto lg = asOneIdx(instrs[4], WasmVM::Opcode::Local_get);
-    if (!lg || lg->index != 0) { std::cerr << "test_for_with_decl_init: [4] bad\n"; return 6; }
-    if (!is(instrs[5], WasmVM::Opcode::Return)) { std::cerr << "test_for_with_decl_init: [5] bad\n"; return 7; }
-    auto br = asOneIdx(instrs[6], WasmVM::Opcode::Br);
-    if (!br || br->index != 0) { std::cerr << "test_for_with_decl_init: [6] bad\n"; return 8; }
+    if (!is(instrs[4], WasmVM::Opcode::Block)) { std::cerr << "test_for_with_decl_init: [4] bad\n"; return 6; }
+    auto lg = asOneIdx(instrs[5], WasmVM::Opcode::Local_get);
+    if (!lg || lg->index != 0) { std::cerr << "test_for_with_decl_init: [5] bad\n"; return 7; }
+    if (!is(instrs[6], WasmVM::Opcode::Return)) { std::cerr << "test_for_with_decl_init: [6] bad\n"; return 8; }
     if (!is(instrs[7], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [7] bad\n"; return 9; }
-    if (!is(instrs[8], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [8] bad\n"; return 10; }
+    auto br = asOneIdx(instrs[8], WasmVM::Opcode::Br);
+    if (!br || br->index != 0) { std::cerr << "test_for_with_decl_init: [8] bad\n"; return 10; }
+    if (!is(instrs[9], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [9] bad\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [10] bad\n"; return 12; }
     return 0;
 }
 
