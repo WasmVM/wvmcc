@@ -353,6 +353,19 @@ wvmcc::parser::TypeNodePtr TypeMap::getFieldType(const wvmcc::parser::TypeNodePt
     return nullptr;
 }
 
+std::vector<std::string> TypeMap::getOrderedFieldNames(const wvmcc::parser::TypeNodePtr& type) const {
+    std::vector<std::string> names;
+    if (!type || !type->su) return names;
+    for (const auto& member : type->su->members) {
+        for (const auto& sd : member.declarators) {
+            if (!sd.declarator) continue;
+            auto n = declaratorName(sd.declarator);
+            if (!n.empty()) names.push_back(n);
+        }
+    }
+    return names;
+}
+
 WasmVM::ValueType TypeMap::getBaseType(const wvmcc::parser::TypeNodePtr& type) const {
     if (!type) {
         return WasmVM::ValueType::i32;

@@ -24,11 +24,17 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
             if (keywords.count(pp.lexeme)) return Token(KeywordToken{pp.lexeme}, pp.span);
             return Token(IdentifierToken{pp.lexeme}, pp.span);
         case K::PPNumber: {
-            // Heuristic: if lexeme contains '.', 'e', 'E', 'p', or 'P' it's a floating constant
+            // Floating-constant heuristic. A decimal float is marked by '.' or
+            // an 'e'/'E' exponent. A *hex* constant (0x…) uses 'p'/'P' for its
+            // binary exponent — there, 'e'/'E' are ordinary hex digits and must
+            // NOT trigger float classification (e.g. 0xFE is the integer 254).
             const std::string& s = pp.lexeme;
+            const bool isHex = s.size() >= 2 && s[0] == '0'
+                               && (s[1] == 'x' || s[1] == 'X');
             bool isFloat = false;
             for (char c : s) {
-                if (c == '.' || c == 'e' || c == 'E' || c == 'p' || c == 'P') { isFloat = true; break; }
+                if (c == '.' || c == 'p' || c == 'P') { isFloat = true; break; }
+                if (!isHex && (c == 'e' || c == 'E')) { isFloat = true; break; }
             }
             if (isFloat) {
                 // parse optional floating suffix: f/F => float, l/L => long double, otherwise double

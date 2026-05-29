@@ -62,3 +62,7 @@ add_e2e_test(phase5-variadic         ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_vari
 # M2-B — float arithmetic codegen
 add_e2e_test(phase5-float            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_float.c)
 add_e2e_test(phase5-variadic-float   ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_variadic_float.c)
+
+# #77 — file-scope (global) variable codegen: scalar/array/struct globals,
+# initializers (data segments), zero-init, and cross-function mutation.
+add_e2e_test(phase5-globals          ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_globals.c)

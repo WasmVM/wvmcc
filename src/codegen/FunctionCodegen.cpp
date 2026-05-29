@@ -374,6 +374,9 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
     case K::Unary:
         emitUnaryExpr(static_cast<const wvmcc::parser::UnaryExpr&>(*expr), needLValue);
         break;
+    case K::PostfixUnary:
+        emitPostfixUnaryExpr(static_cast<const wvmcc::parser::PostfixUnaryExpr&>(*expr), needLValue);
+        break;
     case K::Cast:
         emitCastExpr(static_cast<const wvmcc::parser::CastExpr&>(*expr));
         break;
@@ -503,9 +506,15 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
         } else if constexpr (std::is_same_v<T, GlobalScalar>) {
             emit(WasmVM::Instr::Global_get{(WasmVM::index_t)info.globalIndex});
         } else if constexpr (std::is_same_v<T, GlobalMem>) {
-            // Static local: address is in mem[0].
+            // Static local / file-scope variable: address is in mem[0].
             emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.address});
-            if (!needLValue) {
+            // Aggregates (arrays/structs/unions) decay to their address in
+            // expression context — don't load a scalar out of them.
+            bool isAggregate = info.type
+                && (info.type->kind == wvmcc::parser::TypeNode::Kind::Array
+                    || info.type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || info.type->kind == wvmcc::parser::TypeNode::Kind::Union);
+            if (!needLValue && !isAggregate) {
                 emit(typeMap_.makeLoad(info.type, 0));
             }
         } else {
@@ -514,8 +523,53 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
     }, *symbolInfo);
 }
 
+// Build a synthetic integer-literal expression node (used to desugar
+// ++/-- into `x = x + 1`). value=1 / raw="1" types as `int` (i32), which
+// the binary-op and pointer-arithmetic paths promote as needed.
+static wvmcc::parser::ExprPtr makeIntLiteralExpr(std::int64_t v) {
+    auto il = wvmcc::parser::make_ast<wvmcc::parser::IntegerLiteral>();
+    il->kind = wvmcc::parser::Expr::Kind::Integer;
+    il->value = v;
+    il->raw = std::to_string(v);
+    return il;
+}
+
+// Build `lhs <op> rhs` as a BinaryExpr node (op is a plain binary operator
+// like "+", "<<"). Shares the operand subtrees by pointer — safe because
+// codegen only reads them.
+static wvmcc::parser::ExprPtr makeBinaryExpr(const std::string& op,
+                                             const wvmcc::parser::ExprPtr& lhs,
+                                             const wvmcc::parser::ExprPtr& rhs,
+                                             const wvmcc::SourceSpan& span) {
+    auto be = wvmcc::parser::make_ast<wvmcc::parser::BinaryExpr>();
+    be->kind = wvmcc::parser::Expr::Kind::Binary;
+    be->op = op;
+    be->lhs = lhs;
+    be->rhs = rhs;
+    be->span = span;
+    return be;
+}
+
 void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
     using K = wvmcc::parser::Expr::Kind;
+
+    // --- Compound assignment: `lhs OP= rhs`  ==>  `lhs = (lhs OP rhs)` ---
+    // Reuses the plain-`=` lvalue machinery and the binary-op (incl. pointer-
+    // arithmetic) machinery below. The lhs subtree is evaluated twice; for the
+    // address-bearing lvalues libc uses (locals, `*p`, `a[i]`, `s->m`) that is
+    // observationally fine. Yields the assigned value, as C requires.
+    {
+        static const std::unordered_map<std::string, std::string> kCompound = {
+            {"+=", "+"}, {"-=", "-"}, {"*=", "*"}, {"/=", "/"}, {"%=", "%"},
+            {"<<=", "<<"}, {">>=", ">>"}, {"&=", "&"}, {"|=", "|"}, {"^=", "^"}};
+        auto it = kCompound.find(expr.op);
+        if (it != kCompound.end()) {
+            auto inner = makeBinaryExpr(it->second, expr.lhs, expr.rhs, expr.span);
+            auto assign = makeBinaryExpr("=", expr.lhs, inner, expr.span);
+            emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*assign));
+            return;
+        }
+    }
 
     // --- Assignment ---
     if (expr.op == "=") {
@@ -558,14 +612,32 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                     return;
                 }
                 if (auto* gm = std::get_if<GlobalMem>(&*sym)) {
-                    // Static local: address is in mem[0].
+                    // Static local / file-scope variable: address is in mem[0].
                     auto rhsWasmType = getExprType(expr.rhs);
                     int tempIdx = allocRawLocal(rhsWasmType);
                     emitExpr(expr.rhs, false);
+                    auto gmVt = gm->type ? typeMap_.toWasmType(gm->type)
+                                         : WasmVM::ValueType::i32;
+                    emitConvert(this, rhsWasmType, gmVt);
                     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tempIdx});
                     emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)gm->address});
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
                     emit(typeMap_.makeStore(gm->type, 0));
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
+                    return;
+                }
+                if (auto* gs = std::get_if<GlobalScalar>(&*sym)) {
+                    // File-scope/runtime Wasm global (e.g. __stack_pointer).
+                    auto rhsWasmType = getExprType(expr.rhs);
+                    auto gsVt = gs->type ? typeMap_.toWasmType(gs->type)
+                                         : WasmVM::ValueType::i64;
+                    emitExpr(expr.rhs, false);
+                    emitConvert(this, rhsWasmType, gsVt);
+                    // Leave the value on the stack as the assignment result:
+                    // tee into the global via a temp.
+                    int tempIdx = allocRawLocal(gsVt);
+                    emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)tempIdx});
+                    emit(WasmVM::Instr::Global_set{(WasmVM::index_t)gs->globalIndex});
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
                     return;
                 }
@@ -581,20 +653,13 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         emitExpr(expr.lhs, true);  // push lhs address
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
 
-        bool useHeap = false;
-        if (expr.lhs) {
-            if (expr.lhs->kind == K::Unary) {
-                const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*expr.lhs);
-                useHeap = (u.op == "*");
-            } else if (expr.lhs->kind == K::Member) {
-                const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*expr.lhs);
-                useHeap = m.isArrow;
-            } else if (expr.lhs->kind == K::Index) {
-                useHeap = true;
-            }
-        }
+        // Store into the same memory the load side reads from: a pointer
+        // deref/arrow/pointer-index hits the heap (mem[0]); a `.`/array-index
+        // follows the base's storage (file-scope global → mem[0], shadow-stack
+        // local → mem[1]). Must match emitArrayIndexExpr/emitMemberAccessExpr.
+        uint8_t storeMemidx = expr.lhs ? lvalueMemidx(expr.lhs.get()) : 1;
         auto lhsTypeNode = getExprTypeNode(expr.lhs);
-        emit(typeMap_.makeStore(lhsTypeNode, useHeap ? 0 : 1));
+        emit(typeMap_.makeStore(lhsTypeNode, storeMemidx));
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
         return;
     }
@@ -838,6 +903,16 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
         return;
     }
 
+    // Prefix ++/-- : `++x` ==> `x = x + 1`, `--x` ==> `x = x - 1`. Yields the
+    // new value (the `=` path leaves the assigned value on the stack).
+    if (expr.op == "++" || expr.op == "--") {
+        auto add = makeBinaryExpr(expr.op == "++" ? "+" : "-",
+                                  expr.rhs, makeIntLiteralExpr(1), expr.span);
+        auto assign = makeBinaryExpr("=", expr.rhs, add, expr.span);
+        emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*assign));
+        return;
+    }
+
     emitExpr(expr.rhs, false);
 
     auto exprType = getExprType(expr.rhs);
@@ -885,6 +960,27 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
     } else {
         emit(WasmVM::Instr::Unreachable{});
     }
+}
+
+void FunctionCodegen::emitPostfixUnaryExpr(const wvmcc::parser::PostfixUnaryExpr& expr,
+                                           bool /*needLValue*/) {
+    // `x++` ==> evaluate old value into a temp, then `x = x + 1`, then yield
+    // the old value. The base subtree is evaluated twice (once for the old
+    // value, once inside the desugared assignment); fine for the lvalue forms
+    // libc uses. Result is always an rvalue.
+    using PUOp = wvmcc::parser::PostfixUnaryExpr::Op;
+    auto baseVt = getExprType(expr.base);
+
+    emitExpr(expr.base, false);                 // old value on stack
+    int tmp = allocRawLocal(baseVt);
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tmp});
+
+    auto add = makeBinaryExpr(expr.op == PUOp::Inc ? "+" : "-",
+                              expr.base, makeIntLiteralExpr(1), expr.span);
+    auto assign = makeBinaryExpr("=", expr.base, add, expr.span);
+    emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*assign));
+    emit(WasmVM::Instr::Drop{});                // discard the new value
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tmp}); // push old value
 }
 
 void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
@@ -1275,6 +1371,42 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     }
 }
 
+uint8_t FunctionCodegen::lvalueMemidx(const wvmcc::parser::Expr* e) {
+    using K = wvmcc::parser::Expr::Kind;
+    if (!e) return 1;
+    switch (e->kind) {
+        case K::Ident: {
+            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*e);
+            auto sym = symbolTable_.lookup(id.name);
+            // File-scope variables (GlobalMem) live in mem[0]; everything else
+            // addressable as an lvalue base is a shadow-stack local (mem[1]).
+            if (sym && std::holds_alternative<GlobalMem>(*sym)) return 0;
+            return 1;
+        }
+        case K::Member: {
+            const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*e);
+            if (m.isArrow) return 0;                 // through a pointer → heap
+            return lvalueMemidx(m.base.get());       // `.` follows the base
+        }
+        case K::Index: {
+            const auto& ix = static_cast<const wvmcc::parser::IndexExpr&>(*e);
+            auto bt = getExprTypeNode(ix.base);
+            if (bt && bt->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+                return 0;                            // indexing a pointer → heap
+            return lvalueMemidx(ix.base.get());      // indexing an array follows base
+        }
+        case K::Unary: {
+            const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
+            if (u.op == "*") return 0;               // deref → heap
+            return lvalueMemidx(u.rhs.get());
+        }
+        default:
+            // Any computed pointer value (call result, cast, arithmetic) refers
+            // to a heap object in mem[0].
+            return 0;
+    }
+}
+
 void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue) {
     // Determine base struct type for field-offset lookup
     auto baseType = getExprTypeNode(expr.base);
@@ -1284,8 +1416,9 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
 
     size_t fieldOffset = baseType ? typeMap_.getFieldOffset(baseType, expr.member) : 0;
     auto fieldType     = baseType ? typeMap_.getFieldType(baseType, expr.member)   : nullptr;
-    // . accesses shadow-stack locals (mem[1]); -> accesses heap objects (mem[0])
-    uint8_t memidx = expr.isArrow ? 0 : 1;
+    // -> hits the heap (mem[0]); `.` follows the base's storage: a file-scope
+    // struct lives in mem[0], a shadow-stack local in mem[1].
+    uint8_t memidx = lvalueMemidx(&expr);
 
     if (expr.isArrow) {
         emitExpr(expr.base, false);  // pointer value is the base address
@@ -1317,8 +1450,11 @@ void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, b
     }
 
     size_t elemSize = elemType ? typeMap_.byteSize(elemType) : 4;
-    // Heap pointers use mem[0]; shadow-stack arrays use mem[1]
-    uint8_t memidx = baseIsPointer ? 0 : 1;
+    // Indexing a pointer hits the heap (mem[0]); indexing an array follows the
+    // base's storage — a file-scope array lives in mem[0], a shadow-stack local
+    // array in mem[1].
+    (void)baseIsPointer;
+    uint8_t memidx = lvalueMemidx(&expr);
 
     emitExpr(expr.base, false);    // base address (i64)
     emitExpr(expr.index, false);   // index
@@ -2326,8 +2462,11 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
             tn->simple.push_back(wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
             return tn;
         }
-        // Assignment yields the lhs type.
-        if (b.op == "=") return getExprTypeNode(b.lhs);
+        // Plain and compound assignment yield the lhs type.
+        if (b.op == "=" || (b.op.size() >= 2 && b.op.back() == '='
+                            && b.op != "==" && b.op != "!="
+                            && b.op != "<=" && b.op != ">="))
+            return getExprTypeNode(b.lhs);
         // Arithmetic / bitwise / shift: usual arithmetic conversions on operand
         // types; here we pick the "wider" of the two.
         auto lt = getExprTypeNode(b.lhs);
@@ -2422,6 +2561,10 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
             }
         }
         return nullptr;
+    }
+    case K::PostfixUnary: {
+        const auto& pu = static_cast<const wvmcc::parser::PostfixUnaryExpr&>(*expr);
+        return getExprTypeNode(pu.base); // x++ has the type of x
     }
     case K::Member: {
         const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*expr);

@@ -3,6 +3,7 @@
 #include "AddressTakenAnalyzer.hpp"
 #include "StartWrapper.hpp"
 #include <stdexcept>
+#include <cstring>
 
 namespace wvmcc::codegen {
 
@@ -78,14 +79,14 @@ size_t ModuleCodegen::allocateStaticStorage(size_t size, size_t align) {
 
 void ModuleCodegen::finalizeFreestandingHeapBase() {
     // Round up the post-data top to 8 bytes so callers can rely on
-    // __heap_base being i64-aligned.
+    // __heap_base being i64-aligned. Patch the slot reserved in setupGlobals.
     size_t top = dataAllocator_.currentTop();
     top = (top + 7u) & ~size_t{7};
-    WasmVM::WasmGlobal heapBase;
-    heapBase.type = WasmVM::GlobalType{WasmVM::GlobalType::constant,
-                                       WasmVM::ValueType::i64};
-    heapBase.init = WasmVM::Instr::I64_const{(WasmVM::i64_t)top};
-    module_.globals.push_back(heapBase);
+    if (heapBaseGlobalIdx_ >= 0
+        && heapBaseGlobalIdx_ < (int)module_.globals.size()) {
+        module_.globals[heapBaseGlobalIdx_].init =
+            WasmVM::Instr::I64_const{(WasmVM::i64_t)top};
+    }
 }
 
 void ModuleCodegen::setupMemory() {
@@ -124,28 +125,41 @@ void ModuleCodegen::setupGlobals() {
     if (compileMode_ == CompileMode::Linkable) {
         // Linkable mode: import $__stack_pointer (mut i64) and $__heap_base
         // (const i64) from env. Both initial values are set by the linker's
-        // crt0 (M2-L6) after the merged memory layout is known.
+        // crt0 (M2-L6) after the merged memory layout is known. Imported
+        // globals occupy the low global-index slots: __stack_pointer = 0,
+        // __heap_base = 1.
         WasmVM::WasmImport spImp;
         spImp.module = "env";
         spImp.name = "__stack_pointer";
         spImp.desc = spType;
         module_.imports.push_back(spImp);
+        stackPtrGlobalIdx_ = 0;
 
         WasmVM::WasmImport hbImp;
         hbImp.module = "env";
         hbImp.name = "__heap_base";
         hbImp.desc = heapBaseType;
         module_.imports.push_back(hbImp);
+        heapBaseGlobalIdx_ = 1;
         return;
     }
 
     // Freestanding: define the stack pointer locally with M1's standalone
-    // init value. __heap_base is defined after secondPass once the data
-    // segment layout is finalized — see finalizeFreestandingHeapBase().
+    // init value at global 0. Reserve __heap_base at global 1 *now* (init
+    // patched in finalizeFreestandingHeapBase once the data layout is final)
+    // so its index is stable even when static-local guard globals are
+    // appended during secondPass.
     WasmVM::WasmGlobal stackPointerGlobal;
     stackPointerGlobal.type = spType;
     stackPointerGlobal.init = WasmVM::Instr::I64_const{0x10000};
     module_.globals.push_back(stackPointerGlobal);
+    stackPtrGlobalIdx_ = 0;
+
+    WasmVM::WasmGlobal heapBaseGlobal;
+    heapBaseGlobal.type = heapBaseType;
+    heapBaseGlobal.init = WasmVM::Instr::I64_const{0}; // patched in finalize
+    module_.globals.push_back(heapBaseGlobal);
+    heapBaseGlobalIdx_ = 1;
 }
 
 // ---------------------------------------------------------------------------
@@ -345,6 +359,10 @@ void ModuleCodegen::firstPass(const wvmcc::parser::TranslationUnitPtr& tu) {
         }
         registerExternalDecl(external);
     }
+
+    // #77: register runtime globals + file-scope variable definitions as
+    // symbols so function bodies (emitted in secondPass) can resolve them.
+    registerGlobalVars(tu);
 }
 
 void ModuleCodegen::registerExternalDecl(const wvmcc::parser::ExternalDeclPtr& decl) {
@@ -577,14 +595,208 @@ void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& 
     module_.funcs.push_back(wasmFunc);
 }
 
-void ModuleCodegen::emitGlobalScalar(const wvmcc::parser::DeclarationPtr& decl) {
-    WasmVM::WasmGlobal global;
-    global.type = WasmVM::GlobalType{WasmVM::GlobalType::variable, WasmVM::ValueType::i64};
-    global.init = WasmVM::Instr::I64_const{0};
-    module_.globals.push_back(global);
+// #77: encode a constant scalar initializer expression into `out` (little-
+// endian, `size` bytes). Returns false if the initializer is not a simple
+// compile-time constant we can encode (caller then leaves storage zeroed).
+static bool encodeScalarConstInit(const wvmcc::parser::ExprPtr& expr,
+                                  size_t size, bool isFloat,
+                                  std::vector<std::byte>& out) {
+    using K = wvmcc::parser::Expr::Kind;
+    if (!expr) return false;
+    // Peel a leading unary minus on a numeric literal.
+    if (isFloat) {
+        double dv = 0.0;
+        bool neg = false;
+        const wvmcc::parser::Expr* e = expr.get();
+        if (e->kind == K::Unary) {
+            const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
+            if (u.op == "-") { neg = true; e = u.rhs.get(); }
+            else if (u.op == "+") { e = u.rhs.get(); }
+        }
+        if (e && e->kind == K::Float)
+            dv = static_cast<const wvmcc::parser::FloatLiteral&>(*e).value;
+        else if (e && e->kind == K::Integer)
+            dv = (double)static_cast<const wvmcc::parser::IntegerLiteral&>(*e).value;
+        else return false;
+        if (neg) dv = -dv;
+        if (size == 4) { float f = (float)dv; std::memcpy(out.data(), &f, 4); }
+        else           { std::memcpy(out.data(), &dv, 8); }
+        return true;
+    }
+    std::int64_t iv = 0;
+    bool neg = false;
+    const wvmcc::parser::Expr* e = expr.get();
+    if (e->kind == K::Unary) {
+        const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
+        if (u.op == "-") { neg = true; e = u.rhs.get(); }
+        else if (u.op == "+") { e = u.rhs.get(); }
+    }
+    if (e && e->kind == K::Integer)
+        iv = static_cast<const wvmcc::parser::IntegerLiteral&>(*e).value;
+    else if (e && e->kind == K::Char)
+        iv = static_cast<const wvmcc::parser::CharLiteral&>(*e).value;
+    else return false;
+    if (neg) iv = -iv;
+    auto uv = (std::uint64_t)iv;
+    for (size_t i = 0; i < size && i < 8; ++i)
+        out[i] = std::byte((uv >> (8 * i)) & 0xFF);
+    return true;
 }
 
-void ModuleCodegen::emitGlobalAggregate(const wvmcc::parser::DeclarationPtr& decl) {
+bool ModuleCodegen::encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
+                                    const wvmcc::parser::InitializerPtr& init,
+                                    size_t base, std::vector<std::byte>& out) {
+    using TK = wvmcc::parser::TypeNode::Kind;
+    if (!type || !init) return false;
+
+    // Unwrap a top-level cv-qualifier wrapper to reach the real shape.
+    auto t = type;
+    while (t && t->kind == TK::Qualified && t->pointee) t = t->pointee;
+    if (!t) return false;
+
+    // Scalar (Expr) initializer — possibly brace-wrapped (`int x = {5};`).
+    if (init->kind == wvmcc::parser::Initializer::Kind::Expr) {
+        if (!init->expr) return false;
+        if (t->kind == TK::Array || t->kind == TK::Struct || t->kind == TK::Union)
+            return false; // aggregate initialized by a scalar expr — unsupported
+        size_t sz = typeMap_.byteSize(t);
+        if (sz == 0) sz = 4;
+        bool isFloat = false;
+        if (t->kind == TK::Builtin) {
+            using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+            for (auto s : t->simple)
+                if (s == STS::Float || s == STS::Double) isFloat = true;
+        }
+        std::vector<std::byte> tmp(sz, std::byte{0});
+        if (!encodeScalarConstInit(init->expr, sz, isFloat, tmp)) return false;
+        if (base + sz > out.size()) return false;
+        for (size_t i = 0; i < sz; ++i) out[base + i] = tmp[i];
+        return true;
+    }
+
+    // Braced list initializer.
+    const auto& clauses = init->clauses;
+    if (t->kind == TK::Array) {
+        auto elemType = t->element;
+        if (!elemType) return false;
+        size_t elemSize = typeMap_.byteSize(elemType);
+        if (elemSize == 0) return false;
+        for (size_t i = 0; i < clauses.size(); ++i) {
+            if (!clauses[i].init) continue; // hole → zeroed
+            if (!encodeConstInit(elemType, clauses[i].init, base + i * elemSize, out))
+                return false;
+        }
+        return true;
+    }
+    if (t->kind == TK::Struct || t->kind == TK::Union) {
+        auto names = typeMap_.getOrderedFieldNames(t);
+        size_t limit = (t->kind == TK::Union) ? 1 : names.size();
+        for (size_t i = 0; i < clauses.size() && i < limit; ++i) {
+            if (i >= names.size()) break;
+            if (!clauses[i].init) continue; // hole → zeroed
+            auto fieldType   = typeMap_.getFieldType(t, names[i]);
+            size_t fieldOff  = typeMap_.getFieldOffset(t, names[i]);
+            if (!fieldType) return false;
+            if (!encodeConstInit(fieldType, clauses[i].init, base + fieldOff, out))
+                return false;
+        }
+        return true;
+    }
+    // Scalar with a single-element brace list: `int x = {5};`
+    if (!clauses.empty() && clauses[0].init)
+        return encodeConstInit(t, clauses[0].init, base, out);
+    return false;
+}
+
+void ModuleCodegen::registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& tu) {
+    // Runtime globals: C references to these names resolve to global.get /
+    // global.set on the imported/defined Wasm globals reserved in
+    // setupGlobals(). __heap_base is const (read-only); __stack_pointer is
+    // mutable. Their C type is `unsigned long` (i64 pointer-width).
+    auto i64Type = []() {
+        auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        tn->simple.push_back(
+            wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Unsigned);
+        tn->simple.push_back(
+            wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long);
+        return tn;
+    };
+    if (heapBaseGlobalIdx_ >= 0) {
+        GlobalScalar gs; gs.type = i64Type(); gs.isMutable = false;
+        gs.globalIndex = heapBaseGlobalIdx_;
+        symbolTable_.define("__heap_base", gs);
+    }
+    if (stackPtrGlobalIdx_ >= 0) {
+        GlobalScalar gs; gs.type = i64Type(); gs.isMutable = true;
+        gs.globalIndex = stackPtrGlobalIdx_;
+        symbolTable_.define("__stack_pointer", gs);
+    }
+
+    if (!tu) return;
+    for (const auto& external : tu->externals) {
+        if (!external) continue;
+        if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
+            if (*d) registerGlobalVar(*d);
+        }
+    }
+}
+
+void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl) {
+    if (!decl || !decl->declarator) return; // type-only decl (e.g. struct def)
+    // Function declarators are prototypes — handled by registerFunctionDecl.
+    if (decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) return;
+
+    std::string name = getFuncName(decl->declarator);
+    if (name.empty()) return;
+
+    // `extern` (or a bare prototype) declares a reference, not a definition —
+    // no storage. References resolve to another TU at link time (cross-TU is a
+    // follow-up) or to a runtime global (__heap_base, handled above). `typedef`
+    // introduces no object.
+    if (decl->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) return;
+    if (decl->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)) return;
+
+    // Already registered (e.g. the runtime globals, or a repeated tentative
+    // definition).
+    if (symbolTable_.lookup(name).has_value()) return;
+
+    auto typeNode = semantic_.canonicalTypeRepr(decl->specifiers, decl->declarator);
+    if (!typeNode) return;
+
+    size_t size  = typeMap_.byteSize(typeNode);
+    size_t align = typeMap_.byteAlignment(typeNode);
+    if (size == 0) size = 4;
+    if (align == 0) align = 4;
+
+    size_t addr = dataAllocator_.allocate(size, align);
+
+    GlobalMem gm;
+    gm.type = typeNode;
+    gm.dataSegmentIndex = -1;
+    gm.address = addr;
+    symbolTable_.define(name, gm);
+
+    // Initializer: C requires a constant expression at file scope. Encode
+    // scalar and aggregate (`{...}`) constants into an active data segment;
+    // zero-init (no initializer or `= 0`) needs no segment since linear memory
+    // starts zeroed. A non-constant initializer leaves storage zeroed.
+    if (!decl->initializer || !*decl->initializer) return;
+    const auto& init = *decl->initializer;
+
+    std::vector<std::byte> bytes(size, std::byte{0});
+    if (!encodeConstInit(typeNode, init, 0, bytes)) return;
+    // Skip an all-zero segment (memory is already zeroed).
+    bool allZero = true;
+    for (auto b : bytes) if (b != std::byte{0}) { allZero = false; break; }
+    if (allZero) return;
+
+    WasmVM::WasmData seg;
+    seg.mode.type = WasmVM::WasmData::DataMode::Mode::active;
+    seg.mode.memidx = 0;
+    seg.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
+    seg.init = std::move(bytes);
+    module_.datas.push_back(std::move(seg));
 }
 
 void ModuleCodegen::emitStringLiterals() {

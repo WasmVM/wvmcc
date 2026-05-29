@@ -77,10 +77,18 @@ public:
     void emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue = false);
     void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
     void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue = false);
+    void emitPostfixUnaryExpr(const wvmcc::parser::PostfixUnaryExpr& expr, bool needLValue = false);
     void emitCastExpr(const wvmcc::parser::CastExpr& expr);
     void emitCallExpr(const wvmcc::parser::CallExpr& expr);
     void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue = false);
     void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, bool needLValue = false);
+
+    // Pick the linear-memory index (mem[0]=static/heap, mem[1]=shadow stack)
+    // for an aggregate/lvalue access. A pointer deref/arrow/pointer-index hits
+    // the heap (mem[0]); a `.`/array-index follows the base recursively down to
+    // its root identifier — a file-scope GlobalMem object lives in mem[0], a
+    // shadow-stack MemoryLocal in mem[1].
+    uint8_t lvalueMemidx(const wvmcc::parser::Expr* e);
     void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);
 
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);

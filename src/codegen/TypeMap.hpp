@@ -31,6 +31,10 @@ public:
 
     // Get the TypeNode of a named field in a struct/union type (nullptr if not found)
     wvmcc::parser::TypeNodePtr getFieldType(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const;
+
+    // Get the named fields of a struct/union in declaration order (empty if not
+    // a struct/union or no members). Used to encode aggregate initializers.
+    std::vector<std::string> getOrderedFieldNames(const wvmcc::parser::TypeNodePtr& type) const;
     
 private:
     // Helper to get the base type for a node

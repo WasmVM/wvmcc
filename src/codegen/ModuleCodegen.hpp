@@ -124,18 +124,36 @@ private:
 
     void setupMemory();
     void setupGlobals();
-    // Freestanding mode only: append `__heap_base` as a const i64 global
-    // initialized to round_up_to_8(dataAllocator_.currentTop()). Called
-    // after secondPass so the data layout is finalized.
+    // Freestanding mode only: patch the `__heap_base` const i64 global (slot
+    // heapBaseGlobalIdx_, reserved early in setupGlobals) to
+    // round_up_to_8(dataAllocator_.currentTop()). Called after secondPass so
+    // the data layout is finalized.
     void finalizeFreestandingHeapBase();
     void firstPass(const wvmcc::parser::TranslationUnitPtr& tu);
+
+    // #77: register the runtime Wasm globals __stack_pointer / __heap_base as
+    // GlobalScalar symbols so C references resolve to global.get/global.set,
+    // and register every file-scope variable definition (storage in mem[0] +
+    // GlobalMem symbol + optional initializer data segment). Runs inside the
+    // file scope before function bodies are emitted.
+    void registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& tu);
+    void registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl);
+    // Recursively encode a constant initializer (scalar Expr or braced List)
+    // for `type` into `out` at byte offset `base` (little-endian). Returns
+    // false if any leaf is not a compile-time constant we can encode.
+    bool encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
+                         const wvmcc::parser::InitializerPtr& init,
+                         size_t base, std::vector<std::byte>& out);
+
+    // Wasm global indices for the two runtime globals (stable across modes):
+    // __stack_pointer = 0, __heap_base = 1. Captured in setupGlobals().
+    int stackPtrGlobalIdx_ = -1;
+    int heapBaseGlobalIdx_ = -1;
     // Walk every function body to collect &funcname expressions; allocate
     // table slots and emit a funcref table + element segment.
     void analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnitPtr& tu);
     void secondPass(const wvmcc::parser::TranslationUnitPtr& tu);
     void emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef);
-    void emitGlobalScalar(const wvmcc::parser::DeclarationPtr& decl);
-    void emitGlobalAggregate(const wvmcc::parser::DeclarationPtr& decl);
     void emitStringLiterals();
 };
 

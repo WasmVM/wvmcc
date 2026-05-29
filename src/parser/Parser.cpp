@@ -1620,7 +1620,16 @@ ExprPtr Parser::parsePrimary() {
         auto il = make_ast<IntegerLiteral>();
         il->span = tok.span;
         il->raw = tok.lexeme();
-        try { il->value = std::stoll(il->raw); } catch (...) { il->value = 0; }
+        // Prefer the lexer's already-resolved value: it parsed the constant
+        // with the correct base (0x hex, leading-0 octal) and stripped any
+        // u/l suffix. The std::stoll fallback defaults to base 10 and would
+        // truncate "0xff" to 0 (reads "0", stops at 'x'); base 0 lets it
+        // auto-detect the radix for the rare path where the variant is absent.
+        if (auto* itok = std::get_if<IntegerToken>(&tok.v)) {
+            il->value = (std::int64_t)itok->info.value;
+        } else {
+            try { il->value = std::stoll(il->raw, nullptr, 0); } catch (...) { il->value = 0; }
+        }
         il->kind = Expr::Kind::Integer;
         return il;
     }
