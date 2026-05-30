@@ -676,46 +676,47 @@ static int test_memory_local_prologue_epilogue() {
         std::cerr << "test_memory_local_prologue_epilogue: [4] expected Global_set\n"; return 6;
     }
 
-    // Body: (&x) → Local_get{fp}, I64_const{0}, I64_add, Drop                (4 instrs)
+    // Body: (&x) → Local_get{fp}, I64_const{0}, I64_add, I64_const{1<<60},
+    //   I64_or (mem[1] pointer tag), Drop                                   (6 instrs)
     // Return: I32_const{0}, [epilogue Local_get fp, I64_const, I64_add,
     //   Global_set] (4), Return                                             (6 instrs)
     // Fallthrough epilogue: Local_get{fp}, I64_const, I64_add, Global_set   (4 instrs)
     // End                                                                   (1 instr)
-    // Total: 5 prologue + 4 body + 6 return-w-epilogue + 4 trailing + 1 end = 20
-    if (instrs.size() != 20) {
-        std::cerr << "test_memory_local_prologue_epilogue: expected 20 instrs, got " << instrs.size() << "\n";
+    // Total: 5 prologue + 6 body + 6 return-w-epilogue + 4 trailing + 1 end = 22
+    if (instrs.size() != 22) {
+        std::cerr << "test_memory_local_prologue_epilogue: expected 22 instrs, got " << instrs.size() << "\n";
         return 7;
     }
 
-    // Return-side epilogue: instrs[10..13]
-    auto fpGet = asOneIdx(instrs[10], WasmVM::Opcode::Local_get);
+    // Return-side epilogue: instrs[12..15]
+    auto fpGet = asOneIdx(instrs[12], WasmVM::Opcode::Local_get);
     if (!fpGet || fpGet->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [10] expected Local_get{fp}\n"; return 8;
+        std::cerr << "test_memory_local_prologue_epilogue: [12] expected Local_get{fp}\n"; return 8;
     }
-    auto fpConst = asI64Const(instrs[11]);
+    auto fpConst = asI64Const(instrs[13]);
     if (!fpConst || fpConst->value != 4) {
-        std::cerr << "test_memory_local_prologue_epilogue: [11] expected I64_const{4}\n"; return 9;
+        std::cerr << "test_memory_local_prologue_epilogue: [13] expected I64_const{4}\n"; return 9;
     }
-    if (!is(instrs[12], WasmVM::Opcode::I64_add)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [12] expected I64_add\n"; return 10;
+    if (!is(instrs[14], WasmVM::Opcode::I64_add)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [14] expected I64_add\n"; return 10;
     }
-    if (!is(instrs[13], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [13] expected Global_set\n"; return 11;
+    if (!is(instrs[15], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [15] expected Global_set\n"; return 11;
     }
-    if (!is(instrs[14], WasmVM::Opcode::Return)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [14] expected Return\n"; return 12;
+    if (!is(instrs[16], WasmVM::Opcode::Return)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [16] expected Return\n"; return 12;
     }
 
-    // Trailing fallthrough epilogue: instrs[15..18]
-    auto fpGet2 = asOneIdx(instrs[15], WasmVM::Opcode::Local_get);
+    // Trailing fallthrough epilogue: instrs[17..20]
+    auto fpGet2 = asOneIdx(instrs[17], WasmVM::Opcode::Local_get);
     if (!fpGet2 || fpGet2->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [15] expected Local_get{fp}\n"; return 13;
+        std::cerr << "test_memory_local_prologue_epilogue: [17] expected Local_get{fp}\n"; return 13;
     }
-    if (!is(instrs[18], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [18] expected Global_set\n"; return 14;
+    if (!is(instrs[20], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [20] expected Global_set\n"; return 14;
     }
-    if (!is(instrs[19], WasmVM::Opcode::End)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [19] expected End\n"; return 15;
+    if (!is(instrs[21], WasmVM::Opcode::End)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [21] expected End\n"; return 15;
     }
     return 0;
 }

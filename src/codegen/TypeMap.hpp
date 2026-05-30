@@ -46,6 +46,9 @@ public:
 private:
     // Helper to get the base type for a node
     WasmVM::ValueType getBaseType(const wvmcc::parser::TypeNodePtr& type) const;
+
+    // Whether an integer scalar is unsigned (controls narrow-load extension)
+    bool isUnsignedScalarInteger(const wvmcc::parser::TypeNodePtr& type) const;
     
     // Helper to get size for a simple type
     size_t getSimpleTypeSize(const wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier& simpleType) const;

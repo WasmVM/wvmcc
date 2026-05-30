@@ -42,6 +42,10 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
 
     symbolTable_.pushScope();
     firstPass(tu);
+    // All global imports are now known — materialize exported data-address
+    // globals so they occupy the first defined-global slots (before any guard
+    // globals allocated during secondPass).
+    materializeExportedDataGlobals();
     analyzeFuncAddressTaken(tu);
     secondPass(tu);
     symbolTable_.popScope();
@@ -69,12 +73,41 @@ std::optional<WasmVM::index_t> ModuleCodegen::getFuncTypeIdx(const std::string& 
     return it->second;
 }
 
+WasmVM::index_t ModuleCodegen::importedGlobalCount() const {
+    WasmVM::index_t n = 0;
+    for (const auto& imp : module_.imports) {
+        if (std::holds_alternative<WasmVM::GlobalType>(imp.desc)) ++n;
+    }
+    return n;
+}
+
+void ModuleCodegen::materializeExportedDataGlobals() {
+    // Called after firstPass, before any defined global (guard globals) is
+    // allocated, so these address-globals are the first defined globals and
+    // their indices are stable.
+    for (const auto& [name, addr] : exportedDataGlobals_) {
+        WasmVM::WasmGlobal g;
+        g.type = WasmVM::GlobalType{WasmVM::GlobalType::constant, WasmVM::ValueType::i64};
+        g.init = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
+        module_.globals.push_back(g);
+        WasmVM::index_t gidx = importedGlobalCount()
+                             + (WasmVM::index_t)(module_.globals.size() - 1);
+
+        WasmVM::WasmExport ex;
+        ex.name = name;
+        ex.desc = WasmVM::WasmExport::DescType::global;
+        ex.index = gidx;
+        module_.exports.push_back(ex);
+    }
+}
+
 WasmVM::index_t ModuleCodegen::allocateGuardGlobal() {
     WasmVM::WasmGlobal g;
     g.type = WasmVM::GlobalType{WasmVM::GlobalType::variable, WasmVM::ValueType::i32};
     g.init = WasmVM::Instr::I32_const{0};
     module_.globals.push_back(g);
-    return (WasmVM::index_t)(module_.globals.size() - 1);
+    // Defined globals are indexed after all imported globals.
+    return importedGlobalCount() + (WasmVM::index_t)(module_.globals.size() - 1);
 }
 
 size_t ModuleCodegen::allocateStaticStorage(size_t size, size_t align) {
@@ -572,6 +605,11 @@ void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& 
     FunctionCodegen funcCodegen(typeMap_, symbolTable_, &dataAllocator_, this, &semantic_);
     auto wasmFunc = funcCodegen.generate(funcDef, semantic_);
 
+    // Surface any per-function codegen diagnostics (e.g. unimplemented
+    // constructs, undeclared identifiers) up to the driver.
+    const auto& fcDiags = funcCodegen.getDiagnostics();
+    diagnostics_.insert(diagnostics_.end(), fcDiags.begin(), fcDiags.end());
+
     auto ft = buildFuncTypeFromDef(funcDef);
     wasmFunc.typeidx = internFuncType(ft);
 
@@ -754,12 +792,40 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
     std::string name = getFuncName(decl->declarator);
     if (name.empty()) return;
 
-    // `extern` (or a bare prototype) declares a reference, not a definition —
-    // no storage. References resolve to another TU at link time (cross-TU is a
-    // follow-up) or to a runtime global (__heap_base, handled above). `typedef`
-    // introduces no object.
-    if (decl->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) return;
+    // `typedef` introduces no object.
     if (decl->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)) return;
+
+    // `extern` (or a bare prototype) declares a reference, not a definition — no
+    // storage in this TU. In Linkable mode we model it the same way `extern`
+    // functions and the env system globals are modelled: import a Wasm global
+    // `(import "env" <name> (global i64))` that carries the variable's address,
+    // and emit `global.get` at each use. The linker resolves that import to the
+    // defining TU's exported address-global by name. In Freestanding mode there
+    // is no other TU to resolve against, so a reference is genuinely undeclared
+    // (codegen's diagnostic handles it).
+    if (decl->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) {
+        if (compileMode_ != CompileMode::Linkable) return;
+        if (symbolTable_.lookup(name).has_value()) return;
+        auto externType = semantic_.canonicalTypeRepr(decl->specifiers, decl->declarator);
+        if (!externType) return;
+
+        WasmVM::WasmImport imp;
+        imp.module = "env";
+        imp.name = name;
+        imp.desc = WasmVM::GlobalType{WasmVM::GlobalType::constant, WasmVM::ValueType::i64};
+        WasmVM::index_t gidx = importedGlobalCount(); // index before pushing
+        module_.imports.push_back(imp);
+
+        GlobalMem gm;
+        gm.type = externType;
+        gm.dataSegmentIndex = -1;
+        gm.address = 0;
+        gm.isImport = true;
+        gm.name = name;
+        gm.importGlobalIndex = (int)gidx;
+        symbolTable_.define(name, gm);
+        return;
+    }
 
     // Already registered (e.g. the runtime globals, or a repeated tentative
     // definition).
@@ -779,7 +845,15 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
     gm.type = typeNode;
     gm.dataSegmentIndex = -1;
     gm.address = addr;
+    gm.name = name;
     symbolTable_.define(name, gm);
+
+    // Export this definition's address as a Wasm global so other TUs' `extern`
+    // references resolve to it at link time. Materialized after firstPass (once
+    // all global imports are counted) so its global index is stable.
+    if (compileMode_ == CompileMode::Linkable) {
+        exportedDataGlobals_.push_back({name, addr});
+    }
 
     // Initializer: C requires a constant expression at file scope. Encode
     // scalar and aggregate (`{...}`) constants into an active data segment;

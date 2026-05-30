@@ -66,7 +66,12 @@ public:
     const std::vector<Relocation>& getRelocations() const { return relocations_; }
     const std::vector<DataSymbol>& getDataSymbols() const { return dataSymbols_; }
 
+    // Codegen diagnostics accumulated across all functions (errors here mean
+    // the emitted module is unsound — the driver should report and not ship it).
+    const std::vector<wvmcc::Diagnostic>& getDiagnostics() const { return diagnostics_; }
+
 private:
+    std::vector<wvmcc::Diagnostic> diagnostics_;
     const wvmcc::parser::Semantic& semantic_;
     CompileMode compileMode_ = CompileMode::Linkable; // M2-D: default flipped from Freestanding
 
@@ -94,6 +99,16 @@ private:
     // relocations collected from each FunctionCodegen.
     std::vector<DataSymbol> dataSymbols_;
     std::vector<Relocation> relocations_;
+
+    // Cross-TU extern data globals (M2): file-scope object definitions whose
+    // address is exported as a Wasm global so other TUs' `extern` references
+    // (imported address-globals) resolve to it at link time. Collected during
+    // firstPass; materialized by materializeExportedDataGlobals().
+    std::vector<std::pair<std::string, size_t>> exportedDataGlobals_;
+    // Number of imported Wasm globals (defined globals are indexed after these).
+    WasmVM::index_t importedGlobalCount() const;
+    // Emit + export the address-globals collected in exportedDataGlobals_.
+    void materializeExportedDataGlobals();
 
     // Hosted-environment state (issue #40). When the translation unit defines
     // `main`, ModuleCodegen pre-injects four sys_proc imports and emits a

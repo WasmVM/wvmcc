@@ -83,24 +83,27 @@ size_t TypeMap::byteSize(const wvmcc::parser::TypeNodePtr& type) const {
                 return 0;
             }
             using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
-            bool hasDouble = false, hasFloat = false, hasLong = false, hasShort = false;
+            // Scan all specifiers — e.g. `unsigned char` has simple=[Unsigned,
+            // Char] so we cannot key off simple[0] alone (that would size it as
+            // `unsigned int` = 4). Detect the width keyword wherever it appears.
+            bool hasDouble = false, hasFloat = false, hasLong = false,
+                 hasShort = false, hasChar = false, hasBool = false, hasVoid = false;
             for (auto s : type->simple) {
                 if (s == STS::Double) hasDouble = true;
                 else if (s == STS::Float) hasFloat = true;
                 else if (s == STS::Long)  hasLong  = true;
                 else if (s == STS::Short) hasShort = true;
+                else if (s == STS::Char)  hasChar  = true;
+                else if (s == STS::Bool)  hasBool  = true;
+                else if (s == STS::Void)  hasVoid  = true;
             }
             if (hasDouble) return 8; // long double → double in wvmcc
             if (hasFloat)  return 4;
             if (hasLong)   return 8;
             if (hasShort)  return 2;
-            auto simpleType = type->simple[0];
-            switch (simpleType) {
-                case STS::Void: return 0;
-                case STS::Bool:
-                case STS::Char: return 1;
-                default:        return 4;
-            }
+            if (hasChar || hasBool) return 1;
+            if (hasVoid)   return 0;
+            return 4; // int / signed / unsigned
         }
         case wvmcc::parser::TypeNode::Kind::Pointer: {
             // Pointers are 8 bytes in Wasm64
@@ -228,13 +231,48 @@ bool TypeMap::isMemoryResident(const wvmcc::parser::TypeNodePtr& type) const {
     }
 }
 
+// Is this integer scalar unsigned? Determines sign- vs zero-extension on
+// narrow (char/short) loads. `char` with no explicit signedness defaults to
+// SIGNED per docs/spec.md ("char signedness ... default: signed");
+// `_Bool` holds only 0/1 so is treated as unsigned.
+bool TypeMap::isUnsignedScalarInteger(const wvmcc::parser::TypeNodePtr& type) const {
+    if (!type) return false;
+    if (type->kind == wvmcc::parser::TypeNode::Kind::Qualified) {
+        return isUnsignedScalarInteger(type->pointee);
+    }
+    if (type->kind != wvmcc::parser::TypeNode::Kind::Builtin) {
+        return false; // enum → signed int underlying; others irrelevant here
+    }
+    using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+    for (auto s : type->simple) {
+        if (s == STS::Unsigned) return true;
+        if (s == STS::Signed)   return false;
+        if (s == STS::Bool)     return true;
+    }
+    return false; // plain char/short/int → signed
+}
+
 WasmVM::WasmInstr TypeMap::makeLoad(const wvmcc::parser::TypeNodePtr& type, uint8_t memidx) const {
     auto wasmType = toWasmType(type);
 
     // Alignment field is log2 of byte alignment per Wasm spec.
     switch (wasmType) {
-        case WasmVM::ValueType::i32:
+        case WasmVM::ValueType::i32: {
+            // Narrow integers must load with explicit width + extension so we
+            // touch only their own bytes (a plain I32_load would read 4 bytes,
+            // pulling in adjacent storage). char→8-bit, short→16-bit.
+            size_t sz = byteSize(type);
+            bool uns = isUnsignedScalarInteger(type);
+            if (sz == 1) {
+                return uns ? WasmVM::WasmInstr{WasmVM::Instr::I32_load8_u{memidx, 0, 0}}
+                           : WasmVM::WasmInstr{WasmVM::Instr::I32_load8_s{memidx, 0, 0}};
+            }
+            if (sz == 2) {
+                return uns ? WasmVM::WasmInstr{WasmVM::Instr::I32_load16_u{memidx, 0, 1}}
+                           : WasmVM::WasmInstr{WasmVM::Instr::I32_load16_s{memidx, 0, 1}};
+            }
             return WasmVM::Instr::I32_load{memidx, 0, 2}; // log2(4) = 2
+        }
         case WasmVM::ValueType::i64:
             return WasmVM::Instr::I64_load{memidx, 0, 3}; // log2(8) = 3
         case WasmVM::ValueType::f32:
@@ -250,8 +288,14 @@ WasmVM::WasmInstr TypeMap::makeStore(const wvmcc::parser::TypeNodePtr& type, uin
     auto wasmType = toWasmType(type);
 
     switch (wasmType) {
-        case WasmVM::ValueType::i32:
+        case WasmVM::ValueType::i32: {
+            // Narrow integers store only their own width (truncating the i32
+            // value); signedness is irrelevant on store. char→8, short→16.
+            size_t sz = byteSize(type);
+            if (sz == 1) return WasmVM::Instr::I32_store8{memidx, 0, 0};
+            if (sz == 2) return WasmVM::Instr::I32_store16{memidx, 0, 1};
             return WasmVM::Instr::I32_store{memidx, 0, 2};
+        }
         case WasmVM::ValueType::i64:
             return WasmVM::Instr::I64_store{memidx, 0, 3};
         case WasmVM::ValueType::f32:

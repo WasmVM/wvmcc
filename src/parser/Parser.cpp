@@ -715,6 +715,10 @@ TranslationUnitPtr Parser::parseTranslationUnit() {
         // parse external declaration; on error we recover and continue
         auto ext = parseExternalDecl();
         if (ext) tu->externals.push_back(ext);
+        // A multi-declarator declaration (`int a, b;`) yields extra nodes
+        // queued during the call above — flush them in source order.
+        for (auto& pend : pendingExternals_) tu->externals.push_back(pend);
+        pendingExternals_.clear();
     }
     return tu;
 }
@@ -900,16 +904,21 @@ ExternalDeclPtr Parser::parseExternalDecl() {
 
             return ext;
         } else {
-                auto d = parseDeclaration(specs, decl);
-                if (!d) return nullptr;
-                d->gnuAttributes = std::move(gnuAttrs);
-                // static/thread storage duration initializers must be constant (C 6.7.9 constraint 4)
-                if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
-                    // semantic check (constant initializer) moved to Semantic pass
+                // Function declarator not followed by '{' → prototype/declaration.
+                // Still an init-declarator-list (`int f(void), x;`), so emit one
+                // ExternalDecl per declarator (first returned, rest queued).
+                auto decls = parseInitDeclaratorList(specs, decl);
+                if (decls.empty()) return nullptr;
+                ExternalDeclPtr firstExt = nullptr;
+                for (size_t i = 0; i < decls.size(); ++i) {
+                    auto& d = decls[i];
+                    if (i == 0) d->gnuAttributes = std::move(gnuAttrs);
+                    auto ext = make_ast_with_span<ExternalDecl>(d->span);
+                    ext->decl = d;
+                    if (i == 0) firstExt = ext;
+                    else pendingExternals_.push_back(ext);
                 }
-                auto ext = make_ast_with_span<ExternalDecl>(d->span);
-                ext->decl = d;
-                return ext;
+                return firstExt;
         }
     }
 
@@ -923,49 +932,57 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         return ext;
     }
 
-    // otherwise, if we have a declarator (non-function) treat as declaration
+    // otherwise, if we have a declarator (non-function) treat as declaration.
+    // A multi-declarator declaration (`int a, b;`) yields one ExternalDecl per
+    // init-declarator: the first is returned, the rest queued in pendingExternals_.
     if (decl) {
-        auto d = parseDeclaration(specs, decl);
-        if (!d) return nullptr;
-        d->gnuAttributes = std::move(gnuAttrs);
-        // If this declaration has static/thread storage duration, its initializer
-        // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
-        if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
-            if (!initializerIsConstant(*d->initializer)) {
-                wvmcc::Diagnostic diag;
-                diag.severity = wvmcc::Diagnostic::Severity::Error;
-                diag.message = "initializer for object with static storage duration must be constant expression or string literal";
-                diag.span = d->span;
-                diagnostics.push_back(std::move(diag));
-            }
-        }
-        // For object declarations with internal linkage (static): tentative/definitive semantics
-            if (!decl->id.name.empty() && specs.hasStorage(StorageClass::Static)) {
-            std::string nm = decl->id.name;
-            bool is_definitive = d->initializer.has_value();
-            auto it = internal_definitions.find(nm);
-            if (is_definitive) {
-                // if previously definitive, emit duplicate internal definition error (constraint-level)
-                if (it != internal_definitions.end() && it->second.second) {
-                    wvmcc::Diagnostic dd;
-                    dd.severity = wvmcc::Diagnostic::Severity::Error;
-                    dd.message = "duplicate internal definition of '" + nm + "' in translation unit";
-                    dd.span = d->span;
-                    diagnostics.push_back(std::move(dd));
-                    it->second = std::make_pair(d->span, true);
-                } else if (it != internal_definitions.end()) {
-                    it->second = std::make_pair(d->span, true);
-                } else {
-                    internal_definitions[nm] = std::make_pair(d->span, true);
+        auto decls = parseInitDeclaratorList(specs, decl);
+        if (decls.empty()) return nullptr;
+        ExternalDeclPtr firstExt = nullptr;
+        for (size_t i = 0; i < decls.size(); ++i) {
+            auto& d = decls[i];
+            if (i == 0) d->gnuAttributes = std::move(gnuAttrs);
+            // If this declaration has static/thread storage duration, its initializer
+            // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
+            if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
+                if (!initializerIsConstant(*d->initializer)) {
+                    wvmcc::Diagnostic diag;
+                    diag.severity = wvmcc::Diagnostic::Severity::Error;
+                    diag.message = "initializer for object with static storage duration must be constant expression or string literal";
+                    diag.span = d->span;
+                    diagnostics.push_back(std::move(diag));
                 }
-            } else {
-                if (it == internal_definitions.end()) internal_definitions[nm] = std::make_pair(d->span, false);
             }
-        }
+            // For object declarations with internal linkage (static): tentative/definitive semantics
+            std::string nm = d->declarator ? d->declarator->id.name : std::string();
+            if (!nm.empty() && specs.hasStorage(StorageClass::Static)) {
+                bool is_definitive = d->initializer.has_value();
+                auto it = internal_definitions.find(nm);
+                if (is_definitive) {
+                    // if previously definitive, emit duplicate internal definition error (constraint-level)
+                    if (it != internal_definitions.end() && it->second.second) {
+                        wvmcc::Diagnostic dd;
+                        dd.severity = wvmcc::Diagnostic::Severity::Error;
+                        dd.message = "duplicate internal definition of '" + nm + "' in translation unit";
+                        dd.span = d->span;
+                        diagnostics.push_back(std::move(dd));
+                        it->second = std::make_pair(d->span, true);
+                    } else if (it != internal_definitions.end()) {
+                        it->second = std::make_pair(d->span, true);
+                    } else {
+                        internal_definitions[nm] = std::make_pair(d->span, true);
+                    }
+                } else {
+                    if (it == internal_definitions.end()) internal_definitions[nm] = std::make_pair(d->span, false);
+                }
+            }
 
-        auto ext = make_ast_with_span<ExternalDecl>(d->span);
-        ext->decl = d;
-        return ext;
+            auto ext = make_ast_with_span<ExternalDecl>(d->span);
+            ext->decl = d;
+            if (i == 0) firstExt = ext;
+            else pendingExternals_.push_back(ext);
+        }
+        return firstExt;
     }
 
     // fallback recovery: emit a diagnostic and synchronize to the next ';'
@@ -1124,7 +1141,44 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     return decl;
 }
 
+std::vector<DeclarationPtr> Parser::parseInitDeclaratorList(const DeclarationSpecifiers& specs,
+                                                            const DeclaratorPtr &first) {
+    std::vector<DeclarationPtr> out;
+    DeclaratorPtr cur = first;
+    while (true) {
+        auto decl = make_ast<Declaration>();
+        decl->specifiers = specs;
+        decl->declarator = cur;
+        // optional `= initializer` (assignment-expression or brace-list; both
+        // stop at a top-level comma, so they don't swallow the next declarator)
+        if (auto p = lex.peek(); p && p->kind() == TokenKind::Punctuator && p->lexeme() == "=") {
+            lex.next();
+            decl->initializer = parseInitializer();
+        }
+        // a declared typedef-name must be recognized for later declarations
+        if (specs.hasStorage(StorageClass::Typedef)
+            && decl->declarator && !decl->declarator->id.name.empty()) {
+            typedef_names.insert(decl->declarator->id.name);
+        }
+        out.push_back(std::move(decl));
 
+        auto p = lex.peek();
+        if (p && p->kind() == TokenKind::Punctuator && p->lexeme() == ",") {
+            lex.next();                 // consume ',' and parse the next declarator
+            cur = parseDeclarator();
+            if (!cur) break;
+            continue;
+        }
+        break;
+    }
+    // consume the terminating ';' (skip any stray tokens up to it for recovery)
+    while (auto p = lex.peek()) {
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == ";") { lex.next(); break; }
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") break; // don't cross block end
+        lex.next();
+    }
+    return out;
+}
 
 std::vector<BlockItemPtr> Parser::parseCompoundBody() {
     std::vector<BlockItemPtr> body;
@@ -1274,21 +1328,32 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || (lex.peek()->kind() == TokenKind::Punctuator && (lex.peek()->lexeme() == "(" || lex.peek()->lexeme() == "*")))) {
                     maybeDeclr = parseDeclarator();
                 }
-                auto decl = parseDeclaration(specs, maybeDeclr);
-                auto bi = make_ast<BlockItem>();
-                bi->item = decl;
-                // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
-                // external linkage, the declaration shall have no initializer. Block-scope
-                // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
-                // permitted (and are evaluated once on first call).
-                if (decl && decl->initializer.has_value() && specs.hasStorage(StorageClass::Extern)) {
-                    wvmcc::Diagnostic diag;
-                    diag.severity = wvmcc::Diagnostic::Severity::Error;
-                    diag.message = "declaration at block scope with external linkage shall not have an initializer";
-                    diag.span = decl->span;
-                    diagnostics.push_back(std::move(diag));
+                // Type-only declaration (e.g. `struct S { … };`) keeps the old
+                // single-node path; a declarator starts an init-declarator-list
+                // so `int x, y;` yields one BlockItem per declarator.
+                if (!maybeDeclr) {
+                    auto decl = parseDeclaration(specs, maybeDeclr);
+                    auto bi = make_ast<BlockItem>();
+                    bi->item = decl;
+                    body.push_back(bi);
+                    continue;
                 }
-                body.push_back(bi);
+                for (auto& decl : parseInitDeclaratorList(specs, maybeDeclr)) {
+                    auto bi = make_ast<BlockItem>();
+                    bi->item = decl;
+                    // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
+                    // external linkage, the declaration shall have no initializer. Block-scope
+                    // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
+                    // permitted (and are evaluated once on first call).
+                    if (decl && decl->initializer.has_value() && specs.hasStorage(StorageClass::Extern)) {
+                        wvmcc::Diagnostic diag;
+                        diag.severity = wvmcc::Diagnostic::Severity::Error;
+                        diag.message = "declaration at block scope with external linkage shall not have an initializer";
+                        diag.span = decl->span;
+                        diagnostics.push_back(std::move(diag));
+                    }
+                    body.push_back(bi);
+                }
                 continue;
             }
             // if we started with a keyword and no declaration specifiers were parsed,

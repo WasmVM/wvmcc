@@ -107,6 +107,13 @@ public:
     // their underlying struct/union (needed for member access).
     std::shared_ptr<TypeNode> canonicalTypeRepr(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl) const;
 
+    // Resolve a bare TypeNode (e.g. a `sizeof(type-name)` operand produced by
+    // the parser) so struct/union tag-only references and typedef-names are
+    // completed to their definitions. Without this, TypeMap sizes an
+    // unresolved tag/typedef as 0. Returns a resolved copy (or the input if
+    // already complete / nothing to resolve).
+    std::shared_ptr<TypeNode> resolveTypeNode(const std::shared_ptr<TypeNode> &type) const;
+
 private:
     // pointer to diagnostics vector during a run so hooks can append
     std::vector<wvmcc::Diagnostic> *curDiagnostics{nullptr};

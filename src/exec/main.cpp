@@ -321,8 +321,27 @@ int main(int argc, char** argv) {
         codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
     }
     auto module = codegen.generate(main_translation_unit);
+
+    // Surface codegen diagnostics first: a codegen error (unimplemented
+    // construct, undeclared identifier, …) is the root cause, whereas the
+    // subsequent module_validate failure is just its downstream symptom.
+    const auto& codegenDiags = codegen.getDiagnostics();
+    if (!codegenDiags.empty()) {
+        printDiagnostics(codegenDiags);
+        bool hasError = false;
+        for (const auto& d : codegenDiags) {
+            if (d.severity == wvmcc::Diagnostic::Severity::Error) { hasError = true; break; }
+        }
+        if (hasError) return 1;
+    }
+
     if (auto err = WasmVM::module_validate(module)) {
         std::cerr << "error: module validation failed: " << err->what() << std::endl;
+        if (std::getenv("WVMCC_DUMP_INVALID")) {
+            const std::string dt = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
+            write_module_to_file(module, dt, &codegen);
+            std::cerr << "(dumped invalid module to " << dt << ")\n";
+        }
         return 1;
     }
 

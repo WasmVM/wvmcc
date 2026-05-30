@@ -37,7 +37,7 @@ static void emitConvert(FunctionCodegen* fc, WasmVM::ValueType from, WasmVM::Val
     if (from == VT::i64 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_convert_i64_s{}); return; }
     if (from == VT::f32 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_promote_f32{}); return; }
     if (from == VT::f64 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_demote_f64{}); return; }
-    fc->emit(WasmVM::Instr::Unreachable{});
+    fc->emitUnimplemented("codegen: unsupported value-type conversion");
 }
 
 
@@ -283,6 +283,29 @@ void FunctionCodegen::emit(const WasmVM::WasmInstr& instr) {
     }
 }
 
+// Trap on an unhandled/erroneous construct AND record an error diagnostic.
+// Design contract (lowering-plan.md Step 5.1): no silent wrong code — every
+// unimplemented emitExpr/emitStmt branch must surface a diagnostic, not just
+// emit a bare `unreachable` that the validator later rejects opaquely.
+void FunctionCodegen::emitUnimplemented(const std::string& message,
+                                        std::optional<wvmcc::SourceSpan> span) {
+    emit(WasmVM::Instr::Unreachable{});
+    wvmcc::Diagnostic d;
+    d.severity = wvmcc::Diagnostic::Severity::Error;
+    d.message = message;
+    d.span = span;
+    diagnostics_.push_back(std::move(d));
+}
+
+void FunctionCodegen::emitGlobalMemAddr(const GlobalMem& gm) {
+    if (gm.isImport) {
+        // Cross-TU extern: address carried by an imported Wasm global.
+        emit(WasmVM::Instr::Global_get{(WasmVM::index_t)gm.importGlobalIndex});
+    } else {
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)gm.address});
+    }
+}
+
 void FunctionCodegen::pushLoop(int breakDepthAtOpen, int continueDepthAtOpen) {
     ControlFlowEntry e;
     e.kind = ControlFlowEntry::Loop;
@@ -397,7 +420,7 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         break;
     case K::Ternary: {
         const auto& t = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);
-        if (!moduleCg_) { emit(WasmVM::Instr::Unreachable{}); break; }
+        if (!moduleCg_) { emitUnimplemented("codegen: ternary expression requires module context", expr->span); break; }
 
         // Result type: common arithmetic of the two branches. Use
         // typed if-else returning that type.
@@ -435,8 +458,31 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         emit(WasmVM::Instr::End{});
         break;
     }
+    case K::Sizeof: {
+        // `sizeof(type)` or `sizeof expr` → compile-time byte size as size_t
+        // (i64 on wasm64). The operand expression is NOT evaluated (C 6.5.3.4).
+        const auto& so = static_cast<const wvmcc::parser::SizeofExpr&>(*expr);
+        wvmcc::parser::TypeNodePtr opType =
+            so.type.has_value() ? *so.type : getExprTypeNode(so.expr);
+        if (!opType) {
+            emitUnimplemented("codegen: cannot determine operand type of sizeof", expr->span);
+            break;
+        }
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)typeMap_.byteSize(opType)});
+        break;
+    }
+    case K::AlignOf: {
+        // `_Alignof(type)` → compile-time alignment as size_t (i64).
+        const auto& ao = static_cast<const wvmcc::parser::AlignOfExpr&>(*expr);
+        if (!ao.type) {
+            emitUnimplemented("codegen: _Alignof missing type", expr->span);
+            break;
+        }
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)typeMap_.byteAlignment(ao.type)});
+        break;
+    }
     default:
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen not implemented: expression kind " + std::to_string((int)expr->kind), expr->span);
         break;
     }
 }
@@ -483,7 +529,7 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
                 return;
             }
         }
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("use of undeclared identifier '" + expr.name + "'", expr.span);
         return;
     }
 
@@ -492,22 +538,28 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
         if constexpr (std::is_same_v<T, ScalarLocal>) {
             emit(WasmVM::Instr::Local_get{(WasmVM::index_t)info.localIndex});
         } else if constexpr (std::is_same_v<T, MemoryLocal>) {
-            // Compute shadow-stack address: fp + frameOffset
+            // Compute shadow-stack address: fp + frameOffset (untagged mem[1]
+            // offset). Direct named access (needLValue) consumes this with a
+            // static mem[1] load/store.
             emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
             emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
             emit(WasmVM::Instr::I64_add{});
-            // Arrays decay to pointers in expression context, so leave the
-            // base address on the stack rather than loading.
+            // Arrays decay to a pointer *value* in expression context: leave the
+            // base address on the stack AND tag it with the mem[1] nibble so it
+            // can be dereferenced through an opaque pointer elsewhere.
             bool isArray = info.type
                 && info.type->kind == wvmcc::parser::TypeNode::Kind::Array;
             if (!needLValue && !isArray) {
                 emit(typeMap_.makeLoad(info.type, 1));
+            } else if (!needLValue && isArray) {
+                emitApplyTag(AddrKind::Mem1);
             }
         } else if constexpr (std::is_same_v<T, GlobalScalar>) {
             emit(WasmVM::Instr::Global_get{(WasmVM::index_t)info.globalIndex});
         } else if constexpr (std::is_same_v<T, GlobalMem>) {
-            // Static local / file-scope variable: address is in mem[0].
-            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.address});
+            // Static local / file-scope variable: address is in mem[0]
+            // (baked const, or global.get for a cross-TU extern import).
+            emitGlobalMemAddr(info);
             // Aggregates (arrays/structs/unions) decay to their address in
             // expression context — don't load a scalar out of them.
             bool isAggregate = info.type
@@ -518,7 +570,7 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
                 emit(typeMap_.makeLoad(info.type, 0));
             }
         } else {
-            emit(WasmVM::Instr::Unreachable{});
+            emitUnimplemented("codegen: unsupported symbol kind for identifier");
         }
     }, *symbolInfo);
 }
@@ -620,7 +672,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                                          : WasmVM::ValueType::i32;
                     emitConvert(this, rhsWasmType, gmVt);
                     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tempIdx});
-                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)gm->address});
+                    emitGlobalMemAddr(*gm);
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
                     emit(typeMap_.makeStore(gm->type, 0));
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
@@ -659,12 +711,15 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         emitExpr(expr.lhs, true);  // push lhs address
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
 
-        // Store into the same memory the load side reads from: a pointer
-        // deref/arrow/pointer-index hits the heap (mem[0]); a `.`/array-index
-        // follows the base's storage (file-scope global → mem[0], shadow-stack
-        // local → mem[1]). Must match emitArrayIndexExpr/emitMemberAccessExpr.
-        uint8_t storeMemidx = expr.lhs ? lvalueMemidx(expr.lhs.get()) : 1;
-        emit(typeMap_.makeStore(lhsTypeNode, storeMemidx));
+        // A named-object lvalue resolves to a static memory and an untagged
+        // frame/static address; a pointer-rooted lvalue is Dynamic and its
+        // address carries the memidx tag, so dispatch on it.
+        AddrKind k = expr.lhs ? addressKind(expr.lhs.get()) : AddrKind::Mem1;
+        if (k == AddrKind::Dynamic) {
+            emitTaggedStore(lhsTypeNode);
+        } else {
+            emit(typeMap_.makeStore(lhsTypeNode, k == AddrKind::Mem1 ? 1 : 0));
+        }
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
         return;
     }
@@ -793,88 +848,88 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_add{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_add{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_add{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "-") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_sub{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_sub{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_sub{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_sub{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "*") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_mul{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_mul{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_mul{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_mul{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "/") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_div_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_div_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_div{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_div{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "%") {
         // C: % is integer-only; floats are a constraint violation.
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_rem_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_rem_s{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "==") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_eq{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_eq{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_eq{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_eq{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "!=") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_ne{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_ne{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_ne{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_ne{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "<") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_lt_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_lt_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_lt{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_lt{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == ">") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_gt_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_gt_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_gt{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_gt{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "<=") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_le_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_le_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_le{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_le{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == ">=") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_ge_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_ge_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_ge{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_ge{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "&") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_and{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_and{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "|") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_or{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_or{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "^") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_xor{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_xor{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "<<") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_shl{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_shl{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == ">>") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_shr_s{});
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_shr_s{});
-        else emit(WasmVM::Instr::Unreachable{});
+        else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else {
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen not implemented: binary operator '" + expr.op + "'", expr.span);
     }
 }
 
@@ -891,11 +946,17 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
                 return;
             }
         }
+        // &lvalue yields a pointer *value*: take the (untagged) lvalue address
+        // and tag it with the object's memidx. For a pointer-rooted lvalue
+        // (&*p, &p->m, &p[i]) the address already carries p's tag and the kind
+        // is Dynamic, so emitApplyTag is a no-op.
         emitExpr(expr.rhs, true);
+        emitApplyTag(addressKind(expr.rhs.get()));
         return;
     }
 
-    // Dereference: emit the pointer value; load pointee from mem[0] if need_value
+    // Dereference: emit the pointer value, then load the pointee. The pointer
+    // carries its memidx in the high nibble, so dispatch on the tag.
     if (expr.op == "*") {
         emitExpr(expr.rhs, false);
         if (!needLValue) {
@@ -903,7 +964,7 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
             wvmcc::parser::TypeNodePtr pointeeType;
             if (rhsTypeNode && rhsTypeNode->kind == wvmcc::parser::TypeNode::Kind::Pointer)
                 pointeeType = rhsTypeNode->pointee;
-            emit(typeMap_.makeLoad(pointeeType, 0));
+            emitTaggedLoad(pointeeType);
         }
         return;
     }
@@ -939,7 +1000,7 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
         } else if (exprType == WasmVM::ValueType::f64) {
             emit(WasmVM::Instr::F64_neg{});
         } else {
-            emit(WasmVM::Instr::Unreachable{});
+            emitUnimplemented("codegen: unsupported operand type for unary '-'", expr.span);
         }
     } else if (expr.op == "~") {
         // bitwise NOT: x ^ -1
@@ -950,7 +1011,7 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
             emit(WasmVM::Instr::I64_const{-1});
             emit(WasmVM::Instr::I64_xor{});
         } else {
-            emit(WasmVM::Instr::Unreachable{});
+            emitUnimplemented("codegen: unsupported operand type for unary '~'", expr.span);
         }
     } else if (expr.op == "!") {
         if (exprType == WasmVM::ValueType::i32) {
@@ -958,12 +1019,12 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
         } else if (exprType == WasmVM::ValueType::i64) {
             emit(WasmVM::Instr::I64_eqz{});
         } else {
-            emit(WasmVM::Instr::Unreachable{});
+            emitUnimplemented("codegen: unsupported operand type for unary '!'", expr.span);
         }
     } else if (expr.op == "+") {
         // no-op
     } else {
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen not implemented: unary operator '" + expr.op + "'", expr.span);
     }
 }
 
@@ -1021,13 +1082,13 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
     } else if (sourceType == WasmVM::ValueType::f64 && targetType == WasmVM::ValueType::f32) {
         emit(WasmVM::Instr::F32_demote_f64{});
     } else {
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen: unsupported cast conversion", expr.span);
     }
 }
 
 void FunctionCodegen::emitStringLiteral(const wvmcc::parser::StringLiteral& expr) {
     if (!dataAllocator_) {
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen: string literal requires a data allocator", expr.span);
         return;
     }
     size_t addr = dataAllocator_->internString(expr.value);
@@ -1376,40 +1437,106 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     }
 }
 
-uint8_t FunctionCodegen::lvalueMemidx(const wvmcc::parser::Expr* e) {
+FunctionCodegen::AddrKind FunctionCodegen::addressKind(const wvmcc::parser::Expr* e) {
     using K = wvmcc::parser::Expr::Kind;
-    if (!e) return 1;
+    if (!e) return AddrKind::Mem1;
     switch (e->kind) {
         case K::Ident: {
             const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*e);
             auto sym = symbolTable_.lookup(id.name);
-            // File-scope variables (GlobalMem) live in mem[0]; everything else
-            // addressable as an lvalue base is a shadow-stack local (mem[1]).
-            if (sym && std::holds_alternative<GlobalMem>(*sym)) return 0;
-            return 1;
+            // File-scope variables (GlobalMem) are static mem[0]; address-taken
+            // / aggregate locals (MemoryLocal) are static mem[1].
+            if (sym && std::holds_alternative<GlobalMem>(*sym)) return AddrKind::Mem0;
+            return AddrKind::Mem1;
         }
         case K::Member: {
             const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*e);
-            if (m.isArrow) return 0;                 // through a pointer → heap
-            return lvalueMemidx(m.base.get());       // `.` follows the base
+            if (m.isArrow) return AddrKind::Dynamic;     // through a pointer value
+            return addressKind(m.base.get());            // `.` follows the base
         }
         case K::Index: {
             const auto& ix = static_cast<const wvmcc::parser::IndexExpr&>(*e);
             auto bt = getExprTypeNode(ix.base);
             if (bt && bt->kind == wvmcc::parser::TypeNode::Kind::Pointer)
-                return 0;                            // indexing a pointer → heap
-            return lvalueMemidx(ix.base.get());      // indexing an array follows base
+                return AddrKind::Dynamic;                // indexing a pointer value
+            return addressKind(ix.base.get());           // array index follows base
         }
         case K::Unary: {
             const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
-            if (u.op == "*") return 0;               // deref → heap
-            return lvalueMemidx(u.rhs.get());
+            if (u.op == "*") return AddrKind::Dynamic;   // deref of a pointer value
+            return addressKind(u.rhs.get());
         }
         default:
-            // Any computed pointer value (call result, cast, arithmetic) refers
-            // to a heap object in mem[0].
-            return 0;
+            // Any computed pointer value (call result, cast, pointer arithmetic)
+            // is opaque — dispatch on its tag at the access site.
+            return AddrKind::Dynamic;
     }
+}
+
+// OR the memidx tag onto the i64 address on top of the stack. Only mem[1]
+// needs a non-zero nibble; mem[0] and Dynamic (already-tagged) are no-ops.
+void FunctionCodegen::emitApplyTag(AddrKind k) {
+    if (k != AddrKind::Mem1) return;
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)((int64_t)1 << kMemidxShift)});
+    emit(WasmVM::Instr::I64_or{});
+}
+
+// [tagged-addr] -> dispatch on nibble, mask off tag, load `type` from mem[0]/[1].
+// Uses a void `if` that writes the loaded value into a result local (rather
+// than a typed-result block), then leaves it on the stack — this avoids the
+// WasmVM interpreter's mishandling of a typed-result block sitting above other
+// operands on the value stack.
+void FunctionCodegen::emitTaggedLoad(const wvmcc::parser::TypeNodePtr& type) {
+    int addrTmp = allocRawLocal(WasmVM::ValueType::i64);
+    int resTmp  = allocRawLocal(typeMap_.toWasmType(type));
+    emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)addrTmp});
+    // nibble (as i32, to avoid the WasmVM i64-compare interpreter trap)
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kMemidxShift});
+    emit(WasmVM::Instr::I64_shr_u{});
+    emit(WasmVM::Instr::I32_wrap_i64{});
+    emit(WasmVM::Instr::I32_const{1});
+    emit(WasmVM::Instr::I32_eq{});
+    emit(WasmVM::Instr::If{std::nullopt});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+    emit(WasmVM::Instr::I64_and{});
+    emit(typeMap_.makeLoad(type, 1));
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
+    emit(WasmVM::Instr::Else{});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+    emit(WasmVM::Instr::I64_and{});
+    emit(typeMap_.makeLoad(type, 0));
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
+    emit(WasmVM::Instr::End{});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)resTmp});
+}
+
+// [tagged-addr, value] -> dispatch on nibble, mask off tag, store `type`.
+void FunctionCodegen::emitTaggedStore(const wvmcc::parser::TypeNodePtr& type) {
+    int valTmp  = allocRawLocal(typeMap_.toWasmType(type));
+    int addrTmp = allocRawLocal(WasmVM::ValueType::i64);
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)valTmp});   // pop value
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)addrTmp});  // pop tagged addr
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kMemidxShift});
+    emit(WasmVM::Instr::I64_shr_u{});
+    emit(WasmVM::Instr::I32_wrap_i64{});
+    emit(WasmVM::Instr::I32_const{1});
+    emit(WasmVM::Instr::I32_eq{});
+    emit(WasmVM::Instr::If{std::nullopt});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+    emit(WasmVM::Instr::I64_and{});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)valTmp});
+    emit(typeMap_.makeStore(type, 1));
+    emit(WasmVM::Instr::Else{});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+    emit(WasmVM::Instr::I64_and{});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)valTmp});
+    emit(typeMap_.makeStore(type, 0));
+    emit(WasmVM::Instr::End{});
 }
 
 void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue) {
@@ -1421,12 +1548,12 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
 
     size_t fieldOffset = baseType ? typeMap_.getFieldOffset(baseType, expr.member) : 0;
     auto fieldType     = baseType ? typeMap_.getFieldType(baseType, expr.member)   : nullptr;
-    // -> hits the heap (mem[0]); `.` follows the base's storage: a file-scope
-    // struct lives in mem[0], a shadow-stack local in mem[1].
-    uint8_t memidx = lvalueMemidx(&expr);
+    // `->` is rooted at a pointer value (Dynamic, tag-dispatched); `.` follows
+    // the base's storage to a static memory.
+    AddrKind k = addressKind(&expr);
 
     if (expr.isArrow) {
-        emitExpr(expr.base, false);  // pointer value is the base address
+        emitExpr(expr.base, false);  // pointer value (tagged) is the base address
     } else {
         emitExpr(expr.base, true);   // lvalue address of the struct
     }
@@ -1437,7 +1564,8 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
     }
 
     if (!needLValue) {
-        emit(typeMap_.makeLoad(fieldType, memidx));
+        if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
+        else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
     }
 }
 
@@ -1455,13 +1583,14 @@ void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, b
     }
 
     size_t elemSize = elemType ? typeMap_.byteSize(elemType) : 4;
-    // Indexing a pointer hits the heap (mem[0]); indexing an array follows the
-    // base's storage — a file-scope array lives in mem[0], a shadow-stack local
-    // array in mem[1].
-    (void)baseIsPointer;
-    uint8_t memidx = lvalueMemidx(&expr);
+    // Indexing a pointer is rooted at a pointer value (Dynamic, tag-dispatched);
+    // indexing an array follows the base's storage to a static memory.
+    AddrKind k = addressKind(&expr);
 
-    emitExpr(expr.base, false);    // base address (i64)
+    // Base address (i64). For an array base, take its untagged lvalue address
+    // (need_lvalue=true) rather than the tagged decayed pointer; for a pointer
+    // base, load the pointer *value* (which carries its own tag).
+    emitExpr(expr.base, /*needLValue=*/!baseIsPointer);
     emitExpr(expr.index, false);   // index
 
     auto idxWasmType = getExprType(expr.index);
@@ -1477,7 +1606,8 @@ void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, b
     emit(WasmVM::Instr::I64_add{});
 
     if (!needLValue) {
-        emit(typeMap_.makeLoad(elemType, memidx));
+        if (k == AddrKind::Dynamic) emitTaggedLoad(elemType);
+        else emit(typeMap_.makeLoad(elemType, k == AddrKind::Mem1 ? 1 : 0));
     }
 }
 
@@ -1574,7 +1704,7 @@ void FunctionCodegen::emitListInitializer(int baseAddrLocal,
 
 void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr) {
     if (!expr.type) {
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen: compound literal missing type", expr.span);
         return;
     }
 
@@ -1713,7 +1843,7 @@ void FunctionCodegen::emitStmt(const wvmcc::parser::StmtPtr& stmt) {
     case K::Empty:
         break;
     default:
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen not implemented: statement kind " + std::to_string((int)stmt->kind), stmt->span);
         break;
     }
 }
@@ -1916,8 +2046,8 @@ void FunctionCodegen::emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt) {
 
 void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr) {
     if (!returnTypeNode_ || !returnTypeNode_->su) {
-        // No field info: emit unreachable placeholder.
-        emit(WasmVM::Instr::Unreachable{});
+        emitUnimplemented("codegen: struct return missing layout info",
+                          srcExpr ? srcExpr->span : std::optional<wvmcc::SourceSpan>{});
         return;
     }
 
@@ -2459,6 +2589,17 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         ptrTn->kind = wvmcc::parser::TypeNode::Kind::Pointer;
         ptrTn->pointee = charTn;
         return ptrTn;
+    }
+    case K::Sizeof:
+    case K::AlignOf: {
+        // Result is size_t — `unsigned long` (i64 on wasm64).
+        auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+        tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+        tn->simple.push_back(
+            wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Unsigned);
+        tn->simple.push_back(
+            wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long);
+        return tn;
     }
     case K::Binary: {
         const auto& b = static_cast<const wvmcc::parser::BinaryExpr&>(*expr);

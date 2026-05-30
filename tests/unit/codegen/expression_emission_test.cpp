@@ -397,12 +397,14 @@ static int test_addressof_memory_local() {
     symbolTable.popScope();
 
     const auto& instrs = codegen.getInstructions();
-    // &x = emitExpr(x, needLValue=true) → Local_get{0}, I64_const{0}, I64_add
-    if (instrs.size() != 3) {
-        std::cerr << "test_addressof_memory_local: expected 3 instrs, got " << instrs.size() << "\n";
+    // &x of a shadow-stack local yields a *tagged* pointer value:
+    //   Local_get{0}, I64_const{0}, I64_add, I64_const{1<<60}, I64_or
+    if (instrs.size() != 5) {
+        std::cerr << "test_addressof_memory_local: expected 5 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[2], WasmVM::Opcode::I64_add)) { std::cerr << "test_addressof_memory_local: [2] expected I64_add\n"; return 2; }
+    if (!is(instrs[4], WasmVM::Opcode::I64_or))  { std::cerr << "test_addressof_memory_local: [4] expected I64_or (mem[1] tag)\n"; return 3; }
     return 0;
 }
 

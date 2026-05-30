@@ -55,6 +55,12 @@ private:
     FunctionDefPtr parseFunctionDef(const DeclarationSpecifiers& specs, const DeclaratorPtr &decl);
     DeclarationPtr parseDeclaration(const DeclarationSpecifiers& specs, const std::string &name);
     DeclarationPtr parseDeclaration(const DeclarationSpecifiers& specs, const DeclaratorPtr &decl);
+    // Parse a full init-declarator-list (`d1 [= i1], d2 [= i2], …;`) given the
+    // already-parsed first declarator. Returns one single-declarator
+    // Declaration per init-declarator so downstream consumers stay unchanged.
+    // Consumes the terminating ';'.
+    std::vector<DeclarationPtr> parseInitDeclaratorList(const DeclarationSpecifiers& specs,
+                                                        const DeclaratorPtr &first);
 
     // statements/expressions (very small subset)
     std::vector<BlockItemPtr> parseCompoundBody();
@@ -82,6 +88,10 @@ private:
     
 private:
     std::vector<wvmcc::Diagnostic> diagnostics{};
+    // Extra file-scope declarations produced by a multi-declarator declaration
+    // (`int a, b;`). parseExternalDecl returns the first and queues the rest
+    // here; parseTranslationUnit drains this after each call.
+    std::vector<ExternalDeclPtr> pendingExternals_{};
     // track internal linkage (static) definitions by name -> (span, has_definitive_definition)
     std::unordered_map<std::string, std::pair<SourceSpan, bool>> internal_definitions{};
     // known typedef names (updated when parsing typedef declarations)

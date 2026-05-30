@@ -31,7 +31,15 @@ struct GlobalScalar {
 struct GlobalMem {
     wvmcc::parser::TypeNodePtr type;
     int dataSegmentIndex; // Index in Wasm module data segments
-    size_t address; // Memory address
+    size_t address; // Memory address (meaningless when isImport — resolved at link)
+    // Cross-TU `extern` data global (e.g. `extern int errno;`): no local
+    // storage in this TU. Its address is carried by an imported Wasm global
+    // (`importGlobalIndex`); references emit `global.get importGlobalIndex`
+    // instead of a baked `i64.const address`. The linker resolves the import
+    // to the defining TU's exported address-global (by `name`).
+    bool isImport = false;
+    std::string name;
+    int importGlobalIndex = -1; // Wasm global index of the imported address (isImport)
 };
 
 struct FuncSymbol {
