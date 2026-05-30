@@ -42,6 +42,24 @@ function(add_e2e_test name source)
     set_tests_properties(e2e-${name} PROPERTIES TIMEOUT 10)
 endfunction()
 
+# add_link_test(<name> <source.c>)
+#   M2-L4: compiles <source.c> through the *integrated linker*, lazily pulling
+#   the libc TUs it needs from runtime/lib/libc.a, then runs the linked binary
+#   under wasmvm. Exercises the full link pipeline (merge → crt0 → resolve →
+#   dead-code → lazy archive pull) end-to-end. Requires the `runtime` target's
+#   libc.a, which the default build produces.
+set(RUNTIME_LIBDIR ${CMAKE_BINARY_DIR}/runtime/lib)
+set(RUNTIME_INCDIR ${CMAKE_SOURCE_DIR}/runtime/include)
+function(add_link_test name source)
+    set(wasm_out ${INTEGRATION_TEST_DIR}/${name}.wasm)
+    add_test(
+        NAME e2e-${name}
+        COMMAND ${CMAKE_COMMAND} -E env
+            sh -c "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${wasm_out}' && '${WASMVM_EXECUTABLE}' '${wasm_out}'"
+    )
+    set_tests_properties(e2e-${name} PROPERTIES TIMEOUT 15)
+endfunction()
+
 # Phase 2 — memory and aggregates
 add_e2e_test(phase2-struct           ${CMAKE_CURRENT_SOURCE_DIR}/phase2/e2e_struct.c)
 add_e2e_test(phase2-pointer-arith    ${CMAKE_CURRENT_SOURCE_DIR}/phase2/e2e_pointer_arith.c)
@@ -69,3 +87,6 @@ add_e2e_test(phase5-globals          ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_glob
 
 # M2-13 prereq — `continue` in a for-loop must run the step (regression).
 add_e2e_test(phase5-for-continue     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_for_continue.c)
+
+# M2-L4 — lazy archive pulls: link a user TU against libc.a end-to-end.
+add_link_test(libc-string            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_libc_string.c)

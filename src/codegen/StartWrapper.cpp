@@ -155,8 +155,16 @@ void emitStartWrapper(WasmVM::WasmModule& module,
     }
     body.push_back(WasmVM::Instr::End{});
 
+    // The function index space is [function imports..., defined funcs...].
+    // Count only *function* imports — non-func imports (unresolved globals /
+    // memories that survive into the final module) must not be counted, or
+    // the wrapper's index lands past the end of the function space.
+    WasmVM::index_t funcImportCount = 0;
+    for (const auto& imp : module.imports) {
+        if (std::holds_alternative<WasmVM::index_t>(imp.desc)) ++funcImportCount;
+    }
     WasmVM::index_t wrapperIdx =
-        (WasmVM::index_t)(module.imports.size() + module.funcs.size());
+        (WasmVM::index_t)(funcImportCount + module.funcs.size());
     module.funcs.push_back(std::move(wrapper));
     module.start = wrapperIdx;
 

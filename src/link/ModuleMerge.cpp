@@ -83,6 +83,59 @@ void remapConstInstr(WasmVM::ConstInstr& c, const Remap& r) {
     }, c);
 }
 
+// When a freshly-merged module appends new function/global imports, every
+// already-merged *defined* func/global shifts up in the shared index space
+// (imports precede definitions). Rewrite every reference in the existing
+// output that targets a definition (index >= the pre-merge import count) by
+// the number of newly-added imports, so prior modules keep pointing at the
+// same definitions. Must run after this module's import loop but before any
+// of its own funcs/globals/exports are appended.
+void shiftExistingDefRefs(WasmVM::WasmModule& out,
+                          WasmVM::index_t funcThreshold, WasmVM::index_t funcDelta,
+                          WasmVM::index_t globalThreshold, WasmVM::index_t globalDelta) {
+    namespace Op = WasmVM::Opcode;
+    if (funcDelta == 0 && globalDelta == 0) return;
+    auto bumpFunc = [&](WasmVM::index_t& idx) {
+        if (funcDelta && idx >= funcThreshold) idx += funcDelta;
+    };
+    auto bumpGlobal = [&](WasmVM::index_t& idx) {
+        if (globalDelta && idx >= globalThreshold) idx += globalDelta;
+    };
+    auto bumpConst = [&](WasmVM::ConstInstr& c) {
+        std::visit([&](auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, WasmVM::Instr::Ref_func>) bumpFunc(v.index);
+            else if constexpr (std::is_same_v<T, WasmVM::Instr::Global_get>) bumpGlobal(v.index);
+        }, c);
+    };
+    for (auto& f : out.funcs) {
+        for (auto& instr : f.body) {
+            switch (instr.opcode) {
+                case Op::Call:
+                case Op::Return_call:
+                case Op::Ref_func:
+                    if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm))
+                        bumpFunc(oi->index);
+                    break;
+                case Op::Global_get:
+                case Op::Global_set:
+                    if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm))
+                        bumpGlobal(oi->index);
+                    break;
+                default: break;
+            }
+        }
+    }
+    for (auto& ex : out.exports) {
+        if (ex.desc == WasmVM::WasmExport::DescType::func) bumpFunc(ex.index);
+        else if (ex.desc == WasmVM::WasmExport::DescType::global) bumpGlobal(ex.index);
+    }
+    for (auto& e : out.elems)
+        for (auto& entry : e.elemlist) bumpConst(entry);
+    for (auto& g : out.globals) bumpConst(g.init);
+    if (out.start.has_value()) bumpFunc(*out.start);
+}
+
 } // anonymous namespace
 
 void remapInstr(WasmVM::WasmInstr& instr, const Remap& r) {
@@ -126,6 +179,12 @@ void remapInstr(WasmVM::WasmInstr& instr, const Remap& r) {
             }
             break;
         }
+
+        // call_ref / return_call_ref: a single *type* index.
+        case Op::Call_ref:
+        case Op::Return_call_ref:
+            remapOneIdx(r.type);
+            break;
 
         // table.copy: (dst_tableidx, src_tableidx).
         case Op::Table_copy: {
@@ -198,6 +257,11 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
     auto& out = ctx.output;
     DedupState& ds = dedupFor(ctx);
 
+    // Import counts before this module — used to shift already-merged
+    // definitions up by however many new imports this module introduces.
+    const WasmVM::index_t oldFuncImports   = ds.funcImportCount;
+    const WasmVM::index_t oldGlobalImports = ds.globalImportCount;
+
     Remap r;
 
     // ---- Imports: dedupe by (module, name), assigning to the right idx ---
@@ -258,6 +322,14 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
             r.table.push_back(outIdx);
         }
     }
+
+    // ---- Re-index prior definitions for any imports just added ----
+    // New func/global imports occupy slots before all defined funcs/globals,
+    // so every reference in the already-merged output to a definition shifts
+    // up by the count of imports this module introduced.
+    shiftExistingDefRefs(out,
+                         oldFuncImports,   ds.funcImportCount   - oldFuncImports,
+                         oldGlobalImports, ds.globalImportCount - oldGlobalImports);
 
     // ---- Types: dedupe ----
     // Build typeRemap separately from import path so internal type uses are

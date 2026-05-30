@@ -75,9 +75,17 @@ void eliminate(LinkContext& ctx) {
         if (mark.insert(idx).second) work.push(idx);
     };
 
-    if (m.start.has_value()) seed(*m.start);
-    for (const auto& ex : m.exports) {
-        if (ex.desc == WasmVM::WasmExport::DescType::func) seed(ex.index);
+    if (m.start.has_value()) {
+        // Final executable: the entry point and its closure are the only live
+        // code. Exported libc functions that nothing reachable calls (e.g. an
+        // unused qsort pulled transitively) are dead and get stripped.
+        seed(*m.start);
+    } else {
+        // Relocatable object (no crt0): every exported function is a public
+        // entry the next link stage may reference, so all are roots.
+        for (const auto& ex : m.exports) {
+            if (ex.desc == WasmVM::WasmExport::DescType::func) seed(ex.index);
+        }
     }
     for (auto idx : refFunced) seed(idx);
     // All imports are always considered reachable (they're contracts with
