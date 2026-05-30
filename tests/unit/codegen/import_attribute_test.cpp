@@ -27,6 +27,10 @@ static WasmVM::WasmModule compile(const std::string& src) {
     Semantic sem(tu, false);
     sem.run(parser.getDiagnosticsRef());
     ModuleCodegen codegen(sem);
+    // import_module / import_name attributes are checked in freestanding mode
+    // so the observed import layout matches M1's contract; M2-D's linkable
+    // default would otherwise prepend env.__* imports.
+    codegen.setCompileMode(CompileMode::Freestanding);
     auto module = codegen.generate(tu);
     std::remove(fname.c_str());
     return module;

@@ -508,8 +508,16 @@ bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
         
         Preprocessor child;
         child.includePaths = includePaths;
+        child.systemIncludePaths = systemIncludePaths;
+        child.sysroot = sysroot;
         child.inclusionStack = inclusionStack;
         child.pragmaOnceFiles = pragmaOnceFiles;
+        // Inherit the parent's macros so the included file can see them
+        // (matches C preprocessor semantics — feature-test macros are
+        // typically defined before #include lines).
+        for (const auto& [name, m] : macroTable) {
+            child.macroTable.insertOrAssign(name, m);
+        }
         // Use streaming API on child to collect tokens from included file
         if (!child.open(*resolved)) {
             diagnostics.push_back(Diagnostic{
@@ -523,10 +531,14 @@ bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
         while (auto t = child.next()) childTokens.push_back(*t);
         diagnostics.insert(diagnostics.end(), child.diagnostics.begin(), child.diagnostics.end());
 
-        
-
         for (const auto& file : child.pragmaOnceFiles) {
             pragmaOnceFiles.insert(file);
+        }
+        // Propagate macros defined in the included file back to the
+        // includer — this is the cross-include macro visibility that
+        // standard C preprocessors give you.
+        for (const auto& [name, m] : child.macroTable) {
+            macroTable.insertOrAssign(name, m);
         }
 
         for (const auto& tk : childTokens) out.push_back(tk);
@@ -693,9 +705,17 @@ std::optional<std::string> Preprocessor::resolveInclude(const std::string& heade
         }
     }
 
-    // Both forms: search -I paths
+    // Both forms: search -I paths, then -isystem, then <sysroot>/include/.
     for (const auto& base : includePaths) {
         fs::path p = fs::path(base) / header;
+        if (existsFile(p)) return fs::weakly_canonical(p).string();
+    }
+    for (const auto& base : systemIncludePaths) {
+        fs::path p = fs::path(base) / header;
+        if (existsFile(p)) return fs::weakly_canonical(p).string();
+    }
+    if (!sysroot.empty()) {
+        fs::path p = fs::path(sysroot) / "include" / header;
         if (existsFile(p)) return fs::weakly_canonical(p).string();
     }
 

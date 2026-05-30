@@ -28,6 +28,10 @@ static WasmVM::WasmModule compile(const std::string& src, const std::string& fna
     Semantic sem(tu, false);
     sem.run(parser.getDiagnosticsRef());
     ModuleCodegen codegen(sem);
+    // This test exercises M1's freestanding start-wrapper synthesis; force
+    // the mode explicitly so the M2-D linkable default doesn't change the
+    // observed import layout.
+    codegen.setCompileMode(CompileMode::Freestanding);
     auto m = codegen.generate(tu);
     std::remove(fname.c_str());
     return m;

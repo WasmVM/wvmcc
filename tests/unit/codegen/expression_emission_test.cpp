@@ -397,12 +397,14 @@ static int test_addressof_memory_local() {
     symbolTable.popScope();
 
     const auto& instrs = codegen.getInstructions();
-    // &x = emitExpr(x, needLValue=true) → Local_get{0}, I64_const{0}, I64_add
-    if (instrs.size() != 3) {
-        std::cerr << "test_addressof_memory_local: expected 3 instrs, got " << instrs.size() << "\n";
+    // &x of a shadow-stack local yields a *tagged* pointer value:
+    //   Local_get{0}, I64_const{0}, I64_add, I64_const{1<<60}, I64_or
+    if (instrs.size() != 5) {
+        std::cerr << "test_addressof_memory_local: expected 5 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[2], WasmVM::Opcode::I64_add)) { std::cerr << "test_addressof_memory_local: [2] expected I64_add\n"; return 2; }
+    if (!is(instrs[4], WasmVM::Opcode::I64_or))  { std::cerr << "test_addressof_memory_local: [4] expected I64_or (mem[1] tag)\n"; return 3; }
     return 0;
 }
 
@@ -433,14 +435,29 @@ static int test_deref_pointer() {
     symbolTable.popScope();
 
     const auto& instrs = codegen.getInstructions();
-    // Local_get{2}, I32_load{0, 0, 4}
-    if (instrs.size() != 2) {
-        std::cerr << "test_deref_pointer: expected 2 instrs, got " << instrs.size() << "\n";
-        return 1;
-    }
+    // Tagged-pointer deref: the pointer value carries its target memory in the
+    // top nibble of the i64 address. The load dispatches on that tag —
+    //   local.get{p}; local.tee{t}; i64.const 60; i64.shr_u; i32.wrap_i64;
+    //   i32.const 1; i32.eq;
+    //   if   local.get{t}; i64.const <mask>; i64.and; i32.load mem1; local.set
+    //   else local.get{t}; i64.const <mask>; i64.and; i32.load mem0; local.set
+    //   end  local.get{result}
+    // Rather than pin every index, assert the structural invariants of the
+    // dispatch: it starts at the pointer local, branches on the tag, and both
+    // arms perform an i32.load (one per memory).
     auto lg = asOneIdx(instrs[0], WasmVM::Opcode::Local_get);
     if (!lg || lg->index != 2) { std::cerr << "test_deref_pointer: [0] expected Local_get{2}\n"; return 2; }
-    if (!is(instrs[1], WasmVM::Opcode::I32_load)) { std::cerr << "test_deref_pointer: [1] expected I32_load\n"; return 3; }
+
+    bool sawShr = false, sawIf = false;
+    int i32Loads = 0;
+    for (const auto& in : instrs) {
+        if (is(in, WasmVM::Opcode::I64_shr_u)) sawShr = true;       // tag extraction
+        if (is(in, WasmVM::Opcode::If))        sawIf = true;        // mem dispatch
+        if (is(in, WasmVM::Opcode::I32_load))  ++i32Loads;          // one per memory arm
+    }
+    if (!sawShr) { std::cerr << "test_deref_pointer: missing tag extraction (i64.shr_u)\n"; return 3; }
+    if (!sawIf)  { std::cerr << "test_deref_pointer: missing memory dispatch (if)\n"; return 4; }
+    if (i32Loads != 2) { std::cerr << "test_deref_pointer: expected 2 i32.load (mem0+mem1 arms), got " << i32Loads << "\n"; return 5; }
     return 0;
 }
 

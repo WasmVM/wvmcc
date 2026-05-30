@@ -85,9 +85,6 @@ private:
     int functionDepth{0};
     // Compute alignment information from DeclarationSpecifiers (exprs and strings) with access to TU
     std::pair<std::optional<long long>, std::string> computeAlignFromSpecsTU(const DeclarationSpecifiers &specs) const;
-    // Produce a canonical type representation by resolving typedef-names via
-    // the translation unit and expanding underlying type representations.
-    std::shared_ptr<TypeNode> canonicalTypeRepr(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl) const;
     // structural comparison of TypeNode
     static bool typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::shared_ptr<TypeNode> &b);
     // Result of expression type analysis
@@ -104,6 +101,18 @@ public:
     // `inParamPrototype` indicates parameter prototype scope (affects VLA handling).
     // Public so static helper functions in Semantic.cpp can call it.
     std::shared_ptr<TypeNode> buildTypeFromDeclaration(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl, bool inParamPrototype = false, bool *outVariablyModified = nullptr) const;
+    // Produce a canonical type representation by resolving typedef-names via
+    // the translation unit and expanding underlying type representations.
+    // Public so codegen can resolve typedef-named parameter/local types to
+    // their underlying struct/union (needed for member access).
+    std::shared_ptr<TypeNode> canonicalTypeRepr(const DeclarationSpecifiers &specs, const DeclaratorPtr &decl) const;
+
+    // Resolve a bare TypeNode (e.g. a `sizeof(type-name)` operand produced by
+    // the parser) so struct/union tag-only references and typedef-names are
+    // completed to their definitions. Without this, TypeMap sizes an
+    // unresolved tag/typedef as 0. Returns a resolved copy (or the input if
+    // already complete / nothing to resolve).
+    std::shared_ptr<TypeNode> resolveTypeNode(const std::shared_ptr<TypeNode> &type) const;
 
 private:
     // pointer to diagnostics vector during a run so hooks can append

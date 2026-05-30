@@ -4,6 +4,60 @@
 
 namespace wvmcc::codegen {
 
+// Walk a declarator chain to its Identifier node and return the declared
+// name. Chain shape (outer→inner): [Array/Function suffixes] → Identifier
+// → [leading `*`s].
+static std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl) {
+    for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier
+            || !cur->id.name.empty())
+            return cur->id.name;
+    }
+    return std::string();
+}
+
+// Best-effort constant fold of an array-size expression (integer literal).
+static size_t arrayCount(const wvmcc::parser::Declarator* arr) {
+    if (arr->array.size.has_value() && *arr->array.size) {
+        const auto& e = **arr->array.size;
+        if (e.kind == wvmcc::parser::Expr::Kind::Integer) {
+            auto v = static_cast<const wvmcc::parser::IntegerLiteral&>(e).value;
+            if (v > 0) return static_cast<size_t>(v);
+        }
+    }
+    return 1; // unknown / flexible array → treat as one element
+}
+
+// Given the scalar base size/alignment from the specifiers, apply the
+// pointer/array layers of a member's declarator to obtain the member's
+// in-memory size and alignment. Pointers are 8/8 (wasm64); arrays multiply
+// the element size by the element count.
+static void applyDeclaratorToLayout(const wvmcc::parser::DeclaratorPtr& decl,
+                                    size_t& memberSize, size_t& memberAlignment) {
+    if (!decl) return;
+    // Collect layers in type-application order (innermost → outermost),
+    // matching TypeMap::applyDeclaratorLayers: leading `*`s (reversed) first,
+    // then trailing array/function suffixes.
+    std::vector<const wvmcc::parser::Declarator*> belowId, aboveId;
+    bool sawId = false;
+    for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier) { sawId = true; continue; }
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Pointer
+            || cur->kind == wvmcc::parser::Declarator::Kind::Array) {
+            (sawId ? belowId : aboveId).push_back(cur.get());
+        }
+    }
+    auto step = [&](const wvmcc::parser::Declarator* d) {
+        if (d->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+            memberSize = 8; memberAlignment = 8;
+        } else { // Array
+            memberSize *= arrayCount(d);
+        }
+    };
+    for (auto it = belowId.rbegin(); it != belowId.rend(); ++it) step(*it);
+    for (auto* d : aboveId) step(d);
+}
+
 StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpecifier& structSpec) {
     // Check if we've already computed this layout
     auto cached = getCachedLayout(&structSpec);
@@ -23,10 +77,12 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
         return layout;
     }
     
-    // Compute field offsets and alignment
+    // Compute field offsets and alignment. Unions overlay all members at
+    // offset 0; structs lay them out sequentially with alignment padding.
+    const bool isUnion = (structSpec.kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Union);
     size_t currentOffset = 0;
-    size_t maxAlignment = 1;
-    
+    size_t maxMemberSize = 0;
+
     for (const auto& member : structSpec.members) {
         // Get the type of this member
         const auto& specifiers = member.specifiers;
@@ -46,55 +102,23 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
             const auto& typeSpec = specifiers.typeSpecifiers[0];
             
             if (typeSpec.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
-                // Simple type - compute size based on the simple type specifiers
-                for (const auto& simpleType : typeSpec.simple) {
-                    switch (simpleType) {
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void:
-                            memberSize = 0; // Void has no size, but this shouldn't happen in a struct member
-                            memberAlignment = 1;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char:
-                            memberSize = 1;
-                            memberAlignment = 1;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Short:
-                            memberSize = 2;
-                            memberAlignment = 2;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int:
-                            memberSize = 4;
-                            memberAlignment = 4;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long:
-                            memberSize = 8;
-                            memberAlignment = 8;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Float:
-                            memberSize = 4;
-                            memberAlignment = 4;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Double:
-                            memberSize = 8;
-                            memberAlignment = 8;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Bool:
-                            memberSize = 1;
-                            memberAlignment = 1;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Complex:
-                            memberSize = 0; // Complex types are not supported in this simplified version
-                            memberAlignment = 1;
-                            break;
-                        case wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Imaginary:
-                            memberSize = 0; // Imaginary types are not supported in this simplified version
-                            memberAlignment = 1;
-                            break;
-                        default:
-                            // For other types, assume size of 8 (pointer size)
-                            memberSize = 8;
-                            memberAlignment = 8;
-                    }
+                using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+                bool hasDouble = false, hasFloat = false, hasLong = false, hasShort = false;
+                bool hasChar = false, hasBool = false;
+                for (auto s : typeSpec.simple) {
+                    if (s == STS::Double) hasDouble = true;
+                    else if (s == STS::Float) hasFloat = true;
+                    else if (s == STS::Long)  hasLong  = true;
+                    else if (s == STS::Short) hasShort = true;
+                    else if (s == STS::Char)  hasChar  = true;
+                    else if (s == STS::Bool)  hasBool  = true;
                 }
+                if (hasDouble)      { memberSize = 8; memberAlignment = 8; } // long double → double
+                else if (hasFloat)  { memberSize = 4; memberAlignment = 4; }
+                else if (hasLong)   { memberSize = 8; memberAlignment = 8; }
+                else if (hasShort)  { memberSize = 2; memberAlignment = 2; }
+                else if (hasChar || hasBool) { memberSize = 1; memberAlignment = 1; }
+                else                { memberSize = 4; memberAlignment = 4; } // int / signed / unsigned
             } else if (typeSpec.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
                 // Struct or union member - recursively compute layout
                 if (typeSpec.su) {
@@ -117,27 +141,39 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
             memberAlignment = 8;
         }
         
-        // Apply alignment rules
-        size_t alignedOffset = (currentOffset + memberAlignment - 1) & ~(memberAlignment - 1);
-        currentOffset = alignedOffset;
-        
-        // Store field offset
+        // Apply pointer/array declarator layers (e.g. `char *p` → 8 bytes,
+        // `int a[4]` → 16 bytes). Uses the first declarator of the member.
         if (!member.declarators.empty() && member.declarators[0].declarator) {
-            // Get the name of the field (if available)
-            layout.fieldOffsets.emplace_back(member.declarators[0].declarator->id.name, currentOffset);
-        } else {
-            // Anonymous field or unnamed member
-            layout.fieldOffsets.emplace_back("", currentOffset);
+            applyDeclaratorToLayout(member.declarators[0].declarator,
+                                    memberSize, memberAlignment);
         }
-        
-        // Update max alignment and size
+
+        size_t fieldOffset;
+        if (isUnion) {
+            // All union members overlay at offset 0.
+            fieldOffset = 0;
+            maxMemberSize = std::max(maxMemberSize, memberSize);
+        } else {
+            size_t alignedOffset = (currentOffset + memberAlignment - 1) & ~(memberAlignment - 1);
+            currentOffset = alignedOffset;
+            fieldOffset = currentOffset;
+            currentOffset += memberSize;
+        }
+
+        if (!member.declarators.empty() && member.declarators[0].declarator) {
+            layout.fieldOffsets.emplace_back(declaratorName(member.declarators[0].declarator), fieldOffset);
+        } else {
+            layout.fieldOffsets.emplace_back("", fieldOffset);
+        }
+
+        // Update max alignment.
         layout.byteAlignment = std::max(layout.byteAlignment, memberAlignment);
-        currentOffset += memberSize;
     }
-    
-    // Final alignment adjustment for the entire struct
+
+    // Final size: structs pad to alignment; unions are max-member-size padded.
     size_t finalAlignment = layout.byteAlignment;
-    layout.byteSize = (currentOffset + finalAlignment - 1) & ~(finalAlignment - 1);
+    size_t rawSize = isUnion ? maxMemberSize : currentOffset;
+    layout.byteSize = (rawSize + finalAlignment - 1) & ~(finalAlignment - 1);
     
     // Cache the result
     cacheLayout(&structSpec, layout);

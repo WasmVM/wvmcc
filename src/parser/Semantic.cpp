@@ -880,6 +880,7 @@ std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSp
             // represent return type as element (reuse element field)
             f->element = curType;
             f->hasParamTypeList = layer->function.hasParamTypeList;
+            f->isVariadic = layer->function.isVariadic;
             for (const auto &p : layer->function.params) {
                 // best-effort: build param type nodes (limited info)
                 std::shared_ptr<TypeNode> ptn = nullptr;
@@ -956,6 +957,7 @@ std::shared_ptr<TypeNode> Semantic::canonicalTypeRepr(const DeclarationSpecifier
                 f->kind = TypeNode::Kind::Function;
                 f->element = cur;
                 f->hasParamTypeList = layer->function.hasParamTypeList;
+                f->isVariadic = layer->function.isVariadic;
                 for (const auto &p : layer->function.params) {
                     std::shared_ptr<TypeNode> ptn = nullptr;
                     if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);
@@ -1062,6 +1064,52 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
 void Semantic::onDeclaration(const DeclarationPtr &d) {
     if (!d) return;
     (void)d;
+    // The signature-compatibility / declared-type / def-counting bookkeeping
+    // below only applies at file scope. Inside a function, local declarations
+    // have their own scope and must not collide with file-scope (or
+    // each-other-across-functions) names. Block-scope declarations still need
+    // their own diagnostics, though, so handle those here before returning.
+    if (functionDepth > 0) {
+        if (curDiagnostics && d->declarator) {
+            // A variably-modified (VLA) type is permitted at block scope but
+            // flagged as a warning.
+            bool vm = false;
+            buildTypeFromDeclaration(d->specifiers, d->declarator, false, &vm);
+            if (vm) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Warning;
+                diag.message = "declaration has variably-modified type";
+                diag.span = d->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+        }
+        if (curDiagnostics) {
+            // Block-scope external-linkage object with an initializer is an
+            // error; block-scope `static` is fine (no linkage, C 6.2.2p6).
+            if (d->initializer.has_value()
+                && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "declaration at block scope with external linkage shall not have an initializer";
+                diag.span = d->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+            // C 6.7.1: a block-scope function declaration shall have no explicit
+            // storage-class specifier other than extern.
+            if (d->declarator && isFunctionDeclarator(d->declarator)
+                && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)
+                && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+                    || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Auto)
+                    || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register))) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "function with block scope shall have no explicit storage-class";
+                diag.span = d->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+        }
+        return;
+    }
     // perform a simple declaration compatibility check based on compact signature
     if (d->declarator) {
         std::string name = declaratorName(d->declarator);
@@ -1134,6 +1182,14 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             bool isDef = false;
             if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern) && d->initializer.has_value()) isDef = true;
             if (!d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) isDef = true;
+            // A bodyless function declaration (prototype) is NOT a definition,
+            // even though it has no `extern`. Only function definitions (with
+            // a compound-statement body) reach this code path through
+            // onFunctionDef — a Declaration whose outermost declarator layer
+            // is Function is always a prototype here.
+            if (d->declarator && d->declarator->kind == Declarator::Kind::Function) {
+                isDef = false;
+            }
             // Compute canonical alignment and numeric value (if possible)
             auto [maybeVal, canon] = computeAlignFromSpecsTU(d->specifiers);
             std::string alignStr = canon;

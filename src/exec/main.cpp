@@ -3,6 +3,7 @@
 #include <string>
 #include <fstream>
 #include <optional>
+#include <cstdlib>
 
 #include <WasmVM.hpp>
 #include "../pp/Preprocessor.hpp"
@@ -12,14 +13,23 @@
 #include "../parser/Parser.hpp"
 #include "../parser/Semantic.hpp"
 #include "../codegen/ModuleCodegen.hpp"
+#include "../codegen/RelocSection.hpp"
+#include "../link/Linker.hpp"
+#include "Sysroot.hpp"
 
-static bool write_module_to_file(const WasmVM::WasmModule& module, const std::string& path) {
+static bool write_module_to_file(const WasmVM::WasmModule& module,
+                                 const std::string& path,
+                                 const wvmcc::codegen::ModuleCodegen* cg = nullptr) {
     std::ofstream ofs(path, std::ios::binary);
     if (!ofs) {
         std::cerr << "error: cannot open output file: " << path << std::endl;
         return false;
     }
     WasmVM::module_encode(module, ofs);
+    // M2-E: append linking / reloc.CODE custom sections in linkable mode.
+    if (cg && cg->getCompileMode() == wvmcc::codegen::CompileMode::Linkable) {
+        wvmcc::codegen::appendRelocSections(ofs, *cg);
+    }
     ofs.flush();
     return true;
 }
@@ -27,21 +37,40 @@ static bool write_module_to_file(const WasmVM::WasmModule& module, const std::st
 struct CommandLineArgs {
     std::string outPath;
     std::optional<std::string> inputPath;
-    std::vector<std::string> includePaths;
+    std::vector<std::string> includePaths;       // -I
+    std::vector<std::string> systemIncludePaths; // -isystem
+    std::vector<std::string> libraryPaths;       // -L
+    std::vector<std::string> linkLibraries;      // -l<name>
+    std::optional<std::string> sysrootFlag;      // --sysroot=<path>
+    std::string mapPath;                         // --map=<path>
     bool dumpAst = false;
     bool preprocessOnly = false; // -E
+    bool compileOnly = false;    // -c
+    bool freestanding = false;   // -ffreestanding
+    bool noStdLib = false;       // -nostdlib
+    bool verbose = false;        // -v
 };
 
 void showHelp() {
     std::cout << "Usage: wvmcc [options] <input>\n"
                  "\n"
                  "Options:\n"
-                 "  -o <file>   Write output wasm to <file> (default: a.wasm)\n"
-                 "  -E          Run preprocessor only and write output to stdout\n"
-                 "  -I <path>   Add header search path (can repeat)\n"
-                 "  -I<path>    Add header search path (attached form)\n"
-                 "  --ast       Dump a simple AST (XML) to stdout\n"
-                 "  -h, --help  Show this help\n"
+                 "  -o <file>       Write output wasm to <file> (default: a.wasm)\n"
+                 "  -c              Compile only — emit a linkable .wasm object, no link\n"
+                 "  -E              Run preprocessor only and write output to stdout\n"
+                 "  -I <path>       Add header search path (can repeat; attached `-I<path>` ok)\n"
+                 "  -isystem <dir>  Add system header search path (between -I and sysroot)\n"
+                 "  -L <dir>        Add archive search path for -l\n"
+                 "  -l<name>        Link `lib<name>.a` from -L or <sysroot>/lib (multiple ok)\n"
+                 "  -nostdlib       Skip default libc linking and crt0 injection\n"
+                 "  -ffreestanding  Emit a self-contained module (no linker step)\n"
+                 "  -v              Verbose mode (link phase boundaries to stderr)\n"
+                 "  --map=<path>    Write a linker map file describing the linked binary\n"
+                 "  --sysroot=<dir> Override sysroot path (also: --sysroot <dir>)\n"
+                 "                  Resolved in order: --sysroot > WVMCC_SYSROOT >\n"
+                 "                  dirname(argv[0])/../share/wvmcc\n"
+                 "  --ast           Dump a simple AST (XML) to stdout\n"
+                 "  -h, --help      Show this help\n"
               << std::endl;
 }
 
@@ -91,6 +120,26 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
             args.preprocessOnly = true;
             continue;
         }
+        if (arg == "-c") {
+            args.compileOnly = true;
+            continue;
+        }
+        if (arg == "-ffreestanding") {
+            args.freestanding = true;
+            continue;
+        }
+        if (arg == "-nostdlib") {
+            args.noStdLib = true;
+            continue;
+        }
+        if (arg == "-v") {
+            args.verbose = true;
+            continue;
+        }
+        if (arg.rfind("--map=", 0) == 0) {
+            args.mapPath = arg.substr(std::string("--map=").size());
+            continue;
+        }
         if (arg == "-o") {
             if (!parseOutputPath(i, argc, argv, args.outPath)) {
                 continue;
@@ -101,6 +150,49 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
             if (!parseIncludePath(i, argc, argv, args.includePaths)) {
                 return 2;
             }
+            continue;
+        }
+        // -isystem <dir>
+        if (arg == "-isystem") {
+            if (i + 1 < argc) {
+                args.systemIncludePaths.push_back(argv[++i]);
+            } else {
+                std::cerr << "error: -isystem requires a path\n";
+                return 2;
+            }
+            continue;
+        }
+        // -L <dir> or -L<dir>
+        if (arg == "-L") {
+            if (i + 1 < argc) {
+                args.libraryPaths.push_back(argv[++i]);
+            } else {
+                std::cerr << "error: -L requires a path\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg.rfind("-L", 0) == 0 && arg.size() > 2) {
+            args.libraryPaths.push_back(arg.substr(2));
+            continue;
+        }
+        // -l<name> (attached form only; -l with separate name is rare)
+        if (arg.rfind("-l", 0) == 0 && arg.size() > 2) {
+            args.linkLibraries.push_back(arg.substr(2));
+            continue;
+        }
+        // --sysroot=<dir> or --sysroot <dir>
+        if (arg == "--sysroot") {
+            if (i + 1 < argc) {
+                args.sysrootFlag = std::string(argv[++i]);
+            } else {
+                std::cerr << "error: --sysroot requires a path\n";
+                return 2;
+            }
+            continue;
+        }
+        if (arg.rfind("--sysroot=", 0) == 0) {
+            args.sysrootFlag = arg.substr(std::string("--sysroot=").size());
             continue;
         }
         parseInputPath(arg, args.inputPath);
@@ -148,9 +240,24 @@ int main(int argc, char** argv) {
         return 2;
     }
 
+    // Resolve sysroot (4-tier: --sysroot > WVMCC_SYSROOT > argv[0]-relative
+    // > unset). The result feeds preprocessor include search (M2-I) and the
+    // future link phase.
+    wvmcc::SysrootEnv srEnv;
+    srEnv.cliFlag = args.sysrootFlag;
+    srEnv.envVar  = std::getenv("WVMCC_SYSROOT");
+    srEnv.argv0   = argc > 0 ? argv[0] : nullptr;
+    auto sysroot = wvmcc::resolveSysroot(srEnv);
+
     wvmcc::Preprocessor pp;
     for (const auto& p : args.includePaths) {
         pp.addIncludePath(p);
+    }
+    for (const auto& p : args.systemIncludePaths) {
+        pp.addSystemIncludePath(p);
+    }
+    if (sysroot) {
+        pp.setSysroot(*sysroot);
     }
     
     if (!pp.open(*args.inputPath)) {
@@ -207,14 +314,97 @@ int main(int argc, char** argv) {
     }
 
     wvmcc::codegen::ModuleCodegen codegen(sem);
+    // M2-F: pass the explicit -ffreestanding flag down to codegen. Default
+    // mode in M2-D is Linkable; -ffreestanding flips it back to M1's
+    // self-contained layout.
+    if (args.freestanding) {
+        codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
+    }
     auto module = codegen.generate(main_translation_unit);
+
+    // Surface codegen diagnostics first: a codegen error (unimplemented
+    // construct, undeclared identifier, …) is the root cause, whereas the
+    // subsequent module_validate failure is just its downstream symptom.
+    const auto& codegenDiags = codegen.getDiagnostics();
+    if (!codegenDiags.empty()) {
+        printDiagnostics(codegenDiags);
+        bool hasError = false;
+        for (const auto& d : codegenDiags) {
+            if (d.severity == wvmcc::Diagnostic::Severity::Error) { hasError = true; break; }
+        }
+        if (hasError) return 1;
+    }
+
     if (auto err = WasmVM::module_validate(module)) {
         std::cerr << "error: module validation failed: " << err->what() << std::endl;
+        if (std::getenv("WVMCC_DUMP_INVALID")) {
+            const std::string dt = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
+            write_module_to_file(module, dt, &codegen);
+            std::cerr << "(dumped invalid module to " << dt << ")\n";
+        }
         return 1;
     }
+
     const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
-    if (!write_module_to_file(module, target)) {
+
+    // Three output paths:
+    //   -ffreestanding  → self-contained module straight to disk (M1 path)
+    //   -c              → linkable object straight to disk (with reloc.CODE)
+    //   neither         → run the integrated linker (M2-L1..L10)
+    if (args.freestanding || args.compileOnly) {
+        if (!write_module_to_file(module, target, &codegen)) return 1;
+        return 0;
+    }
+
+    // Linker path.
+    wvmcc::link::LinkOptions linkOpts;
+    linkOpts.verbose = args.verbose;
+    linkOpts.no_stdlib = args.noStdLib;
+    linkOpts.map_path = args.mapPath;
+    if (sysroot) linkOpts.sysroot = *sysroot;
+
+    std::vector<wvmcc::link::LinkInput> linkInputs;
+    {
+        wvmcc::link::LinkInput::InMemoryModule mod{std::move(module), *args.inputPath};
+        wvmcc::link::LinkInput in;
+        in.source = std::move(mod);
+        linkInputs.push_back(std::move(in));
+    }
+    // Library archives (M2-L4 will pull from these lazily). For now archive
+    // inputs cause the linker to error.
+    for (const auto& lib : args.linkLibraries) {
+        wvmcc::link::LinkInput::ArchivePath ap{"-l" + lib};
+        wvmcc::link::LinkInput in;
+        in.source = std::move(ap);
+        linkInputs.push_back(std::move(in));
+    }
+
+    auto linkResult = wvmcc::link::link(std::move(linkInputs), linkOpts);
+
+    if (args.verbose) {
+        for (const auto& line : linkResult.log) {
+            std::cerr << line << "\n";
+        }
+    }
+
+    if (!linkResult.ok) {
+        // Errors were appended to the log; surface them on stderr even
+        // when not verbose.
+        if (!args.verbose) {
+            for (const auto& line : linkResult.log) {
+                if (line.rfind("error:", 0) == 0) std::cerr << line << "\n";
+            }
+        }
         return 1;
     }
+
+    if (auto err = WasmVM::module_validate(linkResult.module)) {
+        std::cerr << "error: linked module validation failed: " << err->what() << std::endl;
+        return 1;
+    }
+
+    // The linker output is the final binary — no reloc.CODE / linking
+    // sections (M2-L8 strips them after applying), so pass nullptr for cg.
+    if (!write_module_to_file(linkResult.module, target, nullptr)) return 1;
     return 0;
 }

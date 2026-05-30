@@ -6,7 +6,12 @@
 
 namespace wvmcc::parser {
 
-Parser::Parser(Lexer &lexer) : lex(lexer) {}
+Parser::Parser(Lexer &lexer) : lex(lexer) {
+    // Predefined builtin typedef-names. __builtin_va_list is the variadic
+    // arg-list cookie; we represent it as a Wasm i64 (a pointer to the
+    // current variadic-arg slot on the shadow stack).
+    typedef_names.insert("__builtin_va_list");
+}
 
 static bool initializerIsConstant(const InitializerPtr &init) {
     if (!init) return false;
@@ -121,6 +126,16 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
         // If identifier and it's a known typedef-name, treat as type-specifier.
         if (t->kind() == TokenKind::Identifier) {
             if (typedef_names.count(t->lexeme())) {
+                // Special-case the builtin va_list typedef: represent as `long`
+                // so the rest of the type system handles it as an i64 scalar.
+                if (t->lexeme() == "__builtin_va_list") {
+                    DeclarationSpecifiers::TypeSpecifier ts;
+                    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+                    ts.simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Long);
+                    specs.typeSpecifiers.push_back(ts);
+                    lex.next();
+                    continue;
+                }
                 DeclarationSpecifiers::TypeSpecifier ts;
                 ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::TypedefName;
                 ts.text = t->lexeme();
@@ -444,17 +459,14 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
 
 StructDeclarator Parser::parseStructDeclarator() {
     StructDeclarator sd;
-    // optional declarator
-    if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || lex.peek()->kind() == TokenKind::Punctuator)) {
-        // accept identifier as declarator-id
-        if (lex.peek()->kind() == TokenKind::Identifier) {
-            auto id = make_ast<Declarator>();
-            id->id.name = lex.peek()->lexeme();
-            sd.declarator = id;
-            lex.next();
-        } else {
-            // other declarator forms (not fully implemented): leave declarator null and continue
-        }
+    // optional declarator. A struct-declarator may omit the declarator only
+    // for an anonymous bit-field (`: width`); otherwise parse a full
+    // declarator so pointer / array / function members are handled (and, in
+    // particular, so the lexer always advances — a `*p` member used to fall
+    // through the old identifier-only path consuming nothing, hanging the
+    // enclosing parseStructDeclarationList loop forever).
+    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
+        sd.declarator = parseDeclarator();
     }
 
     // optional bit-field width
@@ -561,8 +573,18 @@ DeclaratorPtr Parser::parseDeclarator() {
             std::vector<Parameter> params;
             std::vector<std::string> idlist;
             bool hasParamTypeList = false;
+            bool isVariadic = false;
 
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                // `...` before any named parameter is illegal in C.
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "...") {
+                    wvmcc::Diagnostic d;
+                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                    d.message = "'...' requires at least one named parameter";
+                    d.span = lex.peek()->span;
+                    diagnostics.push_back(std::move(d));
+                    lex.next(); // consume to recover
+                }
                 // heuristics: if it starts with a type keyword or a typedef-name treat as parameter-type-list
                 if (lex.peek() && (lex.peek()->kind() == TokenKind::Keyword || (lex.peek()->kind() == TokenKind::Identifier && typedef_names.count(lex.peek()->lexeme())))) {
                     hasParamTypeList = true;
@@ -578,6 +600,18 @@ DeclaratorPtr Parser::parseDeclarator() {
                         params.push_back(param);
                         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
                             lex.next();
+                            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "...") {
+                                lex.next();
+                                isVariadic = true;
+                                if (lex.peek() && !(lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                                    wvmcc::Diagnostic d;
+                                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                                    d.message = "'...' must be the last parameter";
+                                    d.span = lex.peek()->span;
+                                    diagnostics.push_back(std::move(d));
+                                }
+                                break;
+                            }
                             if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") break;
                             continue;
                         }
@@ -606,6 +640,7 @@ DeclaratorPtr Parser::parseDeclarator() {
             fn->kind = Declarator::Kind::Function;
             fn->function.params = params;
             fn->function.hasParamTypeList = hasParamTypeList;
+            fn->function.isVariadic = isVariadic;
             fn->function.identifierList = idlist;
             fn->inner = d;
             d = fn;
@@ -680,6 +715,10 @@ TranslationUnitPtr Parser::parseTranslationUnit() {
         // parse external declaration; on error we recover and continue
         auto ext = parseExternalDecl();
         if (ext) tu->externals.push_back(ext);
+        // A multi-declarator declaration (`int a, b;`) yields extra nodes
+        // queued during the call above — flush them in source order.
+        for (auto& pend : pendingExternals_) tu->externals.push_back(pend);
+        pendingExternals_.clear();
     }
     return tu;
 }
@@ -865,16 +904,21 @@ ExternalDeclPtr Parser::parseExternalDecl() {
 
             return ext;
         } else {
-                auto d = parseDeclaration(specs, decl);
-                if (!d) return nullptr;
-                d->gnuAttributes = std::move(gnuAttrs);
-                // static/thread storage duration initializers must be constant (C 6.7.9 constraint 4)
-                if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
-                    // semantic check (constant initializer) moved to Semantic pass
+                // Function declarator not followed by '{' → prototype/declaration.
+                // Still an init-declarator-list (`int f(void), x;`), so emit one
+                // ExternalDecl per declarator (first returned, rest queued).
+                auto decls = parseInitDeclaratorList(specs, decl);
+                if (decls.empty()) return nullptr;
+                ExternalDeclPtr firstExt = nullptr;
+                for (size_t i = 0; i < decls.size(); ++i) {
+                    auto& d = decls[i];
+                    if (i == 0) d->gnuAttributes = std::move(gnuAttrs);
+                    auto ext = make_ast_with_span<ExternalDecl>(d->span);
+                    ext->decl = d;
+                    if (i == 0) firstExt = ext;
+                    else pendingExternals_.push_back(ext);
                 }
-                auto ext = make_ast_with_span<ExternalDecl>(d->span);
-                ext->decl = d;
-                return ext;
+                return firstExt;
         }
     }
 
@@ -888,49 +932,57 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         return ext;
     }
 
-    // otherwise, if we have a declarator (non-function) treat as declaration
+    // otherwise, if we have a declarator (non-function) treat as declaration.
+    // A multi-declarator declaration (`int a, b;`) yields one ExternalDecl per
+    // init-declarator: the first is returned, the rest queued in pendingExternals_.
     if (decl) {
-        auto d = parseDeclaration(specs, decl);
-        if (!d) return nullptr;
-        d->gnuAttributes = std::move(gnuAttrs);
-        // If this declaration has static/thread storage duration, its initializer
-        // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
-        if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
-            if (!initializerIsConstant(*d->initializer)) {
-                wvmcc::Diagnostic diag;
-                diag.severity = wvmcc::Diagnostic::Severity::Error;
-                diag.message = "initializer for object with static storage duration must be constant expression or string literal";
-                diag.span = d->span;
-                diagnostics.push_back(std::move(diag));
-            }
-        }
-        // For object declarations with internal linkage (static): tentative/definitive semantics
-            if (!decl->id.name.empty() && specs.hasStorage(StorageClass::Static)) {
-            std::string nm = decl->id.name;
-            bool is_definitive = d->initializer.has_value();
-            auto it = internal_definitions.find(nm);
-            if (is_definitive) {
-                // if previously definitive, emit duplicate internal definition error (constraint-level)
-                if (it != internal_definitions.end() && it->second.second) {
-                    wvmcc::Diagnostic dd;
-                    dd.severity = wvmcc::Diagnostic::Severity::Error;
-                    dd.message = "duplicate internal definition of '" + nm + "' in translation unit";
-                    dd.span = d->span;
-                    diagnostics.push_back(std::move(dd));
-                    it->second = std::make_pair(d->span, true);
-                } else if (it != internal_definitions.end()) {
-                    it->second = std::make_pair(d->span, true);
-                } else {
-                    internal_definitions[nm] = std::make_pair(d->span, true);
+        auto decls = parseInitDeclaratorList(specs, decl);
+        if (decls.empty()) return nullptr;
+        ExternalDeclPtr firstExt = nullptr;
+        for (size_t i = 0; i < decls.size(); ++i) {
+            auto& d = decls[i];
+            if (i == 0) d->gnuAttributes = std::move(gnuAttrs);
+            // If this declaration has static/thread storage duration, its initializer
+            // expressions must be constant expressions or string literals (C 6.7.9 constraint 4).
+            if (d->initializer.has_value() && (specs.hasStorage(StorageClass::Static) || specs.hasStorage(StorageClass::ThreadLocal))) {
+                if (!initializerIsConstant(*d->initializer)) {
+                    wvmcc::Diagnostic diag;
+                    diag.severity = wvmcc::Diagnostic::Severity::Error;
+                    diag.message = "initializer for object with static storage duration must be constant expression or string literal";
+                    diag.span = d->span;
+                    diagnostics.push_back(std::move(diag));
                 }
-            } else {
-                if (it == internal_definitions.end()) internal_definitions[nm] = std::make_pair(d->span, false);
             }
-        }
+            // For object declarations with internal linkage (static): tentative/definitive semantics
+            std::string nm = d->declarator ? d->declarator->id.name : std::string();
+            if (!nm.empty() && specs.hasStorage(StorageClass::Static)) {
+                bool is_definitive = d->initializer.has_value();
+                auto it = internal_definitions.find(nm);
+                if (is_definitive) {
+                    // if previously definitive, emit duplicate internal definition error (constraint-level)
+                    if (it != internal_definitions.end() && it->second.second) {
+                        wvmcc::Diagnostic dd;
+                        dd.severity = wvmcc::Diagnostic::Severity::Error;
+                        dd.message = "duplicate internal definition of '" + nm + "' in translation unit";
+                        dd.span = d->span;
+                        diagnostics.push_back(std::move(dd));
+                        it->second = std::make_pair(d->span, true);
+                    } else if (it != internal_definitions.end()) {
+                        it->second = std::make_pair(d->span, true);
+                    } else {
+                        internal_definitions[nm] = std::make_pair(d->span, true);
+                    }
+                } else {
+                    if (it == internal_definitions.end()) internal_definitions[nm] = std::make_pair(d->span, false);
+                }
+            }
 
-        auto ext = make_ast_with_span<ExternalDecl>(d->span);
-        ext->decl = d;
-        return ext;
+            auto ext = make_ast_with_span<ExternalDecl>(d->span);
+            ext->decl = d;
+            if (i == 0) firstExt = ext;
+            else pendingExternals_.push_back(ext);
+        }
+        return firstExt;
     }
 
     // fallback recovery: emit a diagnostic and synchronize to the next ';'
@@ -964,6 +1016,7 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     for (auto cur = decl; cur; cur = cur->inner.has_value() ? *cur->inner : nullptr) {
         if (cur->kind == Declarator::Kind::Function) {
             f->params = cur->function.params;
+            f->isVariadic = cur->function.isVariadic;
             break;
         }
     }
@@ -973,11 +1026,22 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
     gotos_in_current_function.clear();
     stmt_context_stack.clear();
     current_function_specs = specs;
+    // Walk the declarator chain: any Pointer layer between the outer Function
+    // layer and the inner Identifier means the return type is a pointer.
+    current_function_returns_pointer = false;
+    for (auto cur = f->declarator; cur; cur = cur->inner.value_or(nullptr)) {
+        if (cur->kind == Declarator::Kind::Pointer) {
+            current_function_returns_pointer = true;
+            break;
+        }
+        if (!cur->inner.has_value()) break;
+    }
     f->body = parseCompoundBody();
     // validate gotos: each goto must name an existing label in this function
     // (defer reporting to Semantic pass)
     // clear current function speculative state
     current_function_specs.reset();
+    current_function_returns_pointer = false;
     return f;
 }
 
@@ -1077,7 +1141,44 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     return decl;
 }
 
+std::vector<DeclarationPtr> Parser::parseInitDeclaratorList(const DeclarationSpecifiers& specs,
+                                                            const DeclaratorPtr &first) {
+    std::vector<DeclarationPtr> out;
+    DeclaratorPtr cur = first;
+    while (true) {
+        auto decl = make_ast<Declaration>();
+        decl->specifiers = specs;
+        decl->declarator = cur;
+        // optional `= initializer` (assignment-expression or brace-list; both
+        // stop at a top-level comma, so they don't swallow the next declarator)
+        if (auto p = lex.peek(); p && p->kind() == TokenKind::Punctuator && p->lexeme() == "=") {
+            lex.next();
+            decl->initializer = parseInitializer();
+        }
+        // a declared typedef-name must be recognized for later declarations
+        if (specs.hasStorage(StorageClass::Typedef)
+            && decl->declarator && !decl->declarator->id.name.empty()) {
+            typedef_names.insert(decl->declarator->id.name);
+        }
+        out.push_back(std::move(decl));
 
+        auto p = lex.peek();
+        if (p && p->kind() == TokenKind::Punctuator && p->lexeme() == ",") {
+            lex.next();                 // consume ',' and parse the next declarator
+            cur = parseDeclarator();
+            if (!cur) break;
+            continue;
+        }
+        break;
+    }
+    // consume the terminating ';' (skip any stray tokens up to it for recovery)
+    while (auto p = lex.peek()) {
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == ";") { lex.next(); break; }
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") break; // don't cross block end
+        lex.next();
+    }
+    return out;
+}
 
 std::vector<BlockItemPtr> Parser::parseCompoundBody() {
     std::vector<BlockItemPtr> body;
@@ -1088,7 +1189,11 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             lex.next();
             auto rs = make_ast<ReturnStmt>();
             rs->span = p->span;
-            rs->value = parseExpression();
+            auto returnExpr = parseExpression();
+            // `return;` (no expression) leaves parseExpression with nullptr.
+            // Don't wrap nullptr in the optional or downstream checks will
+            // think we have an expression that's been silently lost.
+            if (returnExpr) rs->value = returnExpr;
             if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
             // validate return vs function return type if available
             if (current_function_specs.has_value()) {
@@ -1100,6 +1205,8 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                         }
                     }
                 }
+                // `void *f(...)` returns a pointer-to-void, not void.
+                if (current_function_returns_pointer) funcVoid = false;
                 if (rs->value.has_value() && funcVoid) {
                     wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "return with expression in function returning void"; d.span = rs->span; diagnostics.push_back(std::move(d));
                 }
@@ -1221,21 +1328,32 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 if (lex.peek() && (lex.peek()->kind() == TokenKind::Identifier || (lex.peek()->kind() == TokenKind::Punctuator && (lex.peek()->lexeme() == "(" || lex.peek()->lexeme() == "*")))) {
                     maybeDeclr = parseDeclarator();
                 }
-                auto decl = parseDeclaration(specs, maybeDeclr);
-                auto bi = make_ast<BlockItem>();
-                bi->item = decl;
-                // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
-                // external linkage, the declaration shall have no initializer. Block-scope
-                // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
-                // permitted (and are evaluated once on first call).
-                if (decl && decl->initializer.has_value() && specs.hasStorage(StorageClass::Extern)) {
-                    wvmcc::Diagnostic diag;
-                    diag.severity = wvmcc::Diagnostic::Severity::Error;
-                    diag.message = "declaration at block scope with external linkage shall not have an initializer";
-                    diag.span = decl->span;
-                    diagnostics.push_back(std::move(diag));
+                // Type-only declaration (e.g. `struct S { … };`) keeps the old
+                // single-node path; a declarator starts an init-declarator-list
+                // so `int x, y;` yields one BlockItem per declarator.
+                if (!maybeDeclr) {
+                    auto decl = parseDeclaration(specs, maybeDeclr);
+                    auto bi = make_ast<BlockItem>();
+                    bi->item = decl;
+                    body.push_back(bi);
+                    continue;
                 }
-                body.push_back(bi);
+                for (auto& decl : parseInitDeclaratorList(specs, maybeDeclr)) {
+                    auto bi = make_ast<BlockItem>();
+                    bi->item = decl;
+                    // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
+                    // external linkage, the declaration shall have no initializer. Block-scope
+                    // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
+                    // permitted (and are evaluated once on first call).
+                    if (decl && decl->initializer.has_value() && specs.hasStorage(StorageClass::Extern)) {
+                        wvmcc::Diagnostic diag;
+                        diag.severity = wvmcc::Diagnostic::Severity::Error;
+                        diag.message = "declaration at block scope with external linkage shall not have an initializer";
+                        diag.span = decl->span;
+                        diagnostics.push_back(std::move(diag));
+                    }
+                    body.push_back(bi);
+                }
                 continue;
             }
             // if we started with a keyword and no declaration specifiers were parsed,
@@ -1567,9 +1685,47 @@ ExprPtr Parser::parsePrimary() {
         auto il = make_ast<IntegerLiteral>();
         il->span = tok.span;
         il->raw = tok.lexeme();
-        try { il->value = std::stoll(il->raw); } catch (...) { il->value = 0; }
+        // Prefer the lexer's already-resolved value: it parsed the constant
+        // with the correct base (0x hex, leading-0 octal) and stripped any
+        // u/l suffix. The std::stoll fallback defaults to base 10 and would
+        // truncate "0xff" to 0 (reads "0", stops at 'x'); base 0 lets it
+        // auto-detect the radix for the rare path where the variant is absent.
+        if (auto* itok = std::get_if<IntegerToken>(&tok.v)) {
+            il->value = (std::int64_t)itok->info.value;
+        } else {
+            try { il->value = std::stoll(il->raw, nullptr, 0); } catch (...) { il->value = 0; }
+        }
         il->kind = Expr::Kind::Integer;
         return il;
+    }
+    if (t->kind() == TokenKind::CharacterConstant) {
+        auto tok = *lex.next();
+        auto cl = make_ast<CharLiteral>();
+        cl->span = tok.span;
+        // Extract the decoded numeric value out of the CharacterToken variant.
+        if (auto* ct = std::get_if<CharacterToken>(&tok.v)) {
+            cl->value = (char)(ct->info.value & 0xff);
+        }
+        cl->kind = Expr::Kind::Char;
+        return cl;
+    }
+    if (t->kind() == TokenKind::FloatingConstant) {
+        auto tok = *lex.next();
+        auto fl = make_ast<FloatLiteral>();
+        fl->span = tok.span;
+        fl->raw = tok.lexeme();
+        // Detect suffix (f/F/l/L). Strip before stod.
+        bool isFloat = false;
+        std::string body = fl->raw;
+        if (!body.empty()) {
+            char last = body.back();
+            if (last == 'f' || last == 'F') { isFloat = true; body.pop_back(); }
+            else if (last == 'l' || last == 'L') { body.pop_back(); }
+        }
+        try { fl->value = std::stod(body); } catch (...) { fl->value = 0.0; }
+        fl->isFloat = isFloat;
+        fl->kind = Expr::Kind::Float;
+        return fl;
     }
     if (t->kind() == TokenKind::Identifier) {
         auto tok = *lex.next();
@@ -1743,7 +1899,22 @@ ExprPtr Parser::parsePrimary() {
         return inner;
     }
 
-    // fallback: consume token and produce identifier-like node
+    // No valid primary here. Return nullptr so callers (parseExpression,
+    // parseAssignmentExpression, etc.) can report "no expression" — letting
+    // `return;` correctly produce a value-less return, for instance.
+    // Statement-terminator punctuators in particular must NEVER be consumed
+    // by the expression parser.
+    if (auto tok = lex.peek()) {
+        if (tok->kind() == TokenKind::Punctuator) {
+            const auto& lx = tok->lexeme();
+            if (lx == ";" || lx == ")" || lx == "}" || lx == "]" || lx == ",") {
+                return nullptr;
+            }
+        }
+    }
+    // Last-resort fallback for genuinely unrecognized tokens — produce a
+    // synthetic identifier so the rest of the parser can recover. Skipping
+    // this would drop user code from the AST silently.
     auto tok = *lex.next();
     auto id = make_ast<IdentifierExpr>();
     id->span = tok.span;
@@ -1860,8 +2031,7 @@ ExprPtr Parser::parseUnaryExpression() {
                         if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in sizeof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
                     } else lex.next();
                     auto se = make_ast<SizeofExpr>();
-                    se->type = make_ast<TypeNode>();
-                    se->type.value()->kind = TypeNode::Kind::Builtin; se->type.value()->text = "type"; // minimal
+                    se->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
                     se->expr = nullptr;
                     se->kind = Expr::Kind::Sizeof;
                     se->span = t->span;
@@ -1899,6 +2069,7 @@ ExprPtr Parser::parseUnaryExpression() {
                 if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in _Alignof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
             } else lex.next();
             auto ae = make_ast<AlignOfExpr>();
+            ae->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
             ae->type = make_ast<TypeNode>();
             ae->type->kind = TypeNode::Kind::Builtin; ae->type->text = "type";
             // build a simple textual representation of the parsed type-specifiers
@@ -1974,6 +2145,70 @@ ExprPtr Parser::applyPostfixSuffix(ExprPtr lhs) {
             lhs = ie; continue;
         }
         if (p == "(") {
+            // Special-case __builtin_va_arg(expr, type-name): second arg is a
+            // type-name, not an expression. Build a CallExpr with vaArgType
+            // populated so codegen can size/load the slot correctly.
+            bool isVaArg = false;
+            if (lhs && lhs->kind == Expr::Kind::Ident) {
+                const auto& id = static_cast<const IdentifierExpr&>(*lhs);
+                if (id.name == "__builtin_va_arg") isVaArg = true;
+            }
+            if (isVaArg) {
+                lex.next(); // '('
+                std::vector<ExprPtr> args;
+                ExprPtr apExpr = parseAssignmentExpression();
+                args.push_back(apExpr);
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") {
+                    lex.next();
+                } else {
+                    wvmcc::Diagnostic d;
+                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                    d.message = "__builtin_va_arg expects (va_list, type-name)";
+                    if (lex.peek()) d.span = lex.peek()->span;
+                    diagnostics.push_back(std::move(d));
+                }
+                // Parse the type-name as declaration-specifiers + optional abstract declarator.
+                auto vaSpecs = parseDeclarationSpecifiers();
+                bool sawPointer = false;
+                while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "*") {
+                    lex.next();
+                    sawPointer = true;
+                    // skip qualifiers after '*'
+                    while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+                        std::string qk = lex.peek()->lexeme();
+                        if (qk == "const" || qk == "volatile" || qk == "restrict" || qk == "_Atomic") {
+                            lex.next();
+                        } else break;
+                    }
+                }
+                if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") {
+                    lex.next();
+                }
+                // Build a TypeNode from the parsed specifiers.
+                auto tn = make_ast<TypeNode>();
+                if (!vaSpecs.typeSpecifiers.empty()
+                    && vaSpecs.typeSpecifiers[0].kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                    tn->kind = TypeNode::Kind::Builtin;
+                    tn->simple = vaSpecs.typeSpecifiers[0].simple;
+                } else {
+                    tn->kind = TypeNode::Kind::Builtin;
+                }
+                if (sawPointer) {
+                    auto ptr = make_ast<TypeNode>();
+                    ptr->kind = TypeNode::Kind::Pointer;
+                    ptr->pointee = tn;
+                    tn = ptr;
+                }
+                auto ce = make_ast<CallExpr>();
+                ce->callee = lhs;
+                ce->args = std::move(args);
+                ce->vaArgType = tn;
+                ce->kind = Expr::Kind::Call;
+                ce->span = lhs->span;
+                lhs = ce;
+                continue;
+            }
+
             lex.next();
             std::vector<ExprPtr> args;
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
@@ -2197,7 +2432,10 @@ ExprPtr Parser::parseCastExpression() {
             if (t->kind() == TokenKind::Keyword) {
                 static const std::unordered_set<std::string> types = {
                     "void","char","short","int","long","float","double","signed","unsigned",
-                    "_Bool","_Complex","_Imaginary","struct","union","enum"
+                    "_Bool","_Complex","_Imaginary","struct","union","enum",
+                    // Type qualifiers can lead a type-name in a cast:
+                    //   (const unsigned char *)p
+                    "const","volatile","restrict","_Atomic"
                 };
                 if (types.count(t->lexeme())) isTypeNameStart = true;
             } else if (t->kind() == TokenKind::Identifier) {
@@ -2208,7 +2446,22 @@ ExprPtr Parser::parseCastExpression() {
         if (isTypeNameStart) {
             // parse type-name (using declaration specifiers as heuristic)
             auto specs = parseDeclarationSpecifiers();
-            // abstract-declarator not implemented; skip
+            // Minimal abstract-declarator support: count leading `*`s so we
+            // can recognise pointer casts like `(unsigned char *)p`. We don't
+            // attempt array/function abstract declarators yet — they aren't
+            // needed by libc's cast usage and only show up in odd corners.
+            int castPointerDepth = 0;
+            while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator
+                   && lex.peek()->lexeme() == "*") {
+                lex.next();
+                castPointerDepth++;
+                // Skip any qualifier tokens (const/volatile/restrict) after `*`.
+                while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+                    const auto &kw = lex.peek()->lexeme();
+                    if (kw == "const" || kw == "volatile" || kw == "restrict") lex.next();
+                    else break;
+                }
+            }
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
                 if (lex.peek()) {
                     wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in cast"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
@@ -2249,6 +2502,13 @@ ExprPtr Parser::parseCastExpression() {
                 else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
                 else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
             } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+            // Wrap in Pointer layers for each `*` in the abstract declarator.
+            for (int i = 0; i < castPointerDepth; ++i) {
+                auto wrap = make_ast<TypeNode>();
+                wrap->kind = TypeNode::Kind::Pointer;
+                wrap->pointee = tn;
+                tn = wrap;
+            }
             ce->type = tn;
             ce->span = ce->expr ? ce->expr->span : SourceSpan{};
             return ce;

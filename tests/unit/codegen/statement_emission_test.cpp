@@ -290,24 +290,30 @@ static int test_for_no_cond() {
 
     codegen.emitStmt(fs);
 
+    // New structure wraps the body in a $continue block so `continue` runs
+    // the step before re-testing: [Block, Loop, Block, I32_const{0}, Return,
+    //                              End, Br{0}, End, End]
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 7) {
-        std::cerr << "test_for_no_cond: expected 7 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 9) {
+        std::cerr << "test_for_no_cond: expected 9 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[0], WasmVM::Opcode::Block))   { std::cerr << "test_for_no_cond: [0] bad\n"; return 2; }
     if (!is(instrs[1], WasmVM::Opcode::Loop))    { std::cerr << "test_for_no_cond: [1] bad\n"; return 3; }
-    if (!asI32Const(instrs[2]))                  { std::cerr << "test_for_no_cond: [2] bad\n"; return 4; }
-    if (!is(instrs[3], WasmVM::Opcode::Return))  { std::cerr << "test_for_no_cond: [3] bad\n"; return 5; }
-    auto br = asOneIdx(instrs[4], WasmVM::Opcode::Br);
-    if (!br || br->index != 0)                   { std::cerr << "test_for_no_cond: [4] bad\n"; return 6; }
+    if (!is(instrs[2], WasmVM::Opcode::Block))   { std::cerr << "test_for_no_cond: [2] bad\n"; return 4; }
+    if (!asI32Const(instrs[3]))                  { std::cerr << "test_for_no_cond: [3] bad\n"; return 5; }
+    if (!is(instrs[4], WasmVM::Opcode::Return))  { std::cerr << "test_for_no_cond: [4] bad\n"; return 6; }
     if (!is(instrs[5], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [5] bad\n"; return 7; }
-    if (!is(instrs[6], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [6] bad\n"; return 8; }
+    auto br = asOneIdx(instrs[6], WasmVM::Opcode::Br);
+    if (!br || br->index != 0)                   { std::cerr << "test_for_no_cond: [6] bad\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [7] bad\n"; return 9; }
+    if (!is(instrs[8], WasmVM::Opcode::End))     { std::cerr << "test_for_no_cond: [8] bad\n"; return 10; }
     return 0;
 }
 
 // for (;1;) return 0;
-// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, I32_const{0}, Return, Br{0}, End, End]
+// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, Block, I32_const{0},
+//     Return, End, Br{0}, End, End]
 static int test_for_with_cond() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -321,8 +327,8 @@ static int test_for_with_cond() {
     codegen.emitStmt(fs);
 
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 10) {
-        std::cerr << "test_for_with_cond: expected 10 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 12) {
+        std::cerr << "test_for_with_cond: expected 12 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[0], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_cond: [0] bad\n"; return 2; }
@@ -331,18 +337,20 @@ static int test_for_with_cond() {
     if (!is(instrs[3], WasmVM::Opcode::I32_eqz))         { std::cerr << "test_for_with_cond: [3] bad\n"; return 5; }
     auto brif = asOneIdx(instrs[4], WasmVM::Opcode::Br_if);
     if (!brif || brif->index != 1)                       { std::cerr << "test_for_with_cond: [4] bad\n"; return 6; }
-    if (!asI32Const(instrs[5]))                          { std::cerr << "test_for_with_cond: [5] bad\n"; return 7; }
-    if (!is(instrs[6], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_cond: [6] bad\n"; return 8; }
-    auto br = asOneIdx(instrs[7], WasmVM::Opcode::Br);
-    if (!br || br->index != 0)                           { std::cerr << "test_for_with_cond: [7] bad\n"; return 9; }
+    if (!is(instrs[5], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_cond: [5] bad\n"; return 7; }
+    if (!asI32Const(instrs[6]))                          { std::cerr << "test_for_with_cond: [6] bad\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_cond: [7] bad\n"; return 9; }
     if (!is(instrs[8], WasmVM::Opcode::End))             { std::cerr << "test_for_with_cond: [8] bad\n"; return 10; }
-    if (!is(instrs[9], WasmVM::Opcode::End))             { std::cerr << "test_for_with_cond: [9] bad\n"; return 11; }
+    auto br = asOneIdx(instrs[9], WasmVM::Opcode::Br);
+    if (!br || br->index != 0)                           { std::cerr << "test_for_with_cond: [9] bad\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::End))            { std::cerr << "test_for_with_cond: [10] bad\n"; return 12; }
+    if (!is(instrs[11], WasmVM::Opcode::End))            { std::cerr << "test_for_with_cond: [11] bad\n"; return 13; }
     return 0;
 }
 
 // for (;1; 5) return 0;
-// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, I32_const{0}, Return,
-//     I32_const{5}, Drop, Br{0}, End, End]
+// →  [Block, Loop, I32_const{1}, I32_eqz, Br_if{1}, Block, I32_const{0},
+//     Return, End, I32_const{5}, Drop, Br{0}, End, End]
 static int test_for_with_step() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -357,8 +365,8 @@ static int test_for_with_step() {
     codegen.emitStmt(fs);
 
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 12) {
-        std::cerr << "test_for_with_step: expected 12 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 14) {
+        std::cerr << "test_for_with_step: expected 14 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     if (!is(instrs[0], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_step: [0] bad\n"; return 2; }
@@ -367,15 +375,17 @@ static int test_for_with_step() {
     if (!is(instrs[3], WasmVM::Opcode::I32_eqz))         { std::cerr << "test_for_with_step: [3] bad\n"; return 5; }
     auto brif = asOneIdx(instrs[4], WasmVM::Opcode::Br_if);
     if (!brif || brif->index != 1)                       { std::cerr << "test_for_with_step: [4] bad\n"; return 6; }
-    if (!asI32Const(instrs[5]))                          { std::cerr << "test_for_with_step: [5] bad\n"; return 7; }
-    if (!is(instrs[6], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_step: [6] bad\n"; return 8; }
-    auto stepC = asI32Const(instrs[7]);
-    if (!stepC || stepC->value != 5)                     { std::cerr << "test_for_with_step: [7] bad\n"; return 9; }
-    if (!is(instrs[8], WasmVM::Opcode::Drop))            { std::cerr << "test_for_with_step: [8] bad\n"; return 10; }
-    auto br = asOneIdx(instrs[9], WasmVM::Opcode::Br);
-    if (!br || br->index != 0)                           { std::cerr << "test_for_with_step: [9] bad\n"; return 11; }
-    if (!is(instrs[10], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [10] bad\n"; return 12; }
-    if (!is(instrs[11], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [11] bad\n"; return 13; }
+    if (!is(instrs[5], WasmVM::Opcode::Block))           { std::cerr << "test_for_with_step: [5] bad\n"; return 7; }
+    if (!asI32Const(instrs[6]))                          { std::cerr << "test_for_with_step: [6] bad\n"; return 8; }
+    if (!is(instrs[7], WasmVM::Opcode::Return))          { std::cerr << "test_for_with_step: [7] bad\n"; return 9; }
+    if (!is(instrs[8], WasmVM::Opcode::End))             { std::cerr << "test_for_with_step: [8] bad\n"; return 10; }
+    auto stepC = asI32Const(instrs[9]);
+    if (!stepC || stepC->value != 5)                     { std::cerr << "test_for_with_step: [9] bad\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::Drop))           { std::cerr << "test_for_with_step: [10] bad\n"; return 12; }
+    auto br = asOneIdx(instrs[11], WasmVM::Opcode::Br);
+    if (!br || br->index != 0)                           { std::cerr << "test_for_with_step: [11] bad\n"; return 13; }
+    if (!is(instrs[12], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [12] bad\n"; return 14; }
+    if (!is(instrs[13], WasmVM::Opcode::End))            { std::cerr << "test_for_with_step: [13] bad\n"; return 15; }
     return 0;
 }
 
@@ -459,7 +469,8 @@ static int test_local_decl_then_read() {
 }
 
 // for (int i = 0;; ) return i;
-// →  [I32_const{0}, Local_set{0}, Block, Loop, Local_get{0}, Return, Br{0}, End, End]
+// →  [I32_const{0}, Local_set{0}, Block, Loop, Block, Local_get{0}, Return,
+//     End, Br{0}, End, End]
 static int test_for_with_decl_init() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -477,8 +488,8 @@ static int test_for_with_decl_init() {
     codegen.emitStmt(fs);
 
     const auto& instrs = codegen.getInstructions();
-    if (instrs.size() != 9) {
-        std::cerr << "test_for_with_decl_init: expected 9 instrs, got " << instrs.size() << "\n";
+    if (instrs.size() != 11) {
+        std::cerr << "test_for_with_decl_init: expected 11 instrs, got " << instrs.size() << "\n";
         return 1;
     }
     auto c = asI32Const(instrs[0]);
@@ -487,13 +498,15 @@ static int test_for_with_decl_init() {
     if (!ls || ls->index != 0) { std::cerr << "test_for_with_decl_init: [1] bad\n"; return 3; }
     if (!is(instrs[2], WasmVM::Opcode::Block)) { std::cerr << "test_for_with_decl_init: [2] bad\n"; return 4; }
     if (!is(instrs[3], WasmVM::Opcode::Loop))  { std::cerr << "test_for_with_decl_init: [3] bad\n"; return 5; }
-    auto lg = asOneIdx(instrs[4], WasmVM::Opcode::Local_get);
-    if (!lg || lg->index != 0) { std::cerr << "test_for_with_decl_init: [4] bad\n"; return 6; }
-    if (!is(instrs[5], WasmVM::Opcode::Return)) { std::cerr << "test_for_with_decl_init: [5] bad\n"; return 7; }
-    auto br = asOneIdx(instrs[6], WasmVM::Opcode::Br);
-    if (!br || br->index != 0) { std::cerr << "test_for_with_decl_init: [6] bad\n"; return 8; }
+    if (!is(instrs[4], WasmVM::Opcode::Block)) { std::cerr << "test_for_with_decl_init: [4] bad\n"; return 6; }
+    auto lg = asOneIdx(instrs[5], WasmVM::Opcode::Local_get);
+    if (!lg || lg->index != 0) { std::cerr << "test_for_with_decl_init: [5] bad\n"; return 7; }
+    if (!is(instrs[6], WasmVM::Opcode::Return)) { std::cerr << "test_for_with_decl_init: [6] bad\n"; return 8; }
     if (!is(instrs[7], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [7] bad\n"; return 9; }
-    if (!is(instrs[8], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [8] bad\n"; return 10; }
+    auto br = asOneIdx(instrs[8], WasmVM::Opcode::Br);
+    if (!br || br->index != 0) { std::cerr << "test_for_with_decl_init: [8] bad\n"; return 10; }
+    if (!is(instrs[9], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [9] bad\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::End)) { std::cerr << "test_for_with_decl_init: [10] bad\n"; return 12; }
     return 0;
 }
 
@@ -594,21 +607,16 @@ static int test_return_call() {
 
 // Simulate: int f() { int x; (&x); return 0; }
 // x is address-taken → MemoryLocal, frameSize = 4 (sizeof int)
-// Expected final instructions:
-//   [0]  Global_get{0}          // prologue: save SP
-//   [1]  Local_tee{0}           // prologue: fp = saved SP
-//   [2]  I64_const{4}           // prologue: frameSize
-//   [3]  I64_sub                // prologue: new SP = fp - frameSize
-//   [4]  Global_set{0}          // prologue: update SP
-//   [5]  Unreachable            // emitExpr(x) for MemoryLocal (not yet implemented)
-//   [6]  Unreachable            // emitUnaryExpr('&') not yet implemented
-//   [7]  Drop                   // ExprStmt
-//   [8]  I32_const{0}           // return 0
-//   [9]  Local_get{0}           // epilogue before return: get fp
-//   [10] Global_set{0}          // epilogue before return: restore SP
-//   [11] Return
-//   [12] Local_get{0}           // epilogue at end (fallthrough)
-//   [13] Global_set{0}
+// Expected final instructions (M2-B prologue: fp = *new* SP at bottom of
+// frame; epilogue restores SP = fp + frameSize):
+//   [0]  Global_get{0}          // prologue: push old SP
+//   [1]  I64_const{4}           // prologue: frameSize
+//   [2]  I64_sub                // prologue: new SP = old SP - frameSize
+//   [3]  Local_tee{0}           // prologue: fp = new SP
+//   [4]  Global_set{0}          // prologue: commit new SP
+//   [5–...] body...
+//   epilogue before each return / at function end:
+//     Local_get{fp}; I64_const{frameSize}; I64_add; Global_set{0}
 static int test_memory_local_prologue_epilogue() {
     TypeMap typeMap;
     SymbolTable symbolTable;
@@ -652,54 +660,63 @@ static int test_memory_local_prologue_epilogue() {
     if (!is(instrs[0], WasmVM::Opcode::Global_get)) {
         std::cerr << "test_memory_local_prologue_epilogue: [0] expected Global_get\n"; return 2;
     }
-    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
-    if (!ltee) {
-        std::cerr << "test_memory_local_prologue_epilogue: [1] expected Local_tee\n"; return 3;
-    }
-    auto fsize = asI64Const(instrs[2]);
+    auto fsize = asI64Const(instrs[1]);
     if (!fsize || fsize->value != 4) {
-        std::cerr << "test_memory_local_prologue_epilogue: [2] expected I64_const{4}, got "
-                  << (fsize ? std::to_string(fsize->value) : "?") << "\n"; return 4;
+        std::cerr << "test_memory_local_prologue_epilogue: [1] expected I64_const{4}, got "
+                  << (fsize ? std::to_string(fsize->value) : "?") << "\n"; return 3;
     }
-    if (!is(instrs[3], WasmVM::Opcode::I64_sub)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [3] expected I64_sub\n"; return 5;
+    if (!is(instrs[2], WasmVM::Opcode::I64_sub)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [2] expected I64_sub\n"; return 4;
+    }
+    auto ltee = asOneIdx(instrs[3], WasmVM::Opcode::Local_tee);
+    if (!ltee) {
+        std::cerr << "test_memory_local_prologue_epilogue: [3] expected Local_tee{fp}\n"; return 5;
     }
     if (!is(instrs[4], WasmVM::Opcode::Global_set)) {
         std::cerr << "test_memory_local_prologue_epilogue: [4] expected Global_set\n"; return 6;
     }
 
-    // (&x) now correctly emits: Local_get{fp}, I64_const{0}, I64_add, Drop  (4 instrs)
-    // return 0: I32_const{0}, Local_get{fp}, Global_set, Return              (4 instrs)
-    // epilogue at end: Local_get{fp}, Global_set                             (2 instrs)
-    // End{}                                                                  (1 instr)
-    // Total: 5 prologue + 4 body + 4 return + 2 epilogue + 1 end = 16
-    if (instrs.size() != 16) {
-        std::cerr << "test_memory_local_prologue_epilogue: expected 16 instrs, got " << instrs.size() << "\n";
+    // Body: (&x) → Local_get{fp}, I64_const{0}, I64_add, I64_const{1<<60},
+    //   I64_or (mem[1] pointer tag), Drop                                   (6 instrs)
+    // Return: I32_const{0}, [epilogue Local_get fp, I64_const, I64_add,
+    //   Global_set] (4), Return                                             (6 instrs)
+    // Fallthrough epilogue: Local_get{fp}, I64_const, I64_add, Global_set   (4 instrs)
+    // End                                                                   (1 instr)
+    // Total: 5 prologue + 6 body + 6 return-w-epilogue + 4 trailing + 1 end = 22
+    if (instrs.size() != 22) {
+        std::cerr << "test_memory_local_prologue_epilogue: expected 22 instrs, got " << instrs.size() << "\n";
         return 7;
     }
 
-    // epilogue before Return: instrs[10]=Local_get{fp}, [11]=Global_set, [12]=Return
-    auto fpGet = asOneIdx(instrs[10], WasmVM::Opcode::Local_get);
+    // Return-side epilogue: instrs[12..15]
+    auto fpGet = asOneIdx(instrs[12], WasmVM::Opcode::Local_get);
     if (!fpGet || fpGet->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [10] expected Local_get{fp}\n"; return 8;
+        std::cerr << "test_memory_local_prologue_epilogue: [12] expected Local_get{fp}\n"; return 8;
     }
-    if (!is(instrs[11], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [11] expected Global_set\n"; return 9;
+    auto fpConst = asI64Const(instrs[13]);
+    if (!fpConst || fpConst->value != 4) {
+        std::cerr << "test_memory_local_prologue_epilogue: [13] expected I64_const{4}\n"; return 9;
     }
-    if (!is(instrs[12], WasmVM::Opcode::Return)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [12] expected Return\n"; return 10;
+    if (!is(instrs[14], WasmVM::Opcode::I64_add)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [14] expected I64_add\n"; return 10;
+    }
+    if (!is(instrs[15], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [15] expected Global_set\n"; return 11;
+    }
+    if (!is(instrs[16], WasmVM::Opcode::Return)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [16] expected Return\n"; return 12;
     }
 
-    // epilogue at end: instrs[13]=Local_get{fp}, [14]=Global_set, [15]=End
-    auto fpGet2 = asOneIdx(instrs[13], WasmVM::Opcode::Local_get);
+    // Trailing fallthrough epilogue: instrs[17..20]
+    auto fpGet2 = asOneIdx(instrs[17], WasmVM::Opcode::Local_get);
     if (!fpGet2 || fpGet2->index != ltee->index) {
-        std::cerr << "test_memory_local_prologue_epilogue: [13] expected Local_get{fp}\n"; return 11;
+        std::cerr << "test_memory_local_prologue_epilogue: [17] expected Local_get{fp}\n"; return 13;
     }
-    if (!is(instrs[14], WasmVM::Opcode::Global_set)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [14] expected Global_set\n"; return 12;
+    if (!is(instrs[20], WasmVM::Opcode::Global_set)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [20] expected Global_set\n"; return 14;
     }
-    if (!is(instrs[15], WasmVM::Opcode::End)) {
-        std::cerr << "test_memory_local_prologue_epilogue: [15] expected End\n"; return 13;
+    if (!is(instrs[21], WasmVM::Opcode::End)) {
+        std::cerr << "test_memory_local_prologue_epilogue: [21] expected End\n"; return 15;
     }
     return 0;
 }
@@ -828,32 +845,48 @@ static int test_ac1_shadow_stack_address_sequence() {
 
     const auto& instrs = wf.body;
 
-    // Prologue (x is address-taken → shadow stack): Global_get, Local_tee{fp}, I64_const{4}, I64_sub, Global_set
+    // Prologue (x is address-taken → shadow stack):
+    //   Global_get, I64_const{4}, I64_sub, Local_tee{fp}, Global_set
+    // (fp now points to the *new* SP at the bottom of the frame so that
+    // memory-resident locals at offset `o` live at fp+o.)
     if (instrs.size() < 5) { std::cerr << "AC1: too few instrs (" << instrs.size() << ")\n"; return 1; }
     if (!is(instrs[0], WasmVM::Opcode::Global_get)) { std::cerr << "AC1: [0] expected Global_get (prologue)\n"; return 2; }
-    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
-    if (!ltee) { std::cerr << "AC1: [1] expected Local_tee{fp} (prologue)\n"; return 3; }
-    auto fsize = asI64Const(instrs[2]);
-    if (!fsize || fsize->value != 4) { std::cerr << "AC1: [2] expected I64_const{4} (frame size=4 for int x)\n"; return 4; }
-    if (!is(instrs[3], WasmVM::Opcode::I64_sub)) { std::cerr << "AC1: [3] expected I64_sub (prologue)\n"; return 5; }
+    auto fsize = asI64Const(instrs[1]);
+    if (!fsize || fsize->value != 4) { std::cerr << "AC1: [1] expected I64_const{4} (frame size=4 for int x)\n"; return 3; }
+    if (!is(instrs[2], WasmVM::Opcode::I64_sub)) { std::cerr << "AC1: [2] expected I64_sub (prologue)\n"; return 4; }
+    auto ltee = asOneIdx(instrs[3], WasmVM::Opcode::Local_tee);
+    if (!ltee) { std::cerr << "AC1: [3] expected Local_tee{fp} (prologue)\n"; return 5; }
     if (!is(instrs[4], WasmVM::Opcode::Global_set)) { std::cerr << "AC1: [4] expected Global_set (prologue)\n"; return 6; }
 
-    // &x → shadow-stack address of x at offset 0: Local_get{fp}, I64_const{0}, I64_add
-    // followed by Local_set{p}
+    // &x → shadow-stack address of x at offset 0, then TAGGED with the mem[1]
+    // nibble so it can be dereferenced through an opaque pointer:
+    //   Local_get{fp}, I64_const{0}, I64_add, I64_const{mem1 tag}, I64_or, Local_set{p}
     auto lgFp = asOneIdx(instrs[5], WasmVM::Opcode::Local_get);
     if (!lgFp || lgFp->index != ltee->index) { std::cerr << "AC1: [5] expected Local_get{fp} (&x part 1)\n"; return 7; }
     auto xOff = asI64Const(instrs[6]);
     if (!xOff || xOff->value != 0) { std::cerr << "AC1: [6] expected I64_const{0} (x at frame offset 0)\n"; return 8; }
     if (!is(instrs[7], WasmVM::Opcode::I64_add)) { std::cerr << "AC1: [7] expected I64_add (shadow-stack address of x)\n"; return 9; }
-    if (!is(instrs[8], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [8] expected Local_set (p = &x)\n"; return 10; }
+    // Tag the address with the mem[1] nibble (I64_const{tag}, I64_or) before storing to p.
+    if (!asI64Const(instrs[8])) { std::cerr << "AC1: [8] expected I64_const{mem1 tag}\n"; return 10; }
+    if (!is(instrs[9], WasmVM::Opcode::I64_or)) { std::cerr << "AC1: [9] expected I64_or (apply mem1 tag)\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [10] expected Local_set (p = &x)\n"; return 12; }
 
-    // *p = 5: rhs eval, address via p, store through pointer
-    auto five = asI32Const(instrs[9]);
-    if (!five || five->value != 5) { std::cerr << "AC1: [9] expected I32_const{5}\n"; return 11; }
-    if (!is(instrs[10], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [10] expected Local_set{temp}\n"; return 12; }
-    if (!is(instrs[11], WasmVM::Opcode::Local_get)) { std::cerr << "AC1: [11] expected Local_get{p} (pointer value)\n"; return 13; }
-    if (!is(instrs[12], WasmVM::Opcode::Local_get)) { std::cerr << "AC1: [12] expected Local_get{temp} (value 5)\n"; return 14; }
-    if (!is(instrs[13], WasmVM::Opcode::I32_store)) { std::cerr << "AC1: [13] expected I32_store (write through *p)\n"; return 15; }
+    // *p = 5: rhs eval (I32_const{5}), then a tagged store through p that
+    // dispatches on the pointer's tag nibble (shr_u, eq, if/else) and writes via
+    // I32_store. Assert the structural invariants of the remainder.
+    bool sawFive = false, sawShr = false, sawIf = false;
+    int i32Stores = 0;
+    for (size_t k = 11; k < instrs.size(); ++k) {
+        auto c = asI32Const(instrs[k]);
+        if (c && c->value == 5) sawFive = true;
+        if (is(instrs[k], WasmVM::Opcode::I64_shr_u)) sawShr = true; // tag extraction
+        if (is(instrs[k], WasmVM::Opcode::If))        sawIf = true;  // mem dispatch
+        if (is(instrs[k], WasmVM::Opcode::I32_store)) ++i32Stores;   // one per memory arm
+    }
+    if (!sawFive) { std::cerr << "AC1: missing I32_const{5} (rhs)\n"; return 13; }
+    if (!sawShr)  { std::cerr << "AC1: missing tag extraction (i64.shr_u) on store\n"; return 14; }
+    if (!sawIf)   { std::cerr << "AC1: missing memory dispatch (if) on store\n"; return 15; }
+    if (i32Stores != 2) { std::cerr << "AC1: expected 2 i32.store (mem0+mem1 arms), got " << i32Stores << "\n"; return 16; }
 
     return 0;
 }
@@ -912,9 +945,11 @@ static int test_ac2_struct_field_offset() {
     const auto& instrs = wf.body;
 
     // Prologue: 5 instrs (struct forces shadow stack even without explicit address-of)
+    //   [0] Global_get{0}  [1] I64_const{frameSize}  [2] I64_sub
+    //   [3] Local_tee{fp}  [4] Global_set{0}
     if (instrs.size() < 5) { std::cerr << "AC2: too few instrs\n"; return 1; }
-    auto ltee = asOneIdx(instrs[1], WasmVM::Opcode::Local_tee);
-    if (!ltee) { std::cerr << "AC2: [1] expected Local_tee{fp}\n"; return 2; }
+    auto ltee = asOneIdx(instrs[3], WasmVM::Opcode::Local_tee);
+    if (!ltee) { std::cerr << "AC2: [3] expected Local_tee{fp}\n"; return 2; }
 
     // s.b body (starts at [5]):
     //   [5] Local_get{fp}   — base of s (lvalue)

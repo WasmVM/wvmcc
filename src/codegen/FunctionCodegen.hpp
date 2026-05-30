@@ -57,20 +57,70 @@ public:
         return diagnostics_;
     }
 
+    // M2-E: positions within `instrBuffer_` where a data-pointer i64.const
+    // was emitted, paired with the mem[0] address pushed. ModuleCodegen
+    // reads this after generate() to populate reloc.CODE.
+    struct DataPtrSite {
+        size_t instrIdx;
+        size_t address;
+    };
+    const std::vector<DataPtrSite>& getDataPtrSites() const { return dataPtrSites_; }
+
     void emit(const WasmVM::WasmInstr& instr);
+
+    // Emit `unreachable` AND record an error diagnostic for an unhandled or
+    // erroneous construct (design Step 5.1: no silent wrong code).
+    void emitUnimplemented(const std::string& message,
+                           std::optional<wvmcc::SourceSpan> span = std::nullopt);
+
+    // Push a GlobalMem's mem[0] address: a baked `i64.const` for a locally
+    // defined object, or `global.get` of the imported address-global for a
+    // cross-TU `extern` reference (resolved by the linker).
+    void emitGlobalMemAddr(const GlobalMem& gm);
 
     // needLValue=true: leave the address (i64) on the stack rather than the value.
     void emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLValue = false);
 
     void emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr);
     void emitCharLiteral(const wvmcc::parser::CharLiteral& expr);
+    void emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr);
     void emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue = false);
     void emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr);
     void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue = false);
+    void emitPostfixUnaryExpr(const wvmcc::parser::PostfixUnaryExpr& expr, bool needLValue = false);
     void emitCastExpr(const wvmcc::parser::CastExpr& expr);
     void emitCallExpr(const wvmcc::parser::CallExpr& expr);
     void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue = false);
     void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, bool needLValue = false);
+
+    // Where an lvalue lives, for choosing how to load/store it. An access
+    // rooted at a named object resolves to a *static* memory (mem[0] for a
+    // file-scope GlobalMem, mem[1] for a shadow-stack MemoryLocal) and uses a
+    // plain load/store with an untagged frame/static address. An access rooted
+    // at a pointer value (deref/arrow/pointer-index anywhere in the chain) is
+    // Dynamic: the pointer carries its memidx in the high nibble (see the
+    // tagged-pointer model below), so the load/store must dispatch on that tag.
+    enum class AddrKind { Mem0, Mem1, Dynamic };
+    AddrKind addressKind(const wvmcc::parser::Expr* e);
+
+    // Tagged-pointer model (memidx in bits [60:63], offset in [0:59]):
+    //   &x / array-or-aggregate decay produce a pointer *value* whose high
+    //   nibble is the object's memidx (mem[1] locals -> 1, mem[0] globals/heap
+    //   -> 0). Frame/static addresses used for direct named access stay
+    //   untagged. A deref through an opaque pointer dispatches on the nibble.
+    static constexpr int    kMemidxShift = 60;
+    static constexpr int64_t kPtrTagMask = (int64_t)0xF << 60;
+    static constexpr int64_t kPtrOffMask = ~((int64_t)0xF << 60);
+    // OR the memidx tag (mem[1] only; mem[0]/Dynamic are no-ops) onto the i64
+    // address currently on the operand stack.
+    void emitApplyTag(AddrKind k);
+    // Assuming a tagged i64 pointer is on the stack, emit a load of `type`
+    // that masks off the tag and dispatches to mem[0] or mem[1] by the nibble.
+    void emitTaggedLoad(const wvmcc::parser::TypeNodePtr& type);
+    // Assuming [tagged-addr(i64), value(T)] are on the stack (addr pushed
+    // first), emit a tag-dispatched store of `type`.
+    void emitTaggedStore(const wvmcc::parser::TypeNodePtr& type);
+
     void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);
 
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);
@@ -105,10 +155,19 @@ private:
 
     // ABI: hidden first parameter for struct-returning functions (-1 if not struct return)
     int hiddenRetPtrLocal_ = -1;
+    // ABI: hidden trailing parameter for variadic callees (spill-base ptr, -1 if not variadic)
+    int vaArgsPtrLocal_ = -1;
     // C return type when function returns a struct (used by emitReturnStmt)
     wvmcc::parser::TypeNodePtr returnTypeNode_;
+    // Wasm result type so emitReturnStmt can coerce e.g. an `int` value
+    // to i64 when the function signature says ssize_t/long. Unset for
+    // void-returning functions (no return value to coerce).
+    std::optional<WasmVM::ValueType> returnWasmType_;
 
     std::unordered_set<std::string> addressTakenNames_;
+
+    // Sites where a data-pointer i64.const was emitted (M2-E).
+    std::vector<DataPtrSite> dataPtrSites_;
 
     int allocRawLocal(WasmVM::ValueType valType);
     std::vector<WasmVM::WasmInstr> generatePrologue();
@@ -116,6 +175,9 @@ private:
 
     void emitStringLiteral(const wvmcc::parser::StringLiteral& expr);
     void emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& srcExpr);
+
+    // __builtin_va_start / __builtin_va_arg / __builtin_va_end / __builtin_va_copy
+    void emitVaBuiltin(const std::string& name, const wvmcc::parser::CallExpr& expr);
 
     // Emit a (possibly designated) initializer-list assigning into the storage
     // at `baseAddrLocal + 0`. memidx selects mem[0] (static / heap) vs mem[1]

@@ -6,6 +6,7 @@
 #include <memory>
 #include <variant>
 #include "../parser/AST.hpp"
+#include <WasmVM.hpp>
 
 namespace wvmcc::codegen {
 
@@ -30,13 +31,28 @@ struct GlobalScalar {
 struct GlobalMem {
     wvmcc::parser::TypeNodePtr type;
     int dataSegmentIndex; // Index in Wasm module data segments
-    size_t address; // Memory address
+    size_t address; // Memory address (meaningless when isImport — resolved at link)
+    // Cross-TU `extern` data global (e.g. `extern int errno;`): no local
+    // storage in this TU. Its address is carried by an imported Wasm global
+    // (`importGlobalIndex`); references emit `global.get importGlobalIndex`
+    // instead of a baked `i64.const address`. The linker resolves the import
+    // to the defining TU's exported address-global (by `name`).
+    bool isImport = false;
+    std::string name;
+    int importGlobalIndex = -1; // Wasm global index of the imported address (isImport)
 };
 
 struct FuncSymbol {
     wvmcc::parser::TypeNodePtr type;
     int funcIndex; // Index in Wasm module functions
     bool isImport; // Whether this is an imported function
+    bool isVariadic{false};       // trailing `...` in C signature
+    int namedParamCount{0};       // number of named (non-variadic) C parameters
+    // Wasm value types for each named C parameter. Used at call sites to
+    // coerce argument values (e.g. i32 → i64) so passing an integer
+    // literal to a function whose parameter is i64 doesn't break
+    // validation. Excludes any hidden trailing variadic spill-base param.
+    std::vector<WasmVM::ValueType> paramTypes;
 };
 
 // Variant type for different symbol kinds

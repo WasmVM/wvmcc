@@ -14,9 +14,24 @@
 
 namespace wvmcc::codegen {
 
+// Compile mode controls how each TU is emitted. Freestanding produces a
+// self-contained module (M1-style: own memories, own stack pointer, start
+// wrapper around main calling sys_proc.exit). Linkable (M2-D) produces an
+// object suitable for the integrated linker — imports `env.__*` runtime
+// state and emits no start wrapper.
+enum class CompileMode {
+    Freestanding,
+    Linkable,
+};
+
 class ModuleCodegen {
 public:
     ModuleCodegen(const wvmcc::parser::Semantic& semantic);
+
+    // Set the compile mode. Default is Freestanding (M2-F-era; M2-D flips
+    // this to Linkable by default).
+    void setCompileMode(CompileMode mode) { compileMode_ = mode; }
+    CompileMode getCompileMode() const { return compileMode_; }
 
     // Generate a Wasm module from a translation unit
     WasmVM::WasmModule generate(const wvmcc::parser::TranslationUnitPtr& tu);
@@ -33,8 +48,32 @@ public:
     // Intern a function type into module_.types (deduplicates).
     WasmVM::index_t internFuncType(const WasmVM::FuncType& ft);
 
+    // M2-E: a module-level data-pointer relocation. `codeFuncIdx` is the
+    // function's index within `module.funcs` (NOT the module-wide function
+    // index space, which would include imports). `instrIdx` is the
+    // instruction's position within that function's body. `dataSymbolIdx`
+    // indexes `getDataSymbols()`.
+    struct Relocation {
+        size_t codeFuncIdx;
+        size_t instrIdx;
+        size_t dataSymbolIdx;
+        int64_t addend;
+    };
+    struct DataSymbol {
+        std::string name;
+        size_t address; // mem[0] offset of the referenced datum
+    };
+    const std::vector<Relocation>& getRelocations() const { return relocations_; }
+    const std::vector<DataSymbol>& getDataSymbols() const { return dataSymbols_; }
+
+    // Codegen diagnostics accumulated across all functions (errors here mean
+    // the emitted module is unsound — the driver should report and not ship it).
+    const std::vector<wvmcc::Diagnostic>& getDiagnostics() const { return diagnostics_; }
+
 private:
+    std::vector<wvmcc::Diagnostic> diagnostics_;
     const wvmcc::parser::Semantic& semantic_;
+    CompileMode compileMode_ = CompileMode::Linkable; // M2-D: default flipped from Freestanding
 
     // Code generation components
     TypeMap typeMap_;
@@ -55,6 +94,21 @@ private:
     // Function-name → table-slot index (in funcref table 0) for every
     // address-taken function. Populated by analyzeFuncAddressTaken().
     std::unordered_map<std::string, size_t> funcTableSlots_;
+
+    // M2-E: data symbols (one per distinct string literal so far) and the
+    // relocations collected from each FunctionCodegen.
+    std::vector<DataSymbol> dataSymbols_;
+    std::vector<Relocation> relocations_;
+
+    // Cross-TU extern data globals (M2): file-scope object definitions whose
+    // address is exported as a Wasm global so other TUs' `extern` references
+    // (imported address-globals) resolve to it at link time. Collected during
+    // firstPass; materialized by materializeExportedDataGlobals().
+    std::vector<std::pair<std::string, size_t>> exportedDataGlobals_;
+    // Number of imported Wasm globals (defined globals are indexed after these).
+    WasmVM::index_t importedGlobalCount() const;
+    // Emit + export the address-globals collected in exportedDataGlobals_.
+    void materializeExportedDataGlobals();
 
     // Hosted-environment state (issue #40). When the translation unit defines
     // `main`, ModuleCodegen pre-injects four sys_proc imports and emits a
@@ -85,14 +139,36 @@ private:
 
     void setupMemory();
     void setupGlobals();
+    // Freestanding mode only: patch the `__heap_base` const i64 global (slot
+    // heapBaseGlobalIdx_, reserved early in setupGlobals) to
+    // round_up_to_8(dataAllocator_.currentTop()). Called after secondPass so
+    // the data layout is finalized.
+    void finalizeFreestandingHeapBase();
     void firstPass(const wvmcc::parser::TranslationUnitPtr& tu);
+
+    // #77: register the runtime Wasm globals __stack_pointer / __heap_base as
+    // GlobalScalar symbols so C references resolve to global.get/global.set,
+    // and register every file-scope variable definition (storage in mem[0] +
+    // GlobalMem symbol + optional initializer data segment). Runs inside the
+    // file scope before function bodies are emitted.
+    void registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& tu);
+    void registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl);
+    // Recursively encode a constant initializer (scalar Expr or braced List)
+    // for `type` into `out` at byte offset `base` (little-endian). Returns
+    // false if any leaf is not a compile-time constant we can encode.
+    bool encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
+                         const wvmcc::parser::InitializerPtr& init,
+                         size_t base, std::vector<std::byte>& out);
+
+    // Wasm global indices for the two runtime globals (stable across modes):
+    // __stack_pointer = 0, __heap_base = 1. Captured in setupGlobals().
+    int stackPtrGlobalIdx_ = -1;
+    int heapBaseGlobalIdx_ = -1;
     // Walk every function body to collect &funcname expressions; allocate
     // table slots and emit a funcref table + element segment.
     void analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnitPtr& tu);
     void secondPass(const wvmcc::parser::TranslationUnitPtr& tu);
     void emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef);
-    void emitGlobalScalar(const wvmcc::parser::DeclarationPtr& decl);
-    void emitGlobalAggregate(const wvmcc::parser::DeclarationPtr& decl);
     void emitStringLiterals();
 };
 

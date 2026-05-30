@@ -198,6 +198,7 @@ struct TypeNode : Node {
     // Function
     std::vector<std::shared_ptr<TypeNode>> params;
     bool hasParamTypeList{false};
+    bool isVariadic{false};
     // For function type, returnType is represented by nesting: function -> pointee? use element/pointee as appropriate
 };
 
@@ -224,6 +225,7 @@ struct Declarator : Node {
     struct FunctionInfo {
         std::vector<Parameter> params; // parameter-type-list
         bool hasParamTypeList{false};
+        bool isVariadic{false};        // trailing `...` present
         std::vector<std::string> identifierList; // identifier-list (old K&R style)
     } function;
 };
@@ -256,6 +258,7 @@ struct FunctionDef : Node {
     DeclarationSpecifiers specifiers;
     DeclaratorPtr declarator; // name and type
     std::vector<Parameter> params;
+    bool isVariadic{false}; // copied from declarator->function.isVariadic
     std::vector<BlockItemPtr> body; // compound-stmt flattened for now
     std::vector<GnuAttribute> gnuAttributes;
 };
@@ -269,6 +272,11 @@ struct IdentifierExpr : Expr { std::string name; };
 struct IntegerLiteral : Expr { std::int64_t value; std::string raw; };
 struct StringLiteral : Expr { std::string value; };
 struct CharLiteral : Expr { char value; };
+struct FloatLiteral : Expr {
+    double value;
+    std::string raw;
+    bool isFloat{false}; // true → f32 (suffix f/F); false → f64 (suffix L or none)
+};
 
 struct UnaryExpr : Expr {
     std::string op;
@@ -288,11 +296,18 @@ struct CastExpr : Expr {
 struct SizeofExpr : Expr {
     std::optional<TypeNodePtr> type; // if present, sizeof(type)
     ExprPtr expr; // if type not present, sizeof expr
+    // Raw type-specifiers for the `sizeof(type-name)` form. Preferred over
+    // `type` by codegen: lets it resolve struct tags / typedef-names to the
+    // complete type via Semantic::canonicalTypeRepr (the `type` field only
+    // ever held a placeholder for the type-name form).
+    std::optional<DeclarationSpecifiers> typeSpecs;
 };
 
 struct AlignOfExpr : Expr {
     TypeNodePtr type;
     std::string typeText; // textual representation of the type inside _Alignof
+    // Raw type-specifiers for `_Alignof(type-name)` (see SizeofExpr::typeSpecs).
+    std::optional<DeclarationSpecifiers> typeSpecs;
 };
 
 struct CompoundLiteral : Expr {
@@ -323,7 +338,13 @@ struct TernaryExpr : Expr {
     ExprPtr elseExpr;
 };
 
-struct CallExpr : Expr { ExprPtr callee; std::vector<ExprPtr> args; };
+struct CallExpr : Expr {
+    ExprPtr callee;
+    std::vector<ExprPtr> args;
+    // For __builtin_va_arg(ap, T): T is parsed as a type-name and stored here.
+    // Null for all other calls.
+    TypeNodePtr vaArgType;
+};
 
 struct MemberExpr : Expr { ExprPtr base; std::string member; bool isArrow = false; };
 

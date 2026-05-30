@@ -3,6 +3,8 @@ set(SRC ${PROJECT_SOURCE_DIR}/src)
 set(CODEGEN_SRCS
     ${SRC}/codegen/FunctionCodegen.cpp
     ${SRC}/codegen/ModuleCodegen.cpp
+    ${SRC}/codegen/StartWrapper.cpp
+    ${SRC}/codegen/RelocSection.cpp
     ${SRC}/codegen/TypeMap.cpp
     ${SRC}/codegen/SymbolTable.cpp
     ${SRC}/codegen/LayoutEngine.cpp
@@ -65,3 +67,21 @@ target_include_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_INCLUDE_DIR
 target_link_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME start-wrapper COMMAND wvmcc-start-wrapper-test)
+
+add_executable(wvmcc-linkable-mode-test linkable_mode_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-linkable-mode-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-linkable-mode-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-linkable-mode-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME linkable-mode COMMAND wvmcc-linkable-mode-test)
+
+add_executable(wvmcc-export-visibility-test export_visibility_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-export-visibility-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-export-visibility-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-export-visibility-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME export-visibility COMMAND wvmcc-export-visibility-test)
+
+add_executable(wvmcc-reloc-section-test reloc_section_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-reloc-section-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-reloc-section-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-reloc-section-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME reloc-section COMMAND wvmcc-reloc-section-test)

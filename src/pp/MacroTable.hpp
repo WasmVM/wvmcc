@@ -43,6 +43,13 @@ public:
     // Get number of defined macros (for testing)
     size_t count() const { return macros.size(); }
 
+    // Iterator access — used by the preprocessor to propagate macros
+    // defined in an included header back to the includer (cross-include
+    // macro propagation).
+    auto begin() const { return macros.begin(); }
+    auto end()   const { return macros.end();   }
+    void insertOrAssign(const std::string& name, const Macro& m) { macros[name] = m; }
+
 private:
     std::unordered_map<std::string, Macro> macros;
 };

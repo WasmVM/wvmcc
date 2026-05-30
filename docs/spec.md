@@ -18,7 +18,7 @@
 
 ## Data Layout & ABI (wasm64)
 - Endianness: little-endian.
-- Pointer size: 64-bit; `size_t`/`ptrdiff_t` are 64-bit. `long` remains 32-bit (LP64 not used; wasm64 only widens pointers).
+- Pointer size: 64-bit; `size_t`/`ptrdiff_t` are 64-bit. `long` is 64-bit (LP64 model on Wasm64). `int` remains 32-bit.
 - Alignment: natural (1/2/4/8). Struct layout follows wasm64/Clang-like natural alignment; document padding.
 - `char` signedness: implementation-defined; default to signed (`-funsigned-char` available later).
 - `long double`: initially aliased to `double`.
@@ -175,7 +175,7 @@ using PPTokenStream = std::vector<PPToken>;
 ## Implementation-Defined Behavior (Defaults in M0)
 - Data model:
   - Pointer width: 64-bit; `sizeof(void*) == 8`; `size_t`/`ptrdiff_t` are 64-bit.
-  - Integer widths: `char` 8-bit, `short` 16-bit, `int` 32-bit, `long` 32-bit, `long long` 64-bit. (LP64 not used; wasm64 only widens pointers.)
+  - Integer widths: `char` 8-bit, `short` 16-bit, `int` 32-bit, `long` 64-bit, `long long` 64-bit. (LP64 model on Wasm64; `long` and pointers are 64-bit, `int` stays 32-bit.)
   - Endianness: little-endian.
 - `char` signedness:
   - Default: signed. Flag: `-funsigned-char` to switch.
