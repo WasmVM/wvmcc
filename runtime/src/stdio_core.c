@@ -32,13 +32,12 @@ struct FILE {
     int rbuf_end;
 };
 
-static FILE __stdin  = { 0, _F_READ };
-static FILE __stdout = { 1, _F_WRITE | _F_LINEBUF };
-static FILE __stderr = { 2, _F_WRITE | _F_UNBUF };
-
-FILE *stdin  = &__stdin;
-FILE *stdout = &__stdout;
-FILE *stderr = &__stderr;
+// The backing FILE objects for the stdin/stdout/stderr macros (see stdio.h).
+// External linkage so other TUs (printf, …) reach them via the macro's
+// address-of through the cross-TU address-global mechanism.
+FILE __wvmcc_stdin  = { 0, _F_READ };
+FILE __wvmcc_stdout = { 1, _F_WRITE | _F_LINEBUF };
+FILE __wvmcc_stderr = { 2, _F_WRITE | _F_UNBUF };
 
 static void lazy_init(FILE *f) {
     if (f->flags & _F_INITED) return;

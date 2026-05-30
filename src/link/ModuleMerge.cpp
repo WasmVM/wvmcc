@@ -289,9 +289,9 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
     // so far; `dataDelta` is the uniform shift applied to its data segments AND
     // to the i64.const data pointers in its code (via `dataRelocs`).
     uint64_t dataDelta = 0;
+    uint64_t tuMin = UINT64_MAX, tuMax = 0;
     {
         bool hasData = false;
-        uint64_t tuMin = UINT64_MAX, tuMax = 0;
         for (const auto& d : in.datas) {
             if (!d.mode.offset.has_value()) continue;
             uint64_t off = dataSegOffset(d);
@@ -309,6 +309,10 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
             }
         }
     }
+    // True if `v` is an address into this TU's data block — used to relocate
+    // address-valued global initializers (the cross-TU address-globals a TU
+    // exports for &object) by the same delta as the data they point at.
+    auto inTuData = [&](uint64_t v) { return dataDelta != 0 && v >= tuMin && v < tuMax; };
     // funcIdx → instr positions of i64.const data pointers to shift.
     std::unordered_map<uint32_t, std::vector<uint32_t>> relocByFunc;
     if (dataDelta != 0)
@@ -414,6 +418,12 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
         (void)outIdx;
         WasmVM::WasmGlobal copy = g;
         remapConstInstr(copy.init, r);
+        // M2-L8: an i64.const global initializer that addresses this TU's data
+        // (an exported address-global, e.g. &__wvmcc_stdout) must move with the
+        // rebased data.
+        if (auto* c = std::get_if<WasmVM::Instr::I64_const>(&copy.init)) {
+            if (inTuData((uint64_t)c->value)) c->value += (WasmVM::i64_t)dataDelta;
+        }
         out.globals.push_back(std::move(copy));
         // Defined-global output index = number of global imports + position
         // in out.globals (already pushed → size - 1).
