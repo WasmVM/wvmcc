@@ -302,6 +302,11 @@ void FunctionCodegen::emitGlobalMemAddr(const GlobalMem& gm) {
         // Cross-TU extern: address carried by an imported Wasm global.
         emit(WasmVM::Instr::Global_get{(WasmVM::index_t)gm.importGlobalIndex});
     } else {
+        // A file-scope object's absolute mem[0] address. Record the site so the
+        // linker rebases this constant when the TU's data is relocated (M2-L8)
+        // — otherwise BSS/zero-init globals (e.g. malloc's __heap_offset, which
+        // has no data segment) collide with other TUs' data.
+        dataPtrSites_.push_back({instrBuffer_.size(), gm.address});
         emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)gm.address});
     }
 }

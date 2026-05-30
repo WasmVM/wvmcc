@@ -292,12 +292,35 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
     uint64_t tuMin = UINT64_MAX, tuMax = 0;
     {
         bool hasData = false;
+        auto note = [&](uint64_t lo, uint64_t hi) {
+            tuMin = std::min(tuMin, lo);
+            tuMax = std::max(tuMax, hi);
+            hasData = true;
+        };
+        // Initialized data: the segment ranges.
         for (const auto& d : in.datas) {
             if (!d.mode.offset.has_value()) continue;
             uint64_t off = dataSegOffset(d);
-            tuMin = std::min(tuMin, off);
-            tuMax = std::max(tuMax, off + (uint64_t)d.init.size());
-            hasData = true;
+            note(off, off + (uint64_t)d.init.size());
+        }
+        // BSS / zero-initialized objects emit no data segment, but the code and
+        // address-globals that reference them carry their addresses as
+        // i64.const. Fold those in so a BSS-only TU (e.g. malloc.c, whose only
+        // datum is `static unsigned long __heap_offset`) is still rebased to a
+        // non-colliding region. (+8: at least a word; aggregate objects also
+        // appear in a data segment above, so this lower bound suffices.)
+        for (const auto& s : dataRelocs) {
+            if (s.funcIdx >= in.funcs.size()) continue;
+            const auto& body = in.funcs[s.funcIdx].body;
+            if (s.instrIdx >= body.size()) continue;
+            const auto& instr = body[s.instrIdx];
+            if (instr.opcode != WasmVM::Opcode::I64_const) continue;
+            if (auto* c = std::get_if<WasmVM::WasmInstr::ConstI64>(&instr.imm))
+                note((uint64_t)c->value, (uint64_t)c->value + 8);
+        }
+        for (const auto& g : in.globals) {
+            if (auto* c = std::get_if<WasmVM::Instr::I64_const>(&g.init))
+                note((uint64_t)c->value, (uint64_t)c->value + 8);
         }
         if (hasData) {
             if (ds.dataTop == 0) {
