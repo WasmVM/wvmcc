@@ -10,9 +10,17 @@
 
 typedef struct FILE FILE;
 
-extern FILE *stdin;
-extern FILE *stdout;
-extern FILE *stderr;
+// stdin/stdout/stderr are the standard FILE* macros (C11 7.21.1). The backing
+// FILE objects live in stdio_core.c; here they're extern declarations of
+// incomplete type, and the macros take their address in *code* — so the
+// pointer is materialized at each use site (a relocatable address) rather than
+// stored as a data-to-data pointer that would need data-segment relocation.
+extern FILE __wvmcc_stdin;
+extern FILE __wvmcc_stdout;
+extern FILE __wvmcc_stderr;
+#define stdin  (&__wvmcc_stdin)
+#define stdout (&__wvmcc_stdout)
+#define stderr (&__wvmcc_stderr)
 
 FILE *fopen(const char *path, const char *mode);
 int   fclose(FILE *stream);

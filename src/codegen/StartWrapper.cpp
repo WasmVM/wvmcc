@@ -50,7 +50,8 @@ SysProcImports injectSysProcImports(WasmVM::WasmModule& module,
 void emitStartWrapper(WasmVM::WasmModule& module,
                       const SysProcImports& sysProc,
                       WasmVM::index_t mainFuncIdx,
-                      bool mainHasArgv) {
+                      bool mainHasArgv,
+                      std::optional<WasmVM::index_t> atExitFlushIdx) {
     // FuncType: () -> ()
     WasmVM::FuncType ft;
     WasmVM::index_t wrapperType = internFuncType(module, ft);
@@ -141,22 +142,35 @@ void emitStartWrapper(WasmVM::WasmModule& module,
         body.push_back(WasmVM::Instr::Br{0});
         body.push_back(WasmVM::Instr::End{}); // end loop
         body.push_back(WasmVM::Instr::End{}); // end block
-        // call main(argc, argv_base) -> i32, then sys_proc.exit
+        // call main(argc, argv_base) -> i32; flush stdio (if linked); then
+        // exit. The flush is () -> (), so it leaves main's i32 result on the
+        // operand stack for sys_proc.exit to consume.
         body.push_back(WasmVM::Instr::Local_get{0});
         body.push_back(WasmVM::Instr::Local_get{3});
         body.push_back(WasmVM::Instr::Call{mainFuncIdx});
+        if (atExitFlushIdx) body.push_back(WasmVM::Instr::Call{*atExitFlushIdx});
         body.push_back(WasmVM::Instr::Call{sysProc.exit});
         body.push_back(WasmVM::Instr::Unreachable{});
     } else {
-        // main(void) wrapper: call main; pass result to exit
+        // main(void) wrapper: call main; flush stdio (if linked); pass result
+        // to exit. The flush is () -> (), leaving main's result on the stack.
         body.push_back(WasmVM::Instr::Call{mainFuncIdx});
+        if (atExitFlushIdx) body.push_back(WasmVM::Instr::Call{*atExitFlushIdx});
         body.push_back(WasmVM::Instr::Call{sysProc.exit});
         body.push_back(WasmVM::Instr::Unreachable{});
     }
     body.push_back(WasmVM::Instr::End{});
 
+    // The function index space is [function imports..., defined funcs...].
+    // Count only *function* imports — non-func imports (unresolved globals /
+    // memories that survive into the final module) must not be counted, or
+    // the wrapper's index lands past the end of the function space.
+    WasmVM::index_t funcImportCount = 0;
+    for (const auto& imp : module.imports) {
+        if (std::holds_alternative<WasmVM::index_t>(imp.desc)) ++funcImportCount;
+    }
     WasmVM::index_t wrapperIdx =
-        (WasmVM::index_t)(module.imports.size() + module.funcs.size());
+        (WasmVM::index_t)(funcImportCount + module.funcs.size());
     module.funcs.push_back(std::move(wrapper));
     module.start = wrapperIdx;
 

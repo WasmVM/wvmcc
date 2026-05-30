@@ -4,6 +4,8 @@
 #include <fstream>
 #include <optional>
 #include <cstdlib>
+#include <algorithm>
+#include <filesystem>
 
 #include <WasmVM.hpp>
 #include "../pp/Preprocessor.hpp"
@@ -337,11 +339,6 @@ int main(int argc, char** argv) {
 
     if (auto err = WasmVM::module_validate(module)) {
         std::cerr << "error: module validation failed: " << err->what() << std::endl;
-        if (std::getenv("WVMCC_DUMP_INVALID")) {
-            const std::string dt = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
-            write_module_to_file(module, dt, &codegen);
-            std::cerr << "(dumped invalid module to " << dt << ")\n";
-        }
         return 1;
     }
 
@@ -365,15 +362,52 @@ int main(int argc, char** argv) {
 
     std::vector<wvmcc::link::LinkInput> linkInputs;
     {
-        wvmcc::link::LinkInput::InMemoryModule mod{std::move(module), *args.inputPath};
+        wvmcc::link::LinkInput::InMemoryModule mod{std::move(module), *args.inputPath, {}};
+        // M2-L8: hand the linker this TU's data-pointer sites so it can shift
+        // the i64.const constants if it rebases the TU's data.
+        for (const auto& rel : codegen.getRelocations()) {
+            mod.dataRelocs.push_back(
+                {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+        }
         wvmcc::link::LinkInput in;
         in.source = std::move(mod);
         linkInputs.push_back(std::move(in));
     }
-    // Library archives (M2-L4 will pull from these lazily). For now archive
-    // inputs cause the linker to error.
-    for (const auto& lib : args.linkLibraries) {
-        wvmcc::link::LinkInput::ArchivePath ap{"-l" + lib};
+    // Resolve a `-l<name>` to `lib<name>.a` under a `-L` dir or <sysroot>/lib.
+    auto resolveLib = [&](const std::string& name) -> std::optional<std::string> {
+        const std::string file = "lib" + name + ".a";
+        for (const auto& dir : args.libraryPaths) {
+            std::filesystem::path p = std::filesystem::path(dir) / file;
+            if (std::filesystem::exists(p)) return p.string();
+        }
+        if (sysroot) {
+            std::filesystem::path p =
+                std::filesystem::path(*sysroot) / "lib" / file;
+            if (std::filesystem::exists(p)) return p.string();
+        }
+        return std::nullopt;
+    };
+
+    // M2-L4: archive inputs. The linker pulls members lazily to satisfy
+    // unresolved imports. Explicit `-l<name>` archives come first; libc is
+    // appended last (default link) unless -nostdlib was given, mirroring cc.
+    std::vector<std::string> libs = args.linkLibraries;
+    if (!args.noStdLib) libs.push_back("c");
+    for (const auto& lib : libs) {
+        auto path = resolveLib(lib);
+        if (!path) {
+            // Missing libc with no sysroot is non-fatal (freestanding-style
+            // builds link nothing); a missing explicit -l is an error.
+            if (lib == "c" && !args.noStdLib &&
+                std::find(args.linkLibraries.begin(), args.linkLibraries.end(),
+                          "c") == args.linkLibraries.end()) {
+                continue;
+            }
+            std::cerr << "error: cannot find -l" << lib
+                      << " (lib" << lib << ".a) in -L paths or sysroot/lib\n";
+            return 1;
+        }
+        wvmcc::link::LinkInput::ArchivePath ap{*path};
         wvmcc::link::LinkInput in;
         in.source = std::move(ap);
         linkInputs.push_back(std::move(in));

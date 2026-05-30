@@ -2,6 +2,7 @@
 #include "FunctionCodegen.hpp"
 #include "AddressTakenAnalyzer.hpp"
 #include "StartWrapper.hpp"
+#include "../parser/ConstExprEval.hpp"
 #include <stdexcept>
 #include <cstring>
 
@@ -665,21 +666,11 @@ static bool encodeScalarConstInit(const wvmcc::parser::ExprPtr& expr,
         else           { std::memcpy(out.data(), &dv, 8); }
         return true;
     }
-    std::int64_t iv = 0;
-    bool neg = false;
-    const wvmcc::parser::Expr* e = expr.get();
-    if (e->kind == K::Unary) {
-        const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
-        if (u.op == "-") { neg = true; e = u.rhs.get(); }
-        else if (u.op == "+") { e = u.rhs.get(); }
-    }
-    if (e && e->kind == K::Integer)
-        iv = static_cast<const wvmcc::parser::IntegerLiteral&>(*e).value;
-    else if (e && e->kind == K::Char)
-        iv = static_cast<const wvmcc::parser::CharLiteral&>(*e).value;
-    else return false;
-    if (neg) iv = -iv;
-    auto uv = (std::uint64_t)iv;
+    // Fold any integer constant expression (literals, unary +/-, |, <<, &,
+    // arithmetic, enum constants, …) — e.g. `_F_WRITE | _F_LINEBUF`.
+    auto folded = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(expr);
+    if (!folded) return false;
+    auto uv = (std::uint64_t)(std::int64_t)*folded;
     for (size_t i = 0; i < size && i < 8; ++i)
         out[i] = std::byte((uv >> (8 * i)) & 0xFF);
     return true;
@@ -776,10 +767,21 @@ void ModuleCodegen::registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& 
     }
 
     if (!tu) return;
-    for (const auto& external : tu->externals) {
-        if (!external) continue;
-        if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
-            if (*d) registerGlobalVar(*d);
+    // Two passes so a real definition always wins over an `extern` declaration
+    // of the same name, regardless of source order. A header's
+    // `extern FILE *stdout;` would otherwise register `stdout` as an imported
+    // address-global, and the later defining `FILE *stdout = &__stdout;` would
+    // be dropped as "already registered" — leaving the symbol unexported.
+    auto isExternRef = [](const wvmcc::parser::DeclarationPtr& d) {
+        return d && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern);
+    };
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool wantExtern = (pass == 1);
+        for (const auto& external : tu->externals) {
+            if (!external) continue;
+            if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
+                if (*d && isExternRef(*d) == wantExtern) registerGlobalVar(*d);
+            }
         }
     }
 }

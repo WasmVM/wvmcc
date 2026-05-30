@@ -32,13 +32,12 @@ struct FILE {
     int rbuf_end;
 };
 
-static FILE __stdin  = { 0, _F_READ };
-static FILE __stdout = { 1, _F_WRITE | _F_LINEBUF };
-static FILE __stderr = { 2, _F_WRITE | _F_UNBUF };
-
-FILE *stdin  = &__stdin;
-FILE *stdout = &__stdout;
-FILE *stderr = &__stderr;
+// The backing FILE objects for the stdin/stdout/stderr macros (see stdio.h).
+// External linkage so other TUs (printf, …) reach them via the macro's
+// address-of through the cross-TU address-global mechanism.
+FILE __wvmcc_stdin  = { 0, _F_READ };
+FILE __wvmcc_stdout = { 1, _F_WRITE | _F_LINEBUF };
+FILE __wvmcc_stderr = { 2, _F_WRITE | _F_UNBUF };
 
 static void lazy_init(FILE *f) {
     if (f->flags & _F_INITED) return;
@@ -61,6 +60,41 @@ static int flush_write_buf(FILE *f) {
     if (n < 0) { f->flags |= _F_ERR; return EOF; }
     f->wbuf_pos = 0;
     return 0;
+}
+
+// Open-stream registry for flush-at-exit. The standard streams are flushed
+// unconditionally; fopen'd streams register here and unregister on fclose.
+// crt0 calls __stdio_exit after main returns (and exit() could too), giving
+// buffered output the same "flush on normal termination" guarantee C requires
+// — without it, line-buffered stdout would silently drop a trailing
+// unterminated line (e.g. printf("Hello") with no '\n').
+//
+// The registry holds only runtime-registered pointers (no static-initializer
+// address-of, which wvmcc cannot yet encode into a data segment); the standard
+// streams are reached directly via their extern objects.
+#define _STREAMS_MAX 64
+static FILE *__open_streams[_STREAMS_MAX];
+static int   __open_streams_n;
+
+static void register_stream(FILE *f) {
+    if (__open_streams_n < _STREAMS_MAX) __open_streams[__open_streams_n++] = f;
+}
+
+static void unregister_stream(FILE *f) {
+    for (int i = 0; i < __open_streams_n; i++) {
+        if (__open_streams[i] == f) { __open_streams[i] = (FILE *)0; return; }
+    }
+}
+
+// Flush every buffered write stream. Invoked from crt0's start wrapper on
+// normal program termination (linked in only when stdio is part of the image,
+// resolved by export name — non-stdio programs never pull this in).
+void __stdio_exit(void) {
+    flush_write_buf(&__wvmcc_stdout);
+    flush_write_buf(&__wvmcc_stderr);
+    for (int i = 0; i < __open_streams_n; i++) {
+        if (__open_streams[i]) flush_write_buf(__open_streams[i]);
+    }
 }
 
 int fflush(FILE *f) {
@@ -254,6 +288,7 @@ FILE *fopen(const char *path, const char *mode) {
     f->rbuf_size = 0;
     f->rbuf_pos = 0;
     f->rbuf_end = 0;
+    register_stream(f);
     return f;
 }
 
@@ -262,6 +297,7 @@ int fclose(FILE *f) {
     int r = 0;
     if (flush_write_buf(f) < 0) r = EOF;
     if (close(f->fd) < 0) r = EOF;
+    unregister_stream(f);
     free(f->wbuf);
     free(f->rbuf);
     free(f);

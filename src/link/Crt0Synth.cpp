@@ -90,6 +90,19 @@ std::optional<MainInfo> findMain(const WasmVM::WasmModule& m) {
     return std::nullopt;
 }
 
+// Look up a defined (non-imported) function export by name, returning its
+// function index. Used to discover libc's optional `__stdio_exit` cleanup so
+// crt0 can call it on normal termination — present only when stdio was linked.
+std::optional<WasmVM::index_t> findExportedFunc(const WasmVM::WasmModule& m,
+                                                const std::string& name) {
+    for (const auto& ex : m.exports) {
+        if (ex.name == name && ex.desc == WasmVM::WasmExport::DescType::func) {
+            return ex.index;
+        }
+    }
+    return std::nullopt;
+}
+
 } // namespace
 
 void synthesize(LinkContext& ctx) {
@@ -107,6 +120,11 @@ void synthesize(LinkContext& ctx) {
                   "(use -nostdlib if you don't need crt0)");
         return;
     }
+
+    // Optional stdio flush-at-exit. Captured pre-shift (like main) so the same
+    // +kSysProcCount adjustment applies after the sys_proc imports renumber the
+    // function index space. Absent when the image has no stdio.
+    auto flushInfo = findExportedFunc(m, "__stdio_exit");
 
     // ----- 1. Drop env.__* imports of mem/global kind. They'll be
     //          replaced by local definitions at the same index positions.
@@ -239,7 +257,9 @@ void synthesize(LinkContext& ctx) {
     // main's funcidx was shifted earlier by +4; mainInfo.funcIdx holds the
     // pre-shift value, so add the shift.
     WasmVM::index_t mainShifted = mainInfo->funcIdx + kSysProcCount;
-    emitStartWrapper(m, sp, mainShifted, mainInfo->hasArgv);
+    std::optional<WasmVM::index_t> flushShifted;
+    if (flushInfo) flushShifted = *flushInfo + kSysProcCount;
+    emitStartWrapper(m, sp, mainShifted, mainInfo->hasArgv, flushShifted);
 }
 
 } // namespace wvmcc::link::crt0

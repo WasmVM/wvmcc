@@ -2,6 +2,8 @@
 
 #include <WasmVM.hpp>
 
+#include <optional>
+
 namespace wvmcc::codegen::startwrapper {
 
 // Indices of the four sys_proc imports (in `module.imports` order = function
@@ -33,9 +35,16 @@ SysProcImports injectSysProcImports(WasmVM::WasmModule& module,
 // `mainFuncIdx` is the final index of `main` in the function index space
 // (linker callers may renumber it during merging — pass the post-merge
 // index).
+//
+// `atExitFlushIdx`, when set, is the function index of a `() -> ()` cleanup
+// (libc's `__stdio_exit`) called after `main` returns and before sys_proc.exit,
+// so buffered stdio is flushed on normal termination. The linker passes it only
+// when stdio was actually linked into the image; otherwise it stays nullopt and
+// no call is emitted.
 void emitStartWrapper(WasmVM::WasmModule& module,
                       const SysProcImports& sysProc,
                       WasmVM::index_t mainFuncIdx,
-                      bool mainHasArgv);
+                      bool mainHasArgv,
+                      std::optional<WasmVM::index_t> atExitFlushIdx = std::nullopt);
 
 } // namespace wvmcc::codegen::startwrapper
