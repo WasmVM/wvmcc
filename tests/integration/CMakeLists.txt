@@ -112,3 +112,7 @@ add_link_stdout_test(stdio-flush     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_stdi
 # _Noreturn: a function ending in a no-return call (exit/abort/user _Noreturn)
 # must emit a trailing `unreachable` so a non-void caller stays valid.
 add_link_test(noreturn               ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_noreturn.c)
+
+# Flush on explicit exit(): buffered output must survive a call to exit() that
+# never returns to crt0 (libc exit() calls __stdio_exit before terminating).
+add_link_stdout_test(exit-flush      ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_exit_flush.c "before-exit")

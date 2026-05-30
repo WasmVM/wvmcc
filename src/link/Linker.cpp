@@ -29,9 +29,18 @@ namespace {
 // runtime state (memories + stack/heap globals, materialized by phaseCrt0).
 // Excluding them from the lazy-pull worklist avoids scanning archives for
 // names that can never match an export.
+//
+// The env.__* set is *exactly* the four names crt0 replaces (see
+// Crt0Synth.cpp) — matching every `__`-prefixed env name would wrongly skip
+// real libc internals like `__stdio_exit`, leaving them unresolved because
+// their defining TU is never pulled.
 bool isRuntimeProvided(const WasmVM::WasmImport& imp) {
     if (imp.module == "sys_proc" || imp.module == "sys_fs") return true;
-    if (imp.module == "env" && imp.name.rfind("__", 0) == 0) return true;
+    if (imp.module == "env" &&
+        (imp.name == "__linear_memory" || imp.name == "__stack_memory" ||
+         imp.name == "__stack_pointer" || imp.name == "__heap_base")) {
+        return true;
+    }
     return false;
 }
 

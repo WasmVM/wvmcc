@@ -14,7 +14,22 @@
 __attribute__((import_module("sys_proc"), import_name("exit")))
 _Noreturn void sys_proc_exit(int);
 
-_Noreturn void exit(int status) { sys_proc_exit(status); }
+/* Defined in stdio_core.c; flushes every buffered write stream. Declared weakly
+   by reference: an exit()-calling program pulls in only this lightweight flush
+   path (flush_write_buf + the write syscall + the FILE objects), never the
+   malloc/printf machinery. Programs that never touch stdio still link it, but
+   the cost is a few hundred bytes of dead-on-arrival flush code — the price of
+   correct C `exit` semantics without a working atexit (function-pointer globals
+   aren't supported yet). crt0 calls __stdio_exit directly on normal return from
+   main; this covers the explicit exit() path, where main never returns. */
+void __stdio_exit(void);
+
+_Noreturn void exit(int status) {
+    __stdio_exit();          /* C: exit() flushes and closes all streams */
+    sys_proc_exit(status);
+}
+
+/* C: abort() does NOT flush — abnormal termination. */
 _Noreturn void abort(void)      { sys_proc_exit(134); }  /* 128 + SIGABRT */
 
 /* ----- conversion ------------------------------------------------- */
