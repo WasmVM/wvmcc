@@ -1254,6 +1254,14 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     wvmcc::parser::TypeNodePtr calleeRetType;
     int sretBufLocal = -1;
 
+    // A direct call to a `_Noreturn` function (exit, abort, …) never returns,
+    // so the path after it is unreachable. Emitting a trailing `unreachable`
+    // keeps a non-void caller valid when such a call is its last statement —
+    // otherwise control falls through to the function `end` with nothing on the
+    // operand stack, which the Wasm validator rejects. Indirect calls can't be
+    // proven no-return, so they're left as ordinary calls.
+    bool calleeNoReturn = false;
+
     if (isDirect) {
         auto funcSym = symbolTable_.lookupFunction(directName);
         if (funcSym && funcSym->type
@@ -1261,6 +1269,7 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
                 || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union)) {
             calleeRetType = funcSym->type;
         }
+        if (funcSym) calleeNoReturn = funcSym->noReturn;
     }
 
     if (calleeRetType) {
@@ -1366,6 +1375,7 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
         } else {
             emitIndirectCall();
         }
+        if (calleeNoReturn) emit(WasmVM::Instr::Unreachable{});
         if (sretBufLocal != -1) {
             emit(WasmVM::Instr::Local_get{(WasmVM::index_t)sretBufLocal});
         }
@@ -1445,6 +1455,11 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     } else {
         emitIndirectCall();
     }
+
+    // A no-return variadic callee never comes back; mark the rest unreachable
+    // (the SP restore below becomes dead but stays valid under the polymorphic
+    // post-`unreachable` stack).
+    if (calleeNoReturn) emit(WasmVM::Instr::Unreachable{});
 
     // 7. Restore SP from saved value if we changed it.
     if (numVariadic > 0) {

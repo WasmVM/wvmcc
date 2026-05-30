@@ -418,6 +418,19 @@ void ModuleCodegen::registerExternalDecl(const wvmcc::parser::ExternalDeclPtr& d
     }, decl->decl);
 }
 
+// A function is no-return if it carries the C11 `_Noreturn` function specifier
+// or GNU `__attribute__((noreturn))`. Call sites use this to emit a trailing
+// `unreachable`, so a non-void caller that ends in e.g. `exit(...)` doesn't
+// fall through to its `end` with an empty operand stack (a validation error).
+static bool isNoReturn(const wvmcc::parser::DeclarationSpecifiers& specs,
+                       const std::vector<wvmcc::parser::GnuAttribute>& attrs) {
+    if (specs.hasFuncSpec(wvmcc::parser::FunctionSpecifier::NoReturn)) return true;
+    for (const auto& a : attrs) {
+        if (a.name == "noreturn" || a.name == "__noreturn__") return true;
+    }
+    return false;
+}
+
 void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& funcDef) {
     if (!funcDef) return;
 
@@ -432,6 +445,7 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = false;
     sym.isVariadic = funcDef->isVariadic;
+    sym.noReturn = isNoReturn(funcDef->specifiers, funcDef->gnuAttributes);
     sym.namedParamCount = isVoidParamList(funcDef->params)
                               ? 0
                               : static_cast<int>(funcDef->params.size());
@@ -524,6 +538,7 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     sym.type = buildReturnTypeNode(decl->specifiers, decl->declarator, semantic_);
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = true;
+    sym.noReturn = isNoReturn(decl->specifiers, decl->gnuAttributes);
     if (decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) {
         sym.isVariadic = decl->declarator->function.isVariadic;
         const auto& dparams = decl->declarator->function.params;

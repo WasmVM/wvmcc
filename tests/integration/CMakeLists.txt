@@ -108,3 +108,7 @@ add_link_test(libc-string            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_libc
 # stdio flush-at-exit: line-buffered stdout with no trailing newline must still
 # appear on normal termination (crt0 calls libc's __stdio_exit before exit).
 add_link_stdout_test(stdio-flush     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_stdio_flush.c "Hello")
+
+# _Noreturn: a function ending in a no-return call (exit/abort/user _Noreturn)
+# must emit a trailing `unreachable` so a non-void caller stays valid.
+add_link_test(noreturn               ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_noreturn.c)
