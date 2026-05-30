@@ -776,10 +776,21 @@ void ModuleCodegen::registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& 
     }
 
     if (!tu) return;
-    for (const auto& external : tu->externals) {
-        if (!external) continue;
-        if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
-            if (*d) registerGlobalVar(*d);
+    // Two passes so a real definition always wins over an `extern` declaration
+    // of the same name, regardless of source order. A header's
+    // `extern FILE *stdout;` would otherwise register `stdout` as an imported
+    // address-global, and the later defining `FILE *stdout = &__stdout;` would
+    // be dropped as "already registered" — leaving the symbol unexported.
+    auto isExternRef = [](const wvmcc::parser::DeclarationPtr& d) {
+        return d && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern);
+    };
+    for (int pass = 0; pass < 2; ++pass) {
+        const bool wantExtern = (pass == 1);
+        for (const auto& external : tu->externals) {
+            if (!external) continue;
+            if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
+                if (*d && isExternRef(*d) == wantExtern) registerGlobalVar(*d);
+            }
         }
     }
 }
