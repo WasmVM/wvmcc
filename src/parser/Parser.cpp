@@ -2031,8 +2031,7 @@ ExprPtr Parser::parseUnaryExpression() {
                         if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in sizeof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
                     } else lex.next();
                     auto se = make_ast<SizeofExpr>();
-                    se->type = make_ast<TypeNode>();
-                    se->type.value()->kind = TypeNode::Kind::Builtin; se->type.value()->text = "type"; // minimal
+                    se->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
                     se->expr = nullptr;
                     se->kind = Expr::Kind::Sizeof;
                     se->span = t->span;
@@ -2070,6 +2069,7 @@ ExprPtr Parser::parseUnaryExpression() {
                 if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in _Alignof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
             } else lex.next();
             auto ae = make_ast<AlignOfExpr>();
+            ae->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
             ae->type = make_ast<TypeNode>();
             ae->type->kind = TypeNode::Kind::Builtin; ae->type->text = "type";
             // build a simple textual representation of the parsed type-specifiers

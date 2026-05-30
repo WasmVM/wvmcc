@@ -459,11 +459,20 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         break;
     }
     case K::Sizeof: {
-        // `sizeof(type)` or `sizeof expr` → compile-time byte size as size_t
-        // (i64 on wasm64). The operand expression is NOT evaluated (C 6.5.3.4).
+        // `sizeof(type-name)` or `sizeof expr` → compile-time byte size as
+        // size_t (i64 on wasm64). The operand expression is NOT evaluated
+        // (C 6.5.3.4). For the type-name form, resolve the parsed specifiers
+        // through Semantic so struct tags / typedef-names complete to their
+        // definition (the parser-built `type` field is only a placeholder).
         const auto& so = static_cast<const wvmcc::parser::SizeofExpr&>(*expr);
-        wvmcc::parser::TypeNodePtr opType =
-            so.type.has_value() ? *so.type : getExprTypeNode(so.expr);
+        wvmcc::parser::TypeNodePtr opType;
+        if (so.typeSpecs.has_value() && semantic_) {
+            opType = semantic_->canonicalTypeRepr(*so.typeSpecs, nullptr);
+        } else if (so.type.has_value()) {
+            opType = *so.type;
+        } else {
+            opType = getExprTypeNode(so.expr);
+        }
         if (!opType) {
             emitUnimplemented("codegen: cannot determine operand type of sizeof", expr->span);
             break;
@@ -472,13 +481,19 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         break;
     }
     case K::AlignOf: {
-        // `_Alignof(type)` → compile-time alignment as size_t (i64).
+        // `_Alignof(type-name)` → compile-time alignment as size_t (i64).
         const auto& ao = static_cast<const wvmcc::parser::AlignOfExpr&>(*expr);
-        if (!ao.type) {
+        wvmcc::parser::TypeNodePtr opType;
+        if (ao.typeSpecs.has_value() && semantic_) {
+            opType = semantic_->canonicalTypeRepr(*ao.typeSpecs, nullptr);
+        } else {
+            opType = ao.type;
+        }
+        if (!opType) {
             emitUnimplemented("codegen: _Alignof missing type", expr->span);
             break;
         }
-        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)typeMap_.byteAlignment(ao.type)});
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)typeMap_.byteAlignment(opType)});
         break;
     }
     default:

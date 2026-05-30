@@ -296,11 +296,18 @@ struct CastExpr : Expr {
 struct SizeofExpr : Expr {
     std::optional<TypeNodePtr> type; // if present, sizeof(type)
     ExprPtr expr; // if type not present, sizeof expr
+    // Raw type-specifiers for the `sizeof(type-name)` form. Preferred over
+    // `type` by codegen: lets it resolve struct tags / typedef-names to the
+    // complete type via Semantic::canonicalTypeRepr (the `type` field only
+    // ever held a placeholder for the type-name form).
+    std::optional<DeclarationSpecifiers> typeSpecs;
 };
 
 struct AlignOfExpr : Expr {
     TypeNodePtr type;
     std::string typeText; // textual representation of the type inside _Alignof
+    // Raw type-specifiers for `_Alignof(type-name)` (see SizeofExpr::typeSpecs).
+    std::optional<DeclarationSpecifiers> typeSpecs;
 };
 
 struct CompoundLiteral : Expr {
