@@ -60,6 +60,20 @@ function(add_link_test name source)
     set_tests_properties(e2e-${name} PROPERTIES TIMEOUT 15)
 endfunction()
 
+# add_link_stdout_test(<name> <source.c> <expected-stdout>)
+#   Like add_link_test, but asserts the program's captured stdout exactly equals
+#   <expected-stdout> (in addition to a zero exit). Used to verify output-side
+#   behavior such as flush-at-exit, where the exit code alone says nothing.
+function(add_link_stdout_test name source expected)
+    set(wasm_out ${INTEGRATION_TEST_DIR}/${name}.wasm)
+    add_test(
+        NAME e2e-${name}
+        COMMAND ${CMAKE_COMMAND} -E env
+            sh -c "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${wasm_out}' && out=$('${WASMVM_EXECUTABLE}' '${wasm_out}') && [ \"$out\" = '${expected}' ]"
+    )
+    set_tests_properties(e2e-${name} PROPERTIES TIMEOUT 15)
+endfunction()
+
 # Phase 2 — memory and aggregates
 add_e2e_test(phase2-struct           ${CMAKE_CURRENT_SOURCE_DIR}/phase2/e2e_struct.c)
 add_e2e_test(phase2-pointer-arith    ${CMAKE_CURRENT_SOURCE_DIR}/phase2/e2e_pointer_arith.c)
@@ -90,3 +104,7 @@ add_e2e_test(phase5-for-continue     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_for_
 
 # M2-L4 — lazy archive pulls: link a user TU against libc.a end-to-end.
 add_link_test(libc-string            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_libc_string.c)
+
+# stdio flush-at-exit: line-buffered stdout with no trailing newline must still
+# appear on normal termination (crt0 calls libc's __stdio_exit before exit).
+add_link_stdout_test(stdio-flush     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_stdio_flush.c "Hello")
