@@ -858,22 +858,35 @@ static int test_ac1_shadow_stack_address_sequence() {
     if (!ltee) { std::cerr << "AC1: [3] expected Local_tee{fp} (prologue)\n"; return 5; }
     if (!is(instrs[4], WasmVM::Opcode::Global_set)) { std::cerr << "AC1: [4] expected Global_set (prologue)\n"; return 6; }
 
-    // &x → shadow-stack address of x at offset 0: Local_get{fp}, I64_const{0}, I64_add
-    // followed by Local_set{p}
+    // &x → shadow-stack address of x at offset 0, then TAGGED with the mem[1]
+    // nibble so it can be dereferenced through an opaque pointer:
+    //   Local_get{fp}, I64_const{0}, I64_add, I64_const{mem1 tag}, I64_or, Local_set{p}
     auto lgFp = asOneIdx(instrs[5], WasmVM::Opcode::Local_get);
     if (!lgFp || lgFp->index != ltee->index) { std::cerr << "AC1: [5] expected Local_get{fp} (&x part 1)\n"; return 7; }
     auto xOff = asI64Const(instrs[6]);
     if (!xOff || xOff->value != 0) { std::cerr << "AC1: [6] expected I64_const{0} (x at frame offset 0)\n"; return 8; }
     if (!is(instrs[7], WasmVM::Opcode::I64_add)) { std::cerr << "AC1: [7] expected I64_add (shadow-stack address of x)\n"; return 9; }
-    if (!is(instrs[8], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [8] expected Local_set (p = &x)\n"; return 10; }
+    // Tag the address with the mem[1] nibble (I64_const{tag}, I64_or) before storing to p.
+    if (!asI64Const(instrs[8])) { std::cerr << "AC1: [8] expected I64_const{mem1 tag}\n"; return 10; }
+    if (!is(instrs[9], WasmVM::Opcode::I64_or)) { std::cerr << "AC1: [9] expected I64_or (apply mem1 tag)\n"; return 11; }
+    if (!is(instrs[10], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [10] expected Local_set (p = &x)\n"; return 12; }
 
-    // *p = 5: rhs eval, address via p, store through pointer
-    auto five = asI32Const(instrs[9]);
-    if (!five || five->value != 5) { std::cerr << "AC1: [9] expected I32_const{5}\n"; return 11; }
-    if (!is(instrs[10], WasmVM::Opcode::Local_set)) { std::cerr << "AC1: [10] expected Local_set{temp}\n"; return 12; }
-    if (!is(instrs[11], WasmVM::Opcode::Local_get)) { std::cerr << "AC1: [11] expected Local_get{p} (pointer value)\n"; return 13; }
-    if (!is(instrs[12], WasmVM::Opcode::Local_get)) { std::cerr << "AC1: [12] expected Local_get{temp} (value 5)\n"; return 14; }
-    if (!is(instrs[13], WasmVM::Opcode::I32_store)) { std::cerr << "AC1: [13] expected I32_store (write through *p)\n"; return 15; }
+    // *p = 5: rhs eval (I32_const{5}), then a tagged store through p that
+    // dispatches on the pointer's tag nibble (shr_u, eq, if/else) and writes via
+    // I32_store. Assert the structural invariants of the remainder.
+    bool sawFive = false, sawShr = false, sawIf = false;
+    int i32Stores = 0;
+    for (size_t k = 11; k < instrs.size(); ++k) {
+        auto c = asI32Const(instrs[k]);
+        if (c && c->value == 5) sawFive = true;
+        if (is(instrs[k], WasmVM::Opcode::I64_shr_u)) sawShr = true; // tag extraction
+        if (is(instrs[k], WasmVM::Opcode::If))        sawIf = true;  // mem dispatch
+        if (is(instrs[k], WasmVM::Opcode::I32_store)) ++i32Stores;   // one per memory arm
+    }
+    if (!sawFive) { std::cerr << "AC1: missing I32_const{5} (rhs)\n"; return 13; }
+    if (!sawShr)  { std::cerr << "AC1: missing tag extraction (i64.shr_u) on store\n"; return 14; }
+    if (!sawIf)   { std::cerr << "AC1: missing memory dispatch (if) on store\n"; return 15; }
+    if (i32Stores != 2) { std::cerr << "AC1: expected 2 i32.store (mem0+mem1 arms), got " << i32Stores << "\n"; return 16; }
 
     return 0;
 }
