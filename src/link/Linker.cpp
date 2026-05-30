@@ -83,7 +83,7 @@ void lazyPullArchives(LinkContext& ctx,
                 if (!cand) { ctx.error("link: " + ar.error()); return; }
                 if (!memberSatisfies(*cand, need)) continue;
 
-                merge::mergeOne(ctx, *cand, ar.memberName(i));
+                merge::mergeOne(ctx, *cand, ar.memberName(i), ar.memberRelocs(i));
                 if (ctx.hasErrors()) return;
                 pulled[a][i] = 1;
                 progress = true;
@@ -114,7 +114,7 @@ void phaseMerge(LinkContext& ctx) {
     std::vector<std::unique_ptr<ArchiveReader>> archives;
     for (const auto& in : ctx.inputs) {
         if (auto* mm = std::get_if<LinkInput::InMemoryModule>(&in.source)) {
-            merge::mergeOne(ctx, mm->module, mm->origin);
+            merge::mergeOne(ctx, mm->module, mm->origin, mm->dataRelocs);
             if (ctx.hasErrors()) return;
             std::ostringstream ss;
             ss << "  merged " << mm->origin

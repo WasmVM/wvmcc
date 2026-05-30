@@ -1,5 +1,6 @@
 #pragma once
 
+#include "Linker.hpp"   // DataPtrSite
 #include <WasmVM.hpp>
 #include <cstdint>
 #include <optional>
@@ -34,12 +35,18 @@ public:
     // if the member bytes fail to decode (sets error()).
     const WasmVM::WasmModule* module(size_t i);
 
+    // Data-pointer relocation sites (M2-L8) for member `i`, parsed from its
+    // `reloc.CODE` custom section (which module_decode drops). Empty if the
+    // member carries no relocs.
+    const std::vector<DataPtrSite>& memberRelocs(size_t i);
+
 private:
     std::string path_;
     std::vector<char> bytes_;            // whole archive file
     std::vector<std::string> names_;     // member names, archive order
     std::vector<uint64_t> dataOffset_;   // file offset of each member's size word
     std::vector<std::optional<WasmVM::WasmModule>> cache_;
+    std::vector<std::optional<std::vector<DataPtrSite>>> relocCache_;
     bool ok_ = false;
     std::string err_;
 };

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LinkContext.hpp"
+#include "Linker.hpp"
 #include <WasmVM.hpp>
 
 namespace wvmcc::link::merge {
@@ -18,9 +19,12 @@ struct Remap {
 
 // Append all of `in`'s contents to ctx.output, deduping imports / types and
 // remapping every cross-reference. Records diagnostics on ctx on failure.
-// `origin` is used in diagnostics.
+// `origin` is used in diagnostics. `dataRelocs` are the input's data-pointer
+// sites (M2-L8): when `in`'s data segments are rebased to avoid colliding with
+// previously-merged TUs, the `i64.const`s at these sites are shifted to match.
 void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
-              const std::string& origin);
+              const std::string& origin,
+              const std::vector<DataPtrSite>& dataRelocs = {});
 
 // Rewrite indices in a single instruction per `r`. Visible for unit tests.
 void remapInstr(WasmVM::WasmInstr& instr, const Remap& r);

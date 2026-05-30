@@ -362,7 +362,13 @@ int main(int argc, char** argv) {
 
     std::vector<wvmcc::link::LinkInput> linkInputs;
     {
-        wvmcc::link::LinkInput::InMemoryModule mod{std::move(module), *args.inputPath};
+        wvmcc::link::LinkInput::InMemoryModule mod{std::move(module), *args.inputPath, {}};
+        // M2-L8: hand the linker this TU's data-pointer sites so it can shift
+        // the i64.const constants if it rebases the TU's data.
+        for (const auto& rel : codegen.getRelocations()) {
+            mod.dataRelocs.push_back(
+                {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+        }
         wvmcc::link::LinkInput in;
         in.source = std::move(mod);
         linkInputs.push_back(std::move(in));

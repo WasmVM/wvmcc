@@ -57,6 +57,11 @@ struct DedupState {
 
     // Whether any merged module set the start section.
     bool startSet = false;
+
+    // M2-L8: running top of placed mem[0] data across merged TUs (0 = nothing
+    // placed yet). Each TU's data is rebased to start at/after this, so per-TU
+    // data segments (all emitted starting at offset 8) don't collide.
+    uint64_t dataTop = 0;
 };
 
 // Singleton-per-link tracking. We stash this on LinkContext via a side
@@ -81,6 +86,21 @@ void remapConstInstr(WasmVM::ConstInstr& c, const Remap& r) {
         }
         // I32/I64/F32/F64_const and Ref_null carry no index.
     }, c);
+}
+
+// Read a data segment's active offset (the i64/i32 const in mode.offset).
+// Returns 0 for passive segments or non-const offsets.
+uint64_t dataSegOffset(const WasmVM::WasmData& d) {
+    if (!d.mode.offset.has_value()) return 0;
+    uint64_t out = 0;
+    std::visit([&](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, WasmVM::Instr::I64_const> ||
+                      std::is_same_v<T, WasmVM::Instr::I32_const>) {
+            out = (uint64_t)v.value;
+        }
+    }, *d.mode.offset);
+    return out;
 }
 
 // When a freshly-merged module appends new function/global imports, every
@@ -253,7 +273,8 @@ void remapInstr(WasmVM::WasmInstr& instr, const Remap& r) {
 }
 
 void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
-              const std::string& origin) {
+              const std::string& origin,
+              const std::vector<DataPtrSite>& dataRelocs) {
     auto& out = ctx.output;
     DedupState& ds = dedupFor(ctx);
 
@@ -261,6 +282,37 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
     // definitions up by however many new imports this module introduces.
     const WasmVM::index_t oldFuncImports   = ds.funcImportCount;
     const WasmVM::index_t oldGlobalImports = ds.globalImportCount;
+
+    // ---- M2-L8: choose this TU's data rebase delta ----
+    // Each TU emits its data starting at offset 8, so without rebasing they
+    // collide. Pack this TU's data block immediately after everything placed
+    // so far; `dataDelta` is the uniform shift applied to its data segments AND
+    // to the i64.const data pointers in its code (via `dataRelocs`).
+    uint64_t dataDelta = 0;
+    {
+        bool hasData = false;
+        uint64_t tuMin = UINT64_MAX, tuMax = 0;
+        for (const auto& d : in.datas) {
+            if (!d.mode.offset.has_value()) continue;
+            uint64_t off = dataSegOffset(d);
+            tuMin = std::min(tuMin, off);
+            tuMax = std::max(tuMax, off + (uint64_t)d.init.size());
+            hasData = true;
+        }
+        if (hasData) {
+            if (ds.dataTop == 0) {
+                ds.dataTop = tuMax;          // first TU keeps its layout
+            } else {
+                uint64_t newBase = (ds.dataTop + 7u) & ~uint64_t{7};
+                dataDelta = newBase - tuMin;
+                ds.dataTop = newBase + (tuMax - tuMin);
+            }
+        }
+    }
+    // funcIdx → instr positions of i64.const data pointers to shift.
+    std::unordered_map<uint32_t, std::vector<uint32_t>> relocByFunc;
+    if (dataDelta != 0)
+        for (const auto& s : dataRelocs) relocByFunc[s.funcIdx].push_back(s.instrIdx);
 
     Remap r;
 
@@ -390,11 +442,26 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
         for (auto& instr : f.body) {
             remapInstr(instr, r);
         }
+        // M2-L8: shift this function's data-pointer i64.const constants by the
+        // TU's data rebase delta.
+        if (dataDelta != 0) {
+            auto it = relocByFunc.find((uint32_t)i);
+            if (it != relocByFunc.end()) {
+                for (uint32_t pos : it->second) {
+                    if (pos >= f.body.size()) continue;
+                    auto& instr = f.body[pos];
+                    if (instr.opcode == WasmVM::Opcode::I64_const) {
+                        if (auto* c = std::get_if<WasmVM::WasmInstr::ConstI64>(&instr.imm))
+                            c->value += (WasmVM::i64_t)dataDelta;
+                    }
+                }
+            }
+        }
         out.funcs.push_back(std::move(f));
     }
 
-    // ---- Data segments: append; offsets are left as-emitted (M2-L8
-    // rebases). Just remap memidx in the segment mode. ----
+    // ---- Data segments: append; rebase offsets by the TU's data delta
+    // (M2-L8) so multi-TU data doesn't collide. Remap memidx in the mode. ----
     for (const auto& d : in.datas) {
         WasmVM::WasmData copy = d;
         if (copy.mode.memidx.has_value()) {
@@ -403,6 +470,10 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
         }
         if (copy.mode.offset.has_value()) {
             remapConstInstr(*copy.mode.offset, r);
+            if (dataDelta != 0) {
+                uint64_t off = dataSegOffset(copy);
+                copy.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)(off + dataDelta)};
+            }
         }
         out.datas.push_back(std::move(copy));
     }

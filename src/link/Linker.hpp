@@ -9,13 +9,24 @@
 
 namespace wvmcc::link {
 
+// A code site holding an absolute data-segment pointer (an `i64.const` whose
+// value is a mem[0] data address). M2-L8 uses these to rewrite the constants
+// when a TU's data is rebased to a non-overlapping region during merge.
+// Indices are *input-module-local*: `funcIdx` indexes the module's defined
+// functions (imports excluded); `instrIdx` is the position within that
+// function's body.
+struct DataPtrSite {
+    uint32_t funcIdx;
+    uint32_t instrIdx;
+};
+
 // One input to the linker. Either an in-memory module (a freshly compiled
-// user TU) or an on-disk path to a wasmvm-ar archive ("libX.a"). Archive
-// reading is lazy-loaded in M2-L4; for now archive inputs error out.
+// user TU) or an on-disk path to a wasmvm-ar archive ("libX.a").
 struct LinkInput {
     struct InMemoryModule {
         WasmVM::WasmModule module;
         std::string origin; // path or "<in-memory>" for diagnostics
+        std::vector<DataPtrSite> dataRelocs; // M2-L8 data-pointer sites
     };
     struct ArchivePath {
         std::string path; // resolved filesystem path
