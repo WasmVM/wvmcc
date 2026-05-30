@@ -116,6 +116,55 @@ int main() {
     }
     EXPECT(putsExportOk, "puts export points at the new local index 1");
 
+    // ---- Global import resolution (data-global analogue) ----------------
+    // A referencing TU imports `(global env.errno i64)` at globalidx 0; the
+    // defining TU exports an i64 address-global "errno" at globalidx 1.
+    // resolveImports should drop the import and rewrite global.get 0 → 0
+    // (the def shifts 1 → 0 once the single global import is removed).
+    {
+        LinkContext gctx;
+        auto& gm = gctx.output;
+
+        WasmVM::WasmImport gimp;
+        gimp.module = "env"; gimp.name = "errno";
+        gimp.desc = WasmVM::GlobalType{WasmVM::GlobalType::constant, WasmVM::ValueType::i64};
+        gm.imports.push_back(gimp);
+
+        WasmVM::WasmGlobal g;
+        g.type = WasmVM::GlobalType{WasmVM::GlobalType::constant, WasmVM::ValueType::i64};
+        g.init = WasmVM::Instr::I64_const{(WasmVM::i64_t)8};
+        gm.globals.push_back(g);
+
+        WasmVM::WasmExport gex;
+        gex.name = "errno"; gex.desc = WasmVM::WasmExport::DescType::global;
+        gex.index = 1; // def is after the 1 global import
+        gm.exports.push_back(gex);
+
+        WasmVM::FuncType gft; // () -> ()
+        gm.types.push_back(gft);
+        WasmVM::WasmFunc gf;
+        gf.typeidx = 0;
+        gf.body.push_back(WasmVM::Instr::Global_get{(WasmVM::index_t)0}); // read imported errno
+        gf.body.push_back(WasmVM::Instr::Drop{});
+        gf.body.push_back(WasmVM::Instr::End{});
+        gm.funcs.push_back(gf);
+
+        resolveImports(gctx);
+
+        bool anyGlobalImport = false;
+        for (const auto& i : gm.imports)
+            if (std::holds_alternative<WasmVM::GlobalType>(i.desc)) anyGlobalImport = true;
+        EXPECT(!anyGlobalImport, "global import env.errno dropped after resolution");
+
+        const auto& gbody = gm.funcs[0].body;
+        EXPECT(gbody[0].opcode == WasmVM::Opcode::Global_get, "fn[0] is a Global_get");
+        if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&gbody[0].imm)) {
+            EXPECT(oi->index == 0, "global.get rewritten to the local errno (new globalidx 0)");
+        }
+        EXPECT(!gm.exports.empty() && gm.exports[0].index == 0,
+               "errno export points at the new local globalidx 0");
+    }
+
     if (failures == 0) std::cout << "all symbol-resolver tests passed\n";
     return failures == 0 ? 0 : 1;
 }
