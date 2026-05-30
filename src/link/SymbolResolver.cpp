@@ -24,10 +24,110 @@ void rewriteConstInstr(WasmVM::ConstInstr& c,
     }, c);
 }
 
+// Resolve cross-module GLOBAL imports against the merged exports by name —
+// the data-symbol analogue of function resolution. A defining TU exports an
+// `i64` address-global (e.g. `errno`); referencing TUs import a global of the
+// same name and `global.get` it. Here we drop each resolved global import and
+// rewrite every global-index reference that pointed at it to the defining
+// global's index. Imported globals occupy the low slots of the global index
+// space, so removing some shifts the defined globals down by the resolved
+// count — exactly mirroring resolveImports' function handling.
+//
+// Single-definition is the libc case (one `int errno;`, many `extern`s); no
+// address collision arises because only one TU defines the object. (Relocating
+// multiple defining TUs' data so their addresses don't overlap is a separate,
+// pre-existing concern handled by RelocApply.)
+void resolveGlobalImports(LinkContext& ctx) {
+    auto& m = ctx.output;
+
+    std::unordered_map<std::string, WasmVM::index_t> globalExport; // name → global idx
+    for (const auto& ex : m.exports) {
+        if (ex.desc == WasmVM::WasmExport::DescType::global)
+            globalExport[ex.name] = ex.index;
+    }
+
+    std::vector<WasmVM::index_t> globalRemap; // old global-import idx → new global idx
+    std::vector<WasmVM::WasmImport> kept;
+    WasmVM::index_t newGlobalImportIdx = 0;
+    int resolvedCount = 0;
+    std::vector<bool> isResolved;
+    std::vector<WasmVM::index_t> oldTarget; // valid only when isResolved[i]
+
+    for (const auto& imp : m.imports) {
+        if (std::holds_alternative<WasmVM::GlobalType>(imp.desc)) {
+            auto it = globalExport.find(imp.name);
+            const bool isHost = kHostModules.count(imp.module) > 0;
+            const bool resolve = !isHost && it != globalExport.end();
+            if (resolve) {
+                isResolved.push_back(true);
+                oldTarget.push_back(it->second);
+                globalRemap.push_back(0); // fixed below
+                ++resolvedCount;
+            } else {
+                isResolved.push_back(false);
+                oldTarget.push_back(0);
+                globalRemap.push_back(newGlobalImportIdx++);
+                kept.push_back(imp);
+            }
+        } else {
+            kept.push_back(imp);
+        }
+    }
+
+    if (resolvedCount == 0) return; // nothing to do — leave imports/index space as-is
+
+    const WasmVM::index_t oldGlobalImportCount = (WasmVM::index_t)globalRemap.size();
+    const WasmVM::index_t newGlobalImportCount = newGlobalImportIdx;
+    auto remapDefinedGlobal = [&](WasmVM::index_t old) -> WasmVM::index_t {
+        return newGlobalImportCount + (old - oldGlobalImportCount);
+    };
+    for (size_t i = 0; i < globalRemap.size(); ++i) {
+        if (isResolved[i]) globalRemap[i] = remapDefinedGlobal(oldTarget[i]);
+    }
+    auto remapGlobal = [&](WasmVM::index_t old) -> WasmVM::index_t {
+        if (old < globalRemap.size()) return globalRemap[old];
+        return remapDefinedGlobal(old);
+    };
+
+    namespace Op = WasmVM::Opcode;
+    // Rewrite every global-index reference: global.get / global.set in code...
+    for (auto& f : m.funcs) {
+        for (auto& instr : f.body) {
+            if (instr.opcode == Op::Global_get || instr.opcode == Op::Global_set) {
+                if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm)) {
+                    oi->index = remapGlobal(oi->index);
+                }
+            }
+        }
+    }
+    // ...global exports...
+    for (auto& ex : m.exports) {
+        if (ex.desc == WasmVM::WasmExport::DescType::global) {
+            ex.index = remapGlobal(ex.index);
+        }
+    }
+    // ...and global.get inside const-expr initializers (global inits).
+    for (auto& g : m.globals) {
+        std::visit([&](auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, WasmVM::Instr::Global_get>) {
+                v.index = remapGlobal(v.index);
+            }
+        }, g.init);
+    }
+
+    m.imports = std::move(kept);
+}
+
 } // namespace
 
 void resolveImports(LinkContext& ctx) {
     auto& m = ctx.output;
+
+    // Resolve cross-module data globals first (independent global index space;
+    // order vs. function resolution doesn't matter). Done before the function
+    // logic's early-return so it runs even when no function imports resolve.
+    resolveGlobalImports(ctx);
 
     // Build a name → (kind, index) export table.
     struct ExportEntry {
