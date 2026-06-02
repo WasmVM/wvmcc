@@ -53,3 +53,13 @@ double copysign(double x, double y) {
     u64 by = bits_of(y) & 0x8000000000000000UL;
     return double_of(bx | by);
 }
+
+// IEEE 754 constants exposed by <math.h>. wvmcc doesn't yet fold
+// `0.0 / 0.0` or `1.0 / 0.0` at compile time, so we construct them from
+// raw bit patterns each call. Cheap (a single memcpy) and avoids relying
+// on the codegen's constant-expression evaluator for floats.
+__attribute__((visibility("default")))
+double __wvmcc_nan(void)  { return double_of(0x7ff8000000000000UL); }
+
+__attribute__((visibility("default")))
+double __wvmcc_inf(void)  { return double_of(0x7ff0000000000000UL); }

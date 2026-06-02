@@ -225,8 +225,16 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         auto prologue = generatePrologue();
         // Append epilogue at end for void/fallthrough paths.
         generateEpilogue();
+        size_t prologueLen = prologue.size();
         prologue.insert(prologue.end(), instrBuffer_.begin(), instrBuffer_.end());
         instrBuffer_ = std::move(prologue);
+        // The prologue was prepended; every previously-recorded data-pointer
+        // site (M2-E) was indexed against the pre-prologue position. Shift
+        // them so they still point at the same `i64.const` instructions in
+        // the final body the linker will see.
+        for (auto& site : dataPtrSites_) {
+            site.instrIdx += prologueLen;
+        }
     }
 
     instrBuffer_.push_back(WasmVM::Instr::End{});

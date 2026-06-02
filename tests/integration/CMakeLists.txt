@@ -116,3 +116,13 @@ add_link_test(noreturn               ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_nore
 # Flush on explicit exit(): buffered output must survive a call to exit() that
 # never returns to crt0 (libc exit() calls __stdio_exit before terminating).
 add_link_stdout_test(exit-flush      ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_exit_flush.c "before-exit")
+
+# M2-14 — float printf via hand-rolled %f / %e / %g / %a. Returns 0 iff every
+# acceptance-criterion conversion produces the expected output (compared via
+# snprintf + strcmp inside the program).
+add_link_test(printf-float           ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_printf_float.c)
+
+# M2-14 — NaN / +Inf / -Inf printing via <math.h>. Stdout-fixture check.
+add_link_stdout_test(printf-float-special
+                                     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_printf_float_special.c
+                                     "nan inf -inf")
