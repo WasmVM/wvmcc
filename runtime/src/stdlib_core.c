@@ -15,10 +15,7 @@ __attribute__((import_module("sys_proc"), import_name("exit")))
 _Noreturn void sys_proc_exit(int);
 
 /* C `atexit`: handlers registered here run in reverse order of registration on
-   normal termination. The table is fixed-size (C requires at least 32 slots).
-   stdio self-registers its flush via atexit on first buffered use (#79), so
-   exit() no longer references __stdio_exit directly — a program that never
-   touches stdio registers nothing and links no flush path. */
+   normal termination. The table is fixed-size (C requires at least 32 slots). */
 #define _ATEXIT_MAX 32
 static void (*__atexit_funcs[_ATEXIT_MAX])(void);
 static int   __atexit_count;
@@ -29,11 +26,23 @@ int atexit(void (*func)(void)) {
     return 0;
 }
 
+/* A single libc-internal at-exit handler — stdio self-registers its flush here
+   on first buffered use (#79). Kept out of the user atexit table so (a) a full
+   table can never silently drop the flush, and (b) it always runs *after* every
+   user handler, matching C's "streams are flushed after atexit handlers"
+   ordering. exit() still references no stdio symbol by name, so a program that
+   never touches stdio leaves the hook null and links no flush path. */
+static void (*__atexit_libc_hook)(void);
+
+void __atexit_libc(void (*func)(void)) { __atexit_libc_hook = func; }
+
 _Noreturn void exit(int status) {
-    /* C: run atexit handlers in reverse (LIFO) order, then terminate. */
+    /* C: run user atexit handlers in reverse (LIFO) order... */
     while (__atexit_count > 0) {
         __atexit_funcs[--__atexit_count]();
     }
+    /* ...then the libc-internal cleanup (stdio flush) after all of them. */
+    if (__atexit_libc_hook) __atexit_libc_hook();
     sys_proc_exit(status);
 }
 
