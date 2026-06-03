@@ -39,9 +39,22 @@ FILE __wvmcc_stdin  = { 0, _F_READ };
 FILE __wvmcc_stdout = { 1, _F_WRITE | _F_LINEBUF };
 FILE __wvmcc_stderr = { 2, _F_WRITE | _F_UNBUF };
 
+// Flush every buffered write stream on normal termination (defined below).
+// #79: self-registered with atexit() on first buffered use, so exit() reaches
+// it through the standard atexit mechanism rather than a hardcoded reference.
+void __stdio_exit(void);
+
 static void lazy_init(FILE *f) {
     if (f->flags & _F_INITED) return;
     f->flags |= _F_INITED;
+    // Register the flush-at-exit handler exactly once, the first time any write
+    // stream is touched. A program that never writes via stdio registers
+    // nothing, so exit() runs an empty handler list.
+    static int atexit_registered;
+    if ((f->flags & _F_WRITE) && !atexit_registered) {
+        atexit_registered = 1;
+        atexit(__stdio_exit);
+    }
     if ((f->flags & _F_UNBUF) == 0) {
         if (f->flags & _F_WRITE) {
             f->wbuf = (char *)malloc(BUFSIZ);

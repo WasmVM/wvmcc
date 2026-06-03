@@ -39,6 +39,11 @@ public:
     // Public hooks used by FunctionCodegen during body emission.
     // Returns table-slot index for an address-taken function, or std::nullopt.
     std::optional<size_t> getFuncTableSlot(const std::string& name) const;
+    // #79: assign (or fetch) the funcref-table slot for `name`, called lazily
+    // when a function-pointer value is emitted during body generation. After
+    // secondPass, emitFuncTable() materializes a funcref table + element
+    // segment covering every interned slot.
+    size_t internFuncTableSlot(const std::string& name);
     // typeIdx in module_.types for a function by name (looked up via FuncSymbol).
     std::optional<WasmVM::index_t> getFuncTypeIdx(const std::string& name) const;
     // Append a new mutable i32 global initialized to 0; return its index.
@@ -66,6 +71,18 @@ public:
     const std::vector<Relocation>& getRelocations() const { return relocations_; }
     const std::vector<DataSymbol>& getDataSymbols() const { return dataSymbols_; }
 
+    // #79: a function-pointer relocation site — an `i64.const (tag | slot)`
+    // whose embedded funcref-table slot the linker rebases when it merges the
+    // per-TU funcref tables. `codeFuncIdx` / `instrIdx` are input-module-local,
+    // matching DataPtrSite.
+    struct FuncPtrReloc {
+        size_t codeFuncIdx;
+        size_t instrIdx;
+    };
+    const std::vector<FuncPtrReloc>& getFuncPtrRelocs() const { return funcPtrRelocs_; }
+    // Number of funcref-table slots this TU allocated (table size).
+    size_t funcTableSlotCount() const { return funcTableSlots_.size(); }
+
     // Codegen diagnostics accumulated across all functions (errors here mean
     // the emitted module is unsound — the driver should report and not ship it).
     const std::vector<wvmcc::Diagnostic>& getDiagnostics() const { return diagnostics_; }
@@ -91,14 +108,19 @@ private:
     // Filled during firstPass() so indirect calls and `&func` know the FuncType.
     std::unordered_map<std::string, WasmVM::index_t> funcTypeIdx_;
 
-    // Function-name → table-slot index (in funcref table 0) for every
-    // address-taken function. Populated by analyzeFuncAddressTaken().
+    // Function-name → table-slot index (in funcref table 0). Interned lazily by
+    // internFuncTableSlot() as function-pointer values are emitted, then
+    // materialized into a funcref table + element segment by emitFuncTable().
     std::unordered_map<std::string, size_t> funcTableSlots_;
 
     // M2-E: data symbols (one per distinct string literal so far) and the
     // relocations collected from each FunctionCodegen.
     std::vector<DataSymbol> dataSymbols_;
     std::vector<Relocation> relocations_;
+    // #79: function-pointer relocation sites collected across all functions.
+    std::vector<FuncPtrReloc> funcPtrRelocs_;
+    // Emit the funcref table + active element segment covering funcTableSlots_.
+    void emitFuncTable();
 
     // Cross-TU extern data globals (M2): file-scope object definitions whose
     // address is exported as a Wasm global so other TUs' `extern` references
@@ -164,9 +186,6 @@ private:
     // __stack_pointer = 0, __heap_base = 1. Captured in setupGlobals().
     int stackPtrGlobalIdx_ = -1;
     int heapBaseGlobalIdx_ = -1;
-    // Walk every function body to collect &funcname expressions; allocate
-    // table slots and emit a funcref table + element segment.
-    void analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnitPtr& tu);
     void secondPass(const wvmcc::parser::TranslationUnitPtr& tu);
     void emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& funcDef);
     void emitStringLiterals();

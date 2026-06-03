@@ -51,10 +51,27 @@ void emitStartWrapper(WasmVM::WasmModule& module,
                       const SysProcImports& sysProc,
                       WasmVM::index_t mainFuncIdx,
                       bool mainHasArgv,
-                      std::optional<WasmVM::index_t> atExitFlushIdx) {
+                      std::optional<WasmVM::index_t> atExitFlushIdx,
+                      std::optional<WasmVM::index_t> libcExitIdx) {
     // FuncType: () -> ()
     WasmVM::FuncType ft;
     WasmVM::index_t wrapperType = internFuncType(module, ft);
+
+    // Terminal sequence after `main` returns (its i32 result is on the stack).
+    // Preferred path (#79): hand the result to libc `exit`, which runs atexit
+    // handlers (including stdio's self-registered flush) then never returns — so
+    // normal return from main and explicit exit() share one termination path.
+    // Fallback (no libc exit linked, e.g. -nostdlib): optional stdio flush then
+    // sys_proc.exit directly.
+    auto emitTerminate = [&](std::vector<WasmVM::WasmInstr>& b) {
+        if (libcExitIdx) {
+            b.push_back(WasmVM::Instr::Call{*libcExitIdx});
+        } else {
+            if (atExitFlushIdx) b.push_back(WasmVM::Instr::Call{*atExitFlushIdx});
+            b.push_back(WasmVM::Instr::Call{sysProc.exit});
+        }
+        b.push_back(WasmVM::Instr::Unreachable{});
+    };
 
     // Stack pointer global is module.globals[0] (M1 / freestanding setup).
     constexpr WasmVM::index_t kSpGlobal = 0;
@@ -148,16 +165,13 @@ void emitStartWrapper(WasmVM::WasmModule& module,
         body.push_back(WasmVM::Instr::Local_get{0});
         body.push_back(WasmVM::Instr::Local_get{3});
         body.push_back(WasmVM::Instr::Call{mainFuncIdx});
-        if (atExitFlushIdx) body.push_back(WasmVM::Instr::Call{*atExitFlushIdx});
-        body.push_back(WasmVM::Instr::Call{sysProc.exit});
-        body.push_back(WasmVM::Instr::Unreachable{});
+        emitTerminate(body);
     } else {
-        // main(void) wrapper: call main; flush stdio (if linked); pass result
-        // to exit. The flush is () -> (), leaving main's result on the stack.
+        // main(void) wrapper: call main, then terminate (libc exit / flush +
+        // sys_proc.exit). main's i32 result stays on the stack for the
+        // terminator to consume.
         body.push_back(WasmVM::Instr::Call{mainFuncIdx});
-        if (atExitFlushIdx) body.push_back(WasmVM::Instr::Call{*atExitFlushIdx});
-        body.push_back(WasmVM::Instr::Call{sysProc.exit});
-        body.push_back(WasmVM::Instr::Unreachable{});
+        emitTerminate(body);
     }
     body.push_back(WasmVM::Instr::End{});
 

@@ -62,7 +62,17 @@ struct DedupState {
     // placed yet). Each TU's data is rebased to start at/after this, so per-TU
     // data segments (all emitted starting at offset 8) don't collide.
     uint64_t dataTop = 0;
+
+    // #79: running count of funcref-table slots placed across merged inputs.
+    // Each input's table entries are appended after this, its element-segment
+    // offset and its function-pointer i64.const slots shifted to match.
+    uint64_t slotTop = 0;
 };
+
+// #79: function-pointer tag layout (must match FunctionCodegen). A function
+// pointer is `(kFuncPtrTag | slot)`; rebasing shifts only the slot bits.
+static constexpr int64_t kFuncPtrTag = (int64_t)0xF << 60;
+static constexpr int64_t kFuncPtrSlotMask = ~((int64_t)0xF << 60);
 
 // Singleton-per-link tracking. We stash this on LinkContext via a side
 // channel below.
@@ -274,7 +284,8 @@ void remapInstr(WasmVM::WasmInstr& instr, const Remap& r) {
 
 void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
               const std::string& origin,
-              const std::vector<DataPtrSite>& dataRelocs) {
+              const std::vector<DataPtrSite>& dataRelocs,
+              const std::vector<DataPtrSite>& funcPtrRelocs) {
     auto& out = ctx.output;
     DedupState& ds = dedupFor(ctx);
 
@@ -425,11 +436,49 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
                            "linkable mode expects mem imports only");
         return;
     }
-    if (!in.tables.empty()) {
-        ctx.error(origin + ": linkable input defines its own table; merge in "
-                           "linkable mode expects table imports only");
-        return;
+    // ---- #79: merge per-TU funcref tables into one unified table 0 ----
+    // Each input may define a local funcref table (sized to its function-pointer
+    // slots, or empty when it only *calls* through pointers). We concatenate the
+    // slots: this input's entries land at [slotDelta, slotDelta + size), so its
+    // element-segment offset and its function-pointer i64.const constants are
+    // shifted by slotDelta below. crt0 later renumbers element-segment ref.func
+    // entries by the sys_proc import count; the slot constants are table indices,
+    // independent of the function index space, so they stay put.
+    const uint64_t slotDelta = ds.slotTop;
+    {
+        uint64_t inSlots = 0;
+        for (const auto& t : in.tables) {
+            if (t.reftype != WasmVM::RefType::funcref) {
+                ctx.error(origin + ": linkable input defines a non-funcref table "
+                                   "(unsupported)");
+                return;
+            }
+            inSlots += t.limits.min;
+        }
+        if (!in.tables.empty()) {
+            if (out.tables.empty()) {
+                WasmVM::TableType u;
+                u.limits.min = (WasmVM::offset_t)(ds.slotTop + inSlots);
+                u.limits.max = std::nullopt;
+                u.limits.is64 = false;
+                u.reftype = WasmVM::RefType::funcref;
+                out.tables.push_back(u);
+            } else {
+                out.tables[0].limits.min =
+                    (WasmVM::offset_t)(ds.slotTop + inSlots);
+                if (out.tables[0].limits.max.has_value())
+                    out.tables[0].limits.max =
+                        (WasmVM::offset_t)(ds.slotTop + inSlots);
+            }
+        }
+        ds.slotTop += inSlots;
     }
+
+    // Map this input's funcPtr relocation sites by input-local function index.
+    std::unordered_map<uint32_t, std::vector<uint32_t>> funcPtrByFunc;
+    if (slotDelta != 0)
+        for (const auto& s : funcPtrRelocs)
+            funcPtrByFunc[s.funcIdx].push_back(s.instrIdx);
 
     // ---- Globals: append defined globals (after import dedup is done) ----
     // M2-D linkable modules have zero defined globals. Defensive support
@@ -490,6 +539,23 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
                 }
             }
         }
+        // #79: rebase function-pointer i64.const slots by the TU's table delta,
+        // preserving the tag in the high nibble.
+        if (slotDelta != 0) {
+            auto it = funcPtrByFunc.find((uint32_t)i);
+            if (it != funcPtrByFunc.end()) {
+                for (uint32_t pos : it->second) {
+                    if (pos >= f.body.size()) continue;
+                    auto& instr = f.body[pos];
+                    if (instr.opcode == WasmVM::Opcode::I64_const) {
+                        if (auto* c = std::get_if<WasmVM::WasmInstr::ConstI64>(&instr.imm)) {
+                            int64_t slot = c->value & kFuncPtrSlotMask;
+                            c->value = kFuncPtrTag | (slot + (int64_t)slotDelta);
+                        }
+                    }
+                }
+            }
+        }
         out.funcs.push_back(std::move(f));
     }
 
@@ -511,8 +577,9 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
         out.datas.push_back(std::move(copy));
     }
 
-    // ---- Element segments: append; remap tableidx and funcref entries.
-    // M2-L7 merges per-TU element segments into the unified table. ----
+    // ---- Element segments: append; remap tableidx and funcref entries, and
+    // shift the active offset into this input's slice of the unified table
+    // (#79). The ref.func entries are remapped via r.func. ----
     for (const auto& e : in.elems) {
         WasmVM::WasmElem copy = e;
         if (copy.mode.tableidx.has_value()) {
@@ -521,6 +588,13 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
         }
         if (copy.mode.offset.has_value()) {
             remapConstInstr(*copy.mode.offset, r);
+            // #79: place this segment at [slotDelta + originalOffset).
+            if (slotDelta != 0) {
+                if (auto* c = std::get_if<WasmVM::Instr::I32_const>(&*copy.mode.offset))
+                    c->value += (WasmVM::i32_t)slotDelta;
+                else if (auto* c64 = std::get_if<WasmVM::Instr::I64_const>(&*copy.mode.offset))
+                    c64->value += (WasmVM::i64_t)slotDelta;
+            }
         }
         for (auto& entry : copy.elemlist) {
             remapConstInstr(entry, r);

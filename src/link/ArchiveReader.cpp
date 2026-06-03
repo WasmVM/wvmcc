@@ -75,6 +75,7 @@ ArchiveReader::ArchiveReader(const std::string& path) : path_(path) {
 
     cache_.resize(names_.size());
     relocCache_.resize(names_.size());
+    funcPtrRelocCache_.resize(names_.size());
     ok_ = true;
 }
 
@@ -124,11 +125,23 @@ bool readULEB(const char* buf, size_t end, size_t& pos, uint64_t& out) {
 } // namespace
 
 const std::vector<DataPtrSite>& ArchiveReader::memberRelocs(size_t i) {
+    return parseRelocSection(i, "reloc.CODE", /*hasSymAndAddend=*/true,
+                             relocCache_);
+}
+
+const std::vector<DataPtrSite>& ArchiveReader::memberFuncPtrRelocs(size_t i) {
+    return parseRelocSection(i, "reloc.FUNCPTR", /*hasSymAndAddend=*/false,
+                             funcPtrRelocCache_);
+}
+
+const std::vector<DataPtrSite>& ArchiveReader::parseRelocSection(
+    size_t i, const std::string& sectionName, bool hasSymAndAddend,
+    std::vector<std::optional<std::vector<DataPtrSite>>>& cache) {
     static const std::vector<DataPtrSite> empty;
     if (i >= names_.size()) return empty;
-    if (relocCache_[i].has_value()) return *relocCache_[i];
-    relocCache_[i].emplace(); // default to empty; fill if we find the section
-    auto& out = *relocCache_[i];
+    if (cache[i].has_value()) return *cache[i];
+    cache[i].emplace(); // default to empty; fill if we find the section
+    auto& out = *cache[i];
 
     const char* buf = bytes_.data();
     const size_t fileSize = bytes_.size();
@@ -156,7 +169,7 @@ const std::vector<DataPtrSite>& ArchiveReader::memberRelocs(size_t i) {
             if (readULEB(buf, secEnd, p, nameLen) && p + nameLen <= secEnd) {
                 std::string name(buf + p, (size_t)nameLen);
                 p += nameLen;
-                if (name == "reloc.CODE") {
+                if (name == sectionName) {
                     uint64_t secIndex = 0, count = 0;
                     if (readULEB(buf, secEnd, p, secIndex) &&
                         readULEB(buf, secEnd, p, count)) {
@@ -164,10 +177,12 @@ const std::vector<DataPtrSite>& ArchiveReader::memberRelocs(size_t i) {
                             uint64_t fIdx = 0, iIdx = 0, symIdx = 0, addend = 0;
                             if (!readULEB(buf, secEnd, p, fIdx)) break;
                             if (!readULEB(buf, secEnd, p, iIdx)) break;
-                            if (!readULEB(buf, secEnd, p, symIdx)) break;
-                            // addend is signed LEB; we don't need its value for
-                            // uniform per-TU rebasing — just consume it.
-                            if (!readULEB(buf, secEnd, p, addend)) break;
+                            if (hasSymAndAddend) {
+                                if (!readULEB(buf, secEnd, p, symIdx)) break;
+                                // addend is signed LEB; not needed for uniform
+                                // per-TU rebasing — just consume it.
+                                if (!readULEB(buf, secEnd, p, addend)) break;
+                            }
                             out.push_back({(uint32_t)fIdx, (uint32_t)iIdx});
                         }
                     }

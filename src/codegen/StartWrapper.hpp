@@ -36,15 +36,20 @@ SysProcImports injectSysProcImports(WasmVM::WasmModule& module,
 // (linker callers may renumber it during merging — pass the post-merge
 // index).
 //
-// `atExitFlushIdx`, when set, is the function index of a `() -> ()` cleanup
-// (libc's `__stdio_exit`) called after `main` returns and before sys_proc.exit,
-// so buffered stdio is flushed on normal termination. The linker passes it only
-// when stdio was actually linked into the image; otherwise it stays nullopt and
-// no call is emitted.
+// `libcExitIdx`, when set, is the function index of libc's `_Noreturn void
+// exit(int)`. The wrapper then terminates by calling it with main's result, so
+// returning from main runs the same atexit-handler path as an explicit exit()
+// (#79) — including stdio's self-registered flush. When unset, the wrapper
+// falls back to the optional `atExitFlushIdx` cleanup plus sys_proc.exit.
+//
+// `atExitFlushIdx`, when set (and `libcExitIdx` is not), is the function index
+// of a `() -> ()` cleanup (libc's `__stdio_exit`) called after `main` returns
+// and before sys_proc.exit, so buffered stdio is flushed on normal termination.
 void emitStartWrapper(WasmVM::WasmModule& module,
                       const SysProcImports& sysProc,
                       WasmVM::index_t mainFuncIdx,
                       bool mainHasArgv,
-                      std::optional<WasmVM::index_t> atExitFlushIdx = std::nullopt);
+                      std::optional<WasmVM::index_t> atExitFlushIdx = std::nullopt,
+                      std::optional<WasmVM::index_t> libcExitIdx = std::nullopt);
 
 } // namespace wvmcc::codegen::startwrapper

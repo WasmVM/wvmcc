@@ -881,7 +881,19 @@ std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSp
             f->element = curType;
             f->hasParamTypeList = layer->function.hasParamTypeList;
             f->isVariadic = layer->function.isVariadic;
-            for (const auto &p : layer->function.params) {
+            // A lone `(void)` parameter list denotes zero parameters — skip it,
+            // so the Function type carries no phantom param (which would
+            // otherwise surface as a spurious i32 in call_indirect / sizeof).
+            const auto& fps = layer->function.params;
+            bool voidParams = fps.size() == 1 && !fps[0].declarator && [&]{
+                for (const auto& ts : fps[0].specifiers.typeSpecifiers)
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                        && ts.simple.size() == 1
+                        && ts.simple[0] == DeclarationSpecifiers::SimpleTypeSpecifier::Void)
+                        return true;
+                return false;
+            }();
+            if (!voidParams) for (const auto &p : fps) {
                 // best-effort: build param type nodes (limited info)
                 std::shared_ptr<TypeNode> ptn = nullptr;
                 if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);

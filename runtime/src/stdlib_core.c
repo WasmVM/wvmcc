@@ -14,18 +14,26 @@
 __attribute__((import_module("sys_proc"), import_name("exit")))
 _Noreturn void sys_proc_exit(int);
 
-/* Defined in stdio_core.c; flushes every buffered write stream. Declared weakly
-   by reference: an exit()-calling program pulls in only this lightweight flush
-   path (flush_write_buf + the write syscall + the FILE objects), never the
-   malloc/printf machinery. Programs that never touch stdio still link it, but
-   the cost is a few hundred bytes of dead-on-arrival flush code — the price of
-   correct C `exit` semantics without a working atexit (function-pointer globals
-   aren't supported yet). crt0 calls __stdio_exit directly on normal return from
-   main; this covers the explicit exit() path, where main never returns. */
-void __stdio_exit(void);
+/* C `atexit`: handlers registered here run in reverse order of registration on
+   normal termination. The table is fixed-size (C requires at least 32 slots).
+   stdio self-registers its flush via atexit on first buffered use (#79), so
+   exit() no longer references __stdio_exit directly — a program that never
+   touches stdio registers nothing and links no flush path. */
+#define _ATEXIT_MAX 32
+static void (*__atexit_funcs[_ATEXIT_MAX])(void);
+static int   __atexit_count;
+
+int atexit(void (*func)(void)) {
+    if (!func || __atexit_count >= _ATEXIT_MAX) return 1; /* table full */
+    __atexit_funcs[__atexit_count++] = func;
+    return 0;
+}
 
 _Noreturn void exit(int status) {
-    __stdio_exit();          /* C: exit() flushes and closes all streams */
+    /* C: run atexit handlers in reverse (LIFO) order, then terminate. */
+    while (__atexit_count > 0) {
+        __atexit_funcs[--__atexit_count]();
+    }
     sys_proc_exit(status);
 }
 

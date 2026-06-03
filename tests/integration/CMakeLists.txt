@@ -86,6 +86,7 @@ add_e2e_test(phase3-goto             ${CMAKE_CURRENT_SOURCE_DIR}/phase3/e2e_goto
 
 # Phase 4 — advanced features
 add_e2e_test(phase4-func-pointer     ${CMAKE_CURRENT_SOURCE_DIR}/phase4/e2e_func_pointer.c)
+add_e2e_test(phase4-func-pointer-global ${CMAKE_CURRENT_SOURCE_DIR}/phase4/e2e_func_pointer_global.c)
 add_e2e_test(phase4-static-local     ${CMAKE_CURRENT_SOURCE_DIR}/phase4/e2e_static_local.c)
 
 # M2-A — variadic function support (compiler prereq for M2 libc/printf)
@@ -106,7 +107,8 @@ add_e2e_test(phase5-for-continue     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_for_
 add_link_test(libc-string            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_libc_string.c)
 
 # stdio flush-at-exit: line-buffered stdout with no trailing newline must still
-# appear on normal termination (crt0 calls libc's __stdio_exit before exit).
+# appear on normal termination. crt0 terminates through libc exit(), which runs
+# stdio's atexit-registered flush handler (#79).
 add_link_stdout_test(stdio-flush     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_stdio_flush.c "Hello")
 
 # _Noreturn: a function ending in a no-return call (exit/abort/user _Noreturn)
@@ -114,8 +116,14 @@ add_link_stdout_test(stdio-flush     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_stdi
 add_link_test(noreturn               ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_noreturn.c)
 
 # Flush on explicit exit(): buffered output must survive a call to exit() that
-# never returns to crt0 (libc exit() calls __stdio_exit before terminating).
+# never returns to crt0 (exit() runs stdio's atexit-registered flush, #79).
 add_link_stdout_test(exit-flush      ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_exit_flush.c "before-exit")
+
+# #79 — atexit() handlers run in reverse (LIFO) order on normal termination,
+# and stdio's flush is routed through atexit. main writes "main" first (so the
+# flush handler registers first and runs last), then registers 3 handlers that
+# print 1/2/3; LIFO yields "main321".
+add_link_stdout_test(atexit          ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_atexit.c "main321")
 
 # M2-14 — float printf via hand-rolled %f / %e / %g / %a. Returns 0 iff every
 # acceptance-criterion conversion produces the expected output (compared via

@@ -32,14 +32,11 @@ WasmVM::ValueType TypeMap::toWasmType(const wvmcc::parser::TypeNodePtr& type) co
             return WasmVM::ValueType::i32;
         }
         case wvmcc::parser::TypeNode::Kind::Pointer: {
-            // M2-L7: pointer-to-function uses Wasm's funcref reference type
-            // (via ref.func / call_ref) so the linker can renumber function
-            // indices when merging without needing to rewrite hardcoded slot
-            // numbers in user code. Other pointers stay i64 (wasm64).
-            if (type->pointee &&
-                type->pointee->kind == wvmcc::parser::TypeNode::Kind::Function) {
-                return WasmVM::ValueType::funcref;
-            }
+            // #79: a function pointer is a tagged i64 carrying a funcref-table
+            // slot (high nibble = function-pointer tag, low bits = slot), called
+            // via call_indirect. Unlike a Wasm funcref it can live in linear
+            // memory (arrays / structs / the atexit table) and be passed around
+            // like any other pointer. All pointers are i64 (wasm64).
             return WasmVM::ValueType::i64;
         }
         case wvmcc::parser::TypeNode::Kind::Array: {
@@ -47,9 +44,10 @@ WasmVM::ValueType TypeMap::toWasmType(const wvmcc::parser::TypeNodePtr& type) co
             return WasmVM::ValueType::i64;
         }
         case wvmcc::parser::TypeNode::Kind::Function: {
-            // M2-L7: bare function "type" decays to funcref in value context
-            // (matches the pointer-to-function case above).
-            return WasmVM::ValueType::funcref;
+            // #79: a bare function name decays to a function-pointer value — a
+            // tagged i64 funcref-table slot (matches the pointer-to-function
+            // case above).
+            return WasmVM::ValueType::i64;
         }
         case wvmcc::parser::TypeNode::Kind::Struct:
         case wvmcc::parser::TypeNode::Kind::Union: {

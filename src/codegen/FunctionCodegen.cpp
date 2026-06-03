@@ -235,6 +235,9 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         for (auto& site : dataPtrSites_) {
             site.instrIdx += prologueLen;
         }
+        for (auto& site : funcPtrSites_) {
+            site.instrIdx += prologueLen;
+        }
     }
 
     instrBuffer_.push_back(WasmVM::Instr::End{});
@@ -317,6 +320,17 @@ void FunctionCodegen::emitGlobalMemAddr(const GlobalMem& gm) {
         dataPtrSites_.push_back({instrBuffer_.size(), gm.address});
         emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)gm.address});
     }
+}
+
+// #79: emit a function-pointer value for `name` — a tagged i64 carrying the
+// function's funcref-table slot (high nibble = kFuncPtrTag, low bits = slot),
+// called through `call_indirect`. The slot is interned lazily; the embedded
+// constant is recorded as a relocation site so the linker can rebase it when
+// per-TU funcref tables are merged into one.
+void FunctionCodegen::emitFuncPtrValue(const std::string& name) {
+    size_t slot = moduleCg_ ? moduleCg_->internFuncTableSlot(name) : 0;
+    funcPtrSites_.push_back({instrBuffer_.size(), name});
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)(kFuncPtrTag | (int64_t)slot)});
 }
 
 void FunctionCodegen::pushLoop(int breakDepthAtOpen, int continueDepthAtOpen) {
@@ -547,13 +561,12 @@ void FunctionCodegen::emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr) 
 void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue) {
     auto symbolInfo = symbolTable_.lookup(expr.name);
     if (!symbolInfo) {
-        // M2-L7: bare function name in value context decays to a funcref via
-        // ref.func, so the linker can renumber function indices without
-        // rewriting hardcoded slot constants in user code.
+        // #79: a bare function name in value context decays to a
+        // function-pointer value (tagged i64 funcref-table slot).
         if (!needLValue) {
             auto funcSym = symbolTable_.lookupFunction(expr.name);
             if (funcSym) {
-                emit(WasmVM::Instr::Ref_func{(WasmVM::index_t)funcSym->funcIndex});
+                emitFuncPtrValue(expr.name);
                 return;
             }
         }
@@ -964,13 +977,13 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
 void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue) {
     // Address-of: emit the inner expression as an lvalue (leaves i64 address on stack)
     if (expr.op == "&") {
-        // M2-L7: &funcname produces a funcref via ref.func. The linker
-        // remaps the funcidx (no hardcoded slot indices in user code).
+        // #79: &funcname produces a function-pointer value (tagged i64
+        // funcref-table slot), identical to the bare-name decay.
         if (expr.rhs && expr.rhs->kind == wvmcc::parser::Expr::Kind::Ident) {
             const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.rhs);
             auto funcSym = symbolTable_.lookupFunction(id.name);
             if (funcSym) {
-                emit(WasmVM::Instr::Ref_func{(WasmVM::index_t)funcSym->funcIndex});
+                emitFuncPtrValue(id.name);
                 return;
             }
         }
@@ -1305,8 +1318,9 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     };
 
     auto emitIndirectCall = [&]() {
-        // M2-L7: function pointers are funcref values. Push the funcref and
-        // use call_ref <typeidx>; no table indirection is needed.
+        // #79: function pointers are tagged-i64 funcref-table slots. Push the
+        // pointer value (the table index, after masking the tag) and use
+        // call_indirect <table 0> <typeidx>.
         emitExpr(expr.callee, false);
 
         std::optional<WasmVM::index_t> typeIdx;
@@ -1324,8 +1338,19 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
                                  == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
                 if (!isVoid) ft.results.push_back(typeMap_.toWasmType(fnNode->element));
             }
-            for (const auto& p : fnNode->params) {
-                ft.params.push_back(typeMap_.toWasmType(p));
+            // A lone `(void)` parameter list means zero parameters — don't
+            // synthesize a spurious i32 param (which would mismatch the callee's
+            // real type and underflow the operand stack on a no-arg call).
+            auto isVoidParam = [](const wvmcc::parser::TypeNodePtr& p) {
+                return p && p->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                    && p->simple.size() == 1
+                    && p->simple[0]
+                       == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void;
+            };
+            if (!(fnNode->params.size() == 1 && isVoidParam(fnNode->params[0]))) {
+                for (const auto& p : fnNode->params) {
+                    ft.params.push_back(typeMap_.toWasmType(p));
+                }
             }
             if (fnNode->isVariadic) {
                 ft.params.push_back(WasmVM::ValueType::i64); // trailing va_args ptr
@@ -1346,7 +1371,12 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
             return;
         }
 
-        emit(WasmVM::Instr::Call_ref{*typeIdx});
+        // Mask off the function-pointer tag to recover the table slot, narrow
+        // to i32, and dispatch through funcref table 0.
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+        emit(WasmVM::Instr::I64_and{});
+        emit(WasmVM::Instr::I32_wrap_i64{});
+        emit(WasmVM::Instr::Call_indirect{(WasmVM::index_t)0, *typeIdx});
     };
 
     if (!calleeIsVariadic) {
@@ -2127,6 +2157,24 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
     }
 }
 
+// #79: does an indirect call through `callee` (a function-pointer expression)
+// leave a value on the stack? False for a `void` return (call_indirect pushes
+// nothing, so the expression-statement path must not emit a Drop). Struct
+// returns currently still leave the sret pointer.
+bool FunctionCodegen::indirectCallLeavesValue(const wvmcc::parser::ExprPtr& callee) {
+    auto ct = getExprTypeNode(callee);
+    auto fn = ct;
+    if (fn && fn->kind == wvmcc::parser::TypeNode::Kind::Pointer) fn = fn->pointee;
+    if (!fn || fn->kind != wvmcc::parser::TypeNode::Kind::Function) return true;
+    auto ret = fn->element;
+    bool isVoidRet = !ret
+        || (ret->kind == wvmcc::parser::TypeNode::Kind::Builtin
+            && !ret->simple.empty()
+            && ret->simple[0]
+               == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
+    return !isVoidRet;
+}
+
 void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
     if (!stmt.expr) return;
 
@@ -2156,8 +2204,16 @@ void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
                         && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
                             || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union);
                     leavesValue = !isVoidRet && !isStructRet;
+                } else {
+                    // #79: not a direct call — the identifier names a
+                    // function-pointer variable. Decide from its pointee type.
+                    leavesValue = indirectCallLeavesValue(call.callee);
                 }
             }
+        } else {
+            // #79: indirect call through an arbitrary function-pointer
+            // expression (e.g. `tbl[i]()`, `(*p)()`).
+            leavesValue = indirectCallLeavesValue(call.callee);
         }
     }
 
@@ -2706,10 +2762,26 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     case K::Ident: {
         const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr);
         auto sym = symbolTable_.lookup(id.name);
-        if (!sym) return nullptr;
-        return std::visit([](const auto& info) -> wvmcc::parser::TypeNodePtr {
-            return info.type;
-        }, *sym);
+        if (sym) {
+            return std::visit([](const auto& info) -> wvmcc::parser::TypeNodePtr {
+                return info.type;
+            }, *sym);
+        }
+        // #79: a bare function name decays to a pointer-to-function value
+        // (tagged-i64 funcref-table slot). Synthesize a proper
+        // pointer-to-function type (FuncSymbol::type is the return type, stored
+        // as the Function node's element) so assignment / initialization sees an
+        // i64 and applies no spurious conversion — mirroring the `&func` case.
+        if (auto fs = symbolTable_.lookupFunction(id.name)) {
+            auto fnTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            fnTn->kind = wvmcc::parser::TypeNode::Kind::Function;
+            fnTn->element = fs->type; // return type (may be null)
+            auto ptr = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            ptr->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+            ptr->pointee = fnTn;
+            return ptr;
+        }
+        return nullptr;
     }
     case K::Unary: {
         const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*expr);

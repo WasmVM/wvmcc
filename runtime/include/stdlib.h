@@ -11,6 +11,7 @@
 /* Process control */
 _Noreturn void exit(int status);
 _Noreturn void abort(void);
+int atexit(void (*func)(void));
 
 /* Conversion */
 int      atoi(const char *s);
