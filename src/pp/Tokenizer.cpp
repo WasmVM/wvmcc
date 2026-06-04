@@ -188,7 +188,15 @@ bool SourceBuffer::processBlockCommentState(char c) {
         rawIdx += 2;
         st = State::Normal;
         pendingSpace = true;
-        return true;
+        // Do NOT break here: returning true would leave fill_buffer with an
+        // empty charBuf and a deferred pendingSpace. When the block comment is
+        // the first thing in the input, that empty buffer surfaces as a nullopt
+        // peek(0), which readNextToken mistakes for EOF — dropping the entire
+        // rest of the translation unit (issue #42). Returning false keeps the
+        // outer loop going so handlePendingSpace() emits the separating space
+        // (per the C standard, a comment is replaced by one space) in this same
+        // fill_buffer call, leaving charBuf non-empty.
+        return false;
     }
     ++rawIdx;
     return false; // continue outer loop
