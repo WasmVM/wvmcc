@@ -54,6 +54,11 @@ int main() {
         {"comment markers in string and char", "char *s=\"// not comment /* nor */\"; char c='*';\n", "char *s=\"// not comment /* nor */\"; char c='*';\n"},
         {"nested comment start tokens (no nesting supported)", "a/* one /* two */ b */ c\n", "a  b */ c\n"},
         {"CRLF with splice and block comment", "x\\\r\n/*y*/\r\nz\r\n", "x \nz\n"},
+        // Issue #42: a block comment at the very start of the input must not
+        // swallow the rest of the translation unit. The comment becomes one space.
+        {"leading block comment keeps following output", "/**/int x;\n", " int x;\n"},
+        {"leading block comment before function (issue #42)", "/* this comment */int foo(){return 1;}\n", " int foo(){return 1;}\n"},
+        {"leading multiline block comment keeps output", "/* a\nb */int y;\n", " int y;\n"},
     };
 
     bool all_ok = true;
