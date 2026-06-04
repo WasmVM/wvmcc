@@ -40,13 +40,24 @@ public:
     // member carries no relocs.
     const std::vector<DataPtrSite>& memberRelocs(size_t i);
 
+    // #79: function-pointer relocation sites for member `i`, parsed from its
+    // `reloc.FUNCPTR` custom section. Empty if the member carries none.
+    const std::vector<DataPtrSite>& memberFuncPtrRelocs(size_t i);
+
 private:
+    // Parse a `reloc.*` custom section ("reloc.CODE" or "reloc.FUNCPTR") of
+    // member `i` into `cache`, returning the (funcIdx, instrIdx) sites.
+    const std::vector<DataPtrSite>& parseRelocSection(
+        size_t i, const std::string& sectionName, bool hasSymAndAddend,
+        std::vector<std::optional<std::vector<DataPtrSite>>>& cache);
+
     std::string path_;
     std::vector<char> bytes_;            // whole archive file
     std::vector<std::string> names_;     // member names, archive order
     std::vector<uint64_t> dataOffset_;   // file offset of each member's size word
     std::vector<std::optional<WasmVM::WasmModule>> cache_;
     std::vector<std::optional<std::vector<DataPtrSite>>> relocCache_;
+    std::vector<std::optional<std::vector<DataPtrSite>>> funcPtrRelocCache_;
     bool ok_ = false;
     std::string err_;
 };

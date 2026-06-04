@@ -24,7 +24,8 @@ struct Remap {
 // previously-merged TUs, the `i64.const`s at these sites are shifted to match.
 void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
               const std::string& origin,
-              const std::vector<DataPtrSite>& dataRelocs = {});
+              const std::vector<DataPtrSite>& dataRelocs = {},
+              const std::vector<DataPtrSite>& funcPtrRelocs = {});
 
 // Rewrite indices in a single instruction per `r`. Visible for unit tests.
 void remapInstr(WasmVM::WasmInstr& instr, const Remap& r);

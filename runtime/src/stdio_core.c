@@ -39,9 +39,27 @@ FILE __wvmcc_stdin  = { 0, _F_READ };
 FILE __wvmcc_stdout = { 1, _F_WRITE | _F_LINEBUF };
 FILE __wvmcc_stderr = { 2, _F_WRITE | _F_UNBUF };
 
+// Flush every buffered write stream on normal termination (defined below).
+// #79: self-registered with libc's at-exit machinery on first buffered use, so
+// exit() reaches it without a hardcoded reference (preserving zero coupling for
+// non-stdio programs).
+void __stdio_exit(void);
+// libc-internal at-exit registration (stdlib_core.c): one reserved handler that
+// runs after every user atexit() handler and cannot be crowded out of the
+// fixed-size atexit table.
+void __atexit_libc(void (*func)(void));
+
 static void lazy_init(FILE *f) {
     if (f->flags & _F_INITED) return;
     f->flags |= _F_INITED;
+    // Register the flush-at-exit handler exactly once, the first time any write
+    // stream is touched. A program that never writes via stdio registers
+    // nothing, so exit() runs no flush.
+    static int atexit_registered;
+    if ((f->flags & _F_WRITE) && !atexit_registered) {
+        atexit_registered = 1;
+        __atexit_libc(__stdio_exit);
+    }
     if ((f->flags & _F_UNBUF) == 0) {
         if (f->flags & _F_WRITE) {
             f->wbuf = (char *)malloc(BUFSIZ);

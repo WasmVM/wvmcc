@@ -86,18 +86,21 @@ int main() {
     EXPECT(!m.start.has_value(),
            "linkable mode emits no start section (linker provides crt0)");
 
-    // Program that takes a function pointer — M2-L7 switched to funcref/
-    // ref.func/call_ref, so no table is needed at all.
+    // Program that takes a function pointer — #79 represents function pointers
+    // as tagged-i64 funcref-table slots dispatched via call_indirect, so the
+    // TU defines a local funcref table + an element segment populating it. The
+    // linker merges these per-TU tables when combining objects (no
+    // __indirect_function_table import).
     auto m2 = compile_linkable(
         "int helper(int x) { return x + 1; }\n"
         "int main(void) { int (*p)(int) = &helper; return p(3); }\n",
         "tmp_linkable_funcptr.c");
     EXPECT(!has_env_import(m2, "__indirect_function_table"),
-           "M2-L7: no funcref table import (function pointers use ref.func/call_ref)");
-    EXPECT(m2.tables.empty(),
-           "no local table either");
-    EXPECT(m2.elems.empty(),
-           "no element segments either");
+           "#79: no funcref table import (per-TU local table merged by linker)");
+    EXPECT(m2.tables.size() == 1,
+           "#79: defines a local funcref table for function pointers");
+    EXPECT(m2.elems.size() == 1,
+           "#79: defines an element segment populating the funcref table");
 
     // Freestanding: __heap_base is defined locally as a const i64 global
     // initialized to the post-data boundary. Re-exercise by forcing the

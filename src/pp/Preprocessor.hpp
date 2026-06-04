@@ -47,6 +47,13 @@ private:
     std::unordered_set<std::string> pragmaOnceFiles{}; // pragma once tracking
     std::vector<Diagnostic> diagnostics{};
     MacroTable macroTable{};
+    // When pushing a *batch* of already-tokenized tokens back (e.g. via
+    // handleInclude or macro expansion), pushTokenBackWithConcat must NOT
+    // do tokenizer lookahead — the parent tokenizer points to source that
+    // comes AFTER the batch in the output stream, so reading from it
+    // splices unrelated tokens into the batch's string literals. Set this
+    // flag while doing such a batch push.
+    bool batchPushNoLookahead = false;
 
     // --- Include parsing & execution helpers --------------------------------
     // Parse-only: parse an #include payload (after the 'include' identifier).

@@ -477,6 +477,20 @@ StructDeclarator Parser::parseStructDeclarator() {
     return sd;
 }
 
+// Thread `tail` into the deepest "hole" of `chain` — i.e. the innermost
+// declarator node whose `inner` is unset (or null). Used to compose a
+// parenthesized sub-declarator with the suffixes/pointer-prefix that surround
+// it: `void (*g)(void)` must become Identifier(g) -> Pointer -> Function, with
+// the Function (trailing `(void)`) spliced beneath the inner `*`, not wrapped
+// outside it. Without this, the `*` is lost and `g` is mis-parsed as a plain
+// `void g(void)` prototype.
+static void attachDeclaratorHole(const DeclaratorPtr& chain, const DeclaratorPtr& tail) {
+    if (!chain) return;
+    Declarator* cur = chain.get();
+    while (cur->inner.has_value() && cur->inner.value()) cur = cur->inner.value().get();
+    cur->inner = tail;
+}
+
 DeclaratorPtr Parser::parseDeclarator() {
     DeclaratorPtr d = nullptr;
 
@@ -501,7 +515,17 @@ DeclaratorPtr Parser::parseDeclarator() {
         d = p;
     }
 
-    // direct-declarator: identifier or ( declarator )
+    // direct-declarator: identifier or ( declarator ).
+    //
+    // For a parenthesized sub-declarator the surrounding pointer-prefix and the
+    // trailing suffixes (arrays / parameter lists) group *around the inner
+    // declarator's result*, so they must be threaded into the inner chain's hole
+    // rather than wrapped outside it (the convention for a bare identifier). We
+    // stash the pre-paren pointer prefix and splice it in last — deepest, below
+    // the trailing suffixes — so e.g. `int *(*g)(void)` reads as "g: pointer to
+    // function(void) returning int*".
+    bool parenGrouped = false;
+    DeclaratorPtr stashedPrefix = nullptr;
     if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
         auto id = make_ast<Declarator>();
         id->kind = Declarator::Kind::Identifier;
@@ -513,13 +537,15 @@ DeclaratorPtr Parser::parseDeclarator() {
         auto inner = parseDeclarator();
         acceptPunct(")");
         if (inner) {
-            inner->inner = d;
+            stashedPrefix = d;   // thread the pre-paren `*`s in after suffixes
             d = inner;
+            parenGrouped = true;
         } else {
             auto nd = make_ast<Declarator>();
             nd->kind = Declarator::Kind::Nested;
             nd->inner = d;
             d = nd;
+            parenGrouped = true;
         }
     }
 
@@ -550,8 +576,8 @@ DeclaratorPtr Parser::parseDeclarator() {
                 arr->array.isStar = true;
                 arr->array.isStatic = isStatic;
                 arr->array.qual = qual;
-                arr->inner = d;
-                d = arr;
+                if (parenGrouped) attachDeclaratorHole(d, arr);
+                else { arr->inner = d; d = arr; }
                 continue;
             }
 
@@ -565,8 +591,8 @@ DeclaratorPtr Parser::parseDeclarator() {
             arr->array.size = size;
             arr->array.isStatic = isStatic;
             arr->array.qual = qual;
-            arr->inner = d;
-            d = arr;
+            if (parenGrouped) attachDeclaratorHole(d, arr);
+            else { arr->inner = d; d = arr; }
             continue;
         } else if (p->lexeme() == "(") {
             lex.next();
@@ -642,11 +668,15 @@ DeclaratorPtr Parser::parseDeclarator() {
             fn->function.hasParamTypeList = hasParamTypeList;
             fn->function.isVariadic = isVariadic;
             fn->function.identifierList = idlist;
-            fn->inner = d;
-            d = fn;
+            if (parenGrouped) attachDeclaratorHole(d, fn);
+            else { fn->inner = d; d = fn; }
             continue;
         } else break;
     }
+
+    // Splice the pre-paren pointer prefix in beneath the trailing suffixes
+    // (deepest), so it qualifies the inner declarator's result type.
+    if (parenGrouped && stashedPrefix) attachDeclaratorHole(d, stashedPrefix);
 
     return d;
 }

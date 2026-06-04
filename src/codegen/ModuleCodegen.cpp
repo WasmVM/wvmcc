@@ -1,6 +1,5 @@
 #include "ModuleCodegen.hpp"
 #include "FunctionCodegen.hpp"
-#include "AddressTakenAnalyzer.hpp"
 #include "StartWrapper.hpp"
 #include "../parser/ConstExprEval.hpp"
 #include <stdexcept>
@@ -20,6 +19,7 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     nextFuncIndex_ = 0;
     funcTypeIdx_.clear();
     funcTableSlots_.clear();
+    funcPtrRelocs_.clear();
     hasMain_ = false;
     mainHasArgv_ = false;
     mainFuncIndex_ = -1;
@@ -47,8 +47,11 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     // globals so they occupy the first defined-global slots (before any guard
     // globals allocated during secondPass).
     materializeExportedDataGlobals();
-    analyzeFuncAddressTaken(tu);
     secondPass(tu);
+    // #79: now that every function-pointer value has interned its table slot,
+    // emit the funcref table + element segment that call_indirect dispatches
+    // through (the linker merges per-TU tables when combining objects).
+    emitFuncTable();
     symbolTable_.popScope();
 
     if (compileMode_ == CompileMode::Freestanding) {
@@ -66,6 +69,14 @@ std::optional<size_t> ModuleCodegen::getFuncTableSlot(const std::string& name) c
     auto it = funcTableSlots_.find(name);
     if (it == funcTableSlots_.end()) return std::nullopt;
     return it->second;
+}
+
+size_t ModuleCodegen::internFuncTableSlot(const std::string& name) {
+    auto it = funcTableSlots_.find(name);
+    if (it != funcTableSlots_.end()) return it->second;
+    size_t slot = funcTableSlots_.size();
+    funcTableSlots_.emplace(name, slot);
+    return slot;
 }
 
 std::optional<WasmVM::index_t> ModuleCodegen::getFuncTypeIdx(const std::string& name) const {
@@ -418,6 +429,19 @@ void ModuleCodegen::registerExternalDecl(const wvmcc::parser::ExternalDeclPtr& d
     }, decl->decl);
 }
 
+// A function is no-return if it carries the C11 `_Noreturn` function specifier
+// or GNU `__attribute__((noreturn))`. Call sites use this to emit a trailing
+// `unreachable`, so a non-void caller that ends in e.g. `exit(...)` doesn't
+// fall through to its `end` with an empty operand stack (a validation error).
+static bool isNoReturn(const wvmcc::parser::DeclarationSpecifiers& specs,
+                       const std::vector<wvmcc::parser::GnuAttribute>& attrs) {
+    if (specs.hasFuncSpec(wvmcc::parser::FunctionSpecifier::NoReturn)) return true;
+    for (const auto& a : attrs) {
+        if (a.name == "noreturn" || a.name == "__noreturn__") return true;
+    }
+    return false;
+}
+
 void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& funcDef) {
     if (!funcDef) return;
 
@@ -432,6 +456,7 @@ void ModuleCodegen::registerFunctionDef(const wvmcc::parser::FunctionDefPtr& fun
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = false;
     sym.isVariadic = funcDef->isVariadic;
+    sym.noReturn = isNoReturn(funcDef->specifiers, funcDef->gnuAttributes);
     sym.namedParamCount = isVoidParamList(funcDef->params)
                               ? 0
                               : static_cast<int>(funcDef->params.size());
@@ -524,6 +549,7 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
     sym.type = buildReturnTypeNode(decl->specifiers, decl->declarator, semantic_);
     sym.funcIndex = nextFuncIndex_++;
     sym.isImport = true;
+    sym.noReturn = isNoReturn(decl->specifiers, decl->gnuAttributes);
     if (decl->declarator->kind == wvmcc::parser::Declarator::Kind::Function) {
         sym.isVariadic = decl->declarator->function.isVariadic;
         const auto& dparams = decl->declarator->function.params;
@@ -545,41 +571,68 @@ void ModuleCodegen::registerFunctionDeclaration(const wvmcc::parser::Declaration
 }
 
 // ---------------------------------------------------------------------------
-// Function-pointer support: scan every function body for `&funcname` usage,
-// allocate one funcref-table slot per address-taken function, and emit an
-// active element segment populating the table.
+// #79: function-pointer support. Every function whose address is taken (via
+// `&f` or a bare-name decay) interns a funcref-table slot during body emission
+// (internFuncTableSlot). After secondPass we materialize a funcref table sized
+// to those slots plus an active element segment populating table[slot] =
+// ref.func(f). call_indirect dispatches through this table; the linker merges
+// per-TU tables into one when combining objects.
 // ---------------------------------------------------------------------------
 
-void ModuleCodegen::analyzeFuncAddressTaken(const wvmcc::parser::TranslationUnitPtr& tu) {
-    if (!tu) return;
-
-    AddressTakenAnalyzer analyzer;
-    std::unordered_set<std::string> allTaken;
-    for (const auto& ext : tu->externals) {
-        if (!ext) continue;
-        if (auto fd = std::get_if<wvmcc::parser::FunctionDefPtr>(&ext->decl)) {
-            if (!*fd) continue;
-            auto names = analyzer.analyze(*fd);
-            for (auto& n : names) allTaken.insert(n);
+void ModuleCodegen::emitFuncTable() {
+    // A module that only *calls* through function pointers (e.g. qsort taking a
+    // `compar` parameter) takes no function address of its own, so it has no
+    // slots — yet its call_indirect still needs table 0 to exist to validate.
+    // Detect that case and emit an empty table the linker will later grow.
+    if (funcTableSlots_.empty()) {
+        bool usesCallIndirect = false;
+        for (const auto& f : module_.funcs) {
+            for (const auto& instr : f.body) {
+                if (instr.opcode == WasmVM::Opcode::Call_indirect) {
+                    usesCallIndirect = true;
+                    break;
+                }
+            }
+            if (usesCallIndirect) break;
         }
+        if (!usesCallIndirect) return;
+        WasmVM::TableType t;
+        t.limits.min = 0;
+        t.limits.max = std::nullopt;
+        t.limits.is64 = false;
+        t.reftype = WasmVM::RefType::funcref;
+        module_.tables.push_back(t);
+        return;
     }
 
-    // Filter to names that resolve to a function symbol.
-    std::vector<std::pair<std::string, int>> tableFuncs;  // name → funcIndex
-    for (const auto& name : allTaken) {
+    const size_t nslots = funcTableSlots_.size();
+
+    // Define a local funcref table 0 sized to fit every slot. Objects compiled
+    // with -c carry their own table so they validate standalone; the linker
+    // concatenates them.
+    WasmVM::TableType t;
+    t.limits.min = (WasmVM::offset_t)nslots;
+    t.limits.max = (WasmVM::offset_t)nslots;
+    t.limits.is64 = false;
+    t.reftype = WasmVM::RefType::funcref;
+    module_.tables.push_back(t);
+
+    // Active element segment: table[slot] = ref.func(funcIndex). Order the
+    // entries by slot so elemlist[i] populates slot i from offset 0.
+    std::vector<std::string> bySlot(nslots);
+    for (const auto& [name, slot] : funcTableSlots_) bySlot[slot] = name;
+
+    WasmVM::WasmElem elem;
+    elem.type = WasmVM::RefType::funcref;
+    elem.mode.type = WasmVM::WasmElem::ElemMode::Mode::active;
+    elem.mode.tableidx = 0;
+    elem.mode.offset = WasmVM::Instr::I32_const{0};
+    for (const auto& name : bySlot) {
         auto sym = symbolTable_.lookupFunction(name);
-        if (!sym) continue;
-        size_t slot = tableFuncs.size();
-        funcTableSlots_[name] = slot;
-        tableFuncs.emplace_back(name, sym->funcIndex);
+        WasmVM::index_t fidx = sym ? (WasmVM::index_t)sym->funcIndex : 0;
+        elem.elemlist.push_back(WasmVM::Instr::Ref_func{fidx});
     }
-
-    // M2-L7: function pointers now flow as funcref values via ref.func /
-    // call_ref, so no per-TU funcref table is needed and the
-    // __indirect_function_table import is dropped. The
-    // analyzeFuncAddressTaken pass still runs (to populate funcTableSlots_
-    // which a few tests inspect), but emits no table or element segment.
-    if (tableFuncs.empty()) return;
+    module_.elems.push_back(std::move(elem));
 }
 
 // ---------------------------------------------------------------------------
@@ -632,6 +685,11 @@ void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& 
                 });
             }
             relocations_.push_back({codeFuncIdx, site.instrIdx, symIdx, 0});
+        }
+        // #79: function-pointer sites — i64.const (tag | slot) constants whose
+        // embedded slot the linker rebases when merging per-TU funcref tables.
+        for (const auto& site : funcCodegen.getFuncPtrSites()) {
+            funcPtrRelocs_.push_back({codeFuncIdx, site.instrIdx});
         }
     }
 

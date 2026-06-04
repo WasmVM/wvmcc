@@ -47,6 +47,7 @@ struct FuncSymbol {
     int funcIndex; // Index in Wasm module functions
     bool isImport; // Whether this is an imported function
     bool isVariadic{false};       // trailing `...` in C signature
+    bool noReturn{false};         // `_Noreturn` / __attribute__((noreturn))
     int namedParamCount{0};       // number of named (non-variadic) C parameters
     // Wasm value types for each named C parameter. Used at call sites to
     // coerce argument values (e.g. i32 → i64) so passing an integer

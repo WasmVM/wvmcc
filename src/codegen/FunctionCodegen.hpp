@@ -66,6 +66,16 @@ public:
     };
     const std::vector<DataPtrSite>& getDataPtrSites() const { return dataPtrSites_; }
 
+    // #79: positions within `instrBuffer_` where a function-pointer value
+    // (`i64.const (funcptr-tag | table-slot)`) was emitted, paired with the
+    // referenced function name. The linker rebases the embedded slot when it
+    // merges per-TU funcref tables into one unified table.
+    struct FuncPtrSite {
+        size_t instrIdx;
+        std::string funcName;
+    };
+    const std::vector<FuncPtrSite>& getFuncPtrSites() const { return funcPtrSites_; }
+
     void emit(const WasmVM::WasmInstr& instr);
 
     // Emit `unreachable` AND record an error diagnostic for an unhandled or
@@ -111,6 +121,14 @@ public:
     static constexpr int    kMemidxShift = 60;
     static constexpr int64_t kPtrTagMask = (int64_t)0xF << 60;
     static constexpr int64_t kPtrOffMask = ~((int64_t)0xF << 60);
+    // #79: a function pointer is a tagged i64 whose high nibble is this
+    // sentinel (distinct from mem[0]=0 / mem[1]=1, so NULL=0 is never a valid
+    // function pointer) and whose low bits hold a funcref-table slot, called via
+    // call_indirect. Memory-storable, unlike a Wasm funcref.
+    static constexpr int64_t kFuncPtrTag = (int64_t)0xF << 60;
+    // Emit a function-pointer value for `name`: `i64.const (kFuncPtrTag | slot)`,
+    // interning a funcref-table slot and recording a relocation site.
+    void emitFuncPtrValue(const std::string& name);
     // OR the memidx tag (mem[1] only; mem[0]/Dynamic are no-ops) onto the i64
     // address currently on the operand stack.
     void emitApplyTag(AddrKind k);
@@ -120,6 +138,10 @@ public:
     // Assuming [tagged-addr(i64), value(T)] are on the stack (addr pushed
     // first), emit a tag-dispatched store of `type`.
     void emitTaggedStore(const wvmcc::parser::TypeNodePtr& type);
+
+    // #79: whether an indirect call through `callee` leaves a value on the
+    // stack (false for a void-returning function pointer).
+    bool indirectCallLeavesValue(const wvmcc::parser::ExprPtr& callee);
 
     void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);
 
@@ -168,6 +190,7 @@ private:
 
     // Sites where a data-pointer i64.const was emitted (M2-E).
     std::vector<DataPtrSite> dataPtrSites_;
+    std::vector<FuncPtrSite> funcPtrSites_;
 
     int allocRawLocal(WasmVM::ValueType valType);
     std::vector<WasmVM::WasmInstr> generatePrologue();

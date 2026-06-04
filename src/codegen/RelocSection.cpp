@@ -67,7 +67,7 @@ void appendRelocSections(std::ostream& os, const ModuleCodegen& cg) {
 
     // Skip entirely when there's nothing to record — keeps default-mode
     // hello-world modules from accumulating empty sections.
-    if (syms.empty() && relocs.empty()) return;
+    if (syms.empty() && relocs.empty() && cg.getFuncPtrRelocs().empty()) return;
 
     // --- linking section ---
     {
@@ -93,6 +93,23 @@ void appendRelocSections(std::ostream& os, const ModuleCodegen& cg) {
             writeS(body, r.addend);
         }
         emitCustomSection(os, "reloc.CODE", body);
+    }
+
+    // --- reloc.FUNCPTR section (#79) ---
+    // Function-pointer i64.const sites whose embedded funcref-table slot the
+    // linker rebases when merging per-TU tables. Just (funcIdx, instrIdx) pairs.
+    {
+        const auto& fpRelocs = cg.getFuncPtrRelocs();
+        if (!fpRelocs.empty()) {
+            std::vector<uint8_t> body;
+            writeU(body, 0);              // section_index = 0
+            writeU(body, fpRelocs.size());
+            for (const auto& r : fpRelocs) {
+                writeU(body, r.codeFuncIdx);
+                writeU(body, r.instrIdx);
+            }
+            emitCustomSection(os, "reloc.FUNCPTR", body);
+        }
     }
 }
 

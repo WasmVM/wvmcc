@@ -369,6 +369,12 @@ int main(int argc, char** argv) {
             mod.dataRelocs.push_back(
                 {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
         }
+        // #79: function-pointer sites — the linker rebases the embedded
+        // funcref-table slot when merging per-TU tables.
+        for (const auto& rel : codegen.getFuncPtrRelocs()) {
+            mod.funcPtrRelocs.push_back(
+                {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+        }
         wvmcc::link::LinkInput in;
         in.source = std::move(mod);
         linkInputs.push_back(std::move(in));

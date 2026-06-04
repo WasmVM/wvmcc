@@ -27,6 +27,9 @@ struct LinkInput {
         WasmVM::WasmModule module;
         std::string origin; // path or "<in-memory>" for diagnostics
         std::vector<DataPtrSite> dataRelocs; // M2-L8 data-pointer sites
+        // #79: function-pointer sites — `i64.const (tag | slot)` constants whose
+        // embedded funcref-table slot is rebased when per-TU tables are merged.
+        std::vector<DataPtrSite> funcPtrRelocs;
     };
     struct ArchivePath {
         std::string path; // resolved filesystem path

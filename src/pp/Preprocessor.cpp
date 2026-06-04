@@ -287,11 +287,14 @@ bool Preprocessor::tryHandleFunctionLikeMacroInvocation(const Macro* m, const PP
     for (auto &pt : rest) invocation.push_back(pt);
     size_t idx = 0;
     std::vector<PPToken> expandedResult;
+    bool saved = batchPushNoLookahead;
+    batchPushNoLookahead = true;
     if (tryExpandFunctionLikeMacro(invocation, idx, m, tok, expandedResult)) {
         for (const auto &et : expandedResult) pushTokenBackWithConcat(et);
     } else {
         for (const auto &itok : invocation) pushTokenBackWithConcat(itok);
     }
+    batchPushNoLookahead = saved;
     return true;
 }
 
@@ -468,7 +471,15 @@ void Preprocessor::handleInclude() {
     std::vector<PPToken> temp;
     std::string currentDir = fileStack.back().dir;
     (void)handleIncludeDirective(tz, temp, currentDir);
+    // Suppress tokenizer lookahead inside pushTokenBackWithConcat: the
+    // tokenizer points at source AFTER the include directive, so any
+    // lookahead would splice post-include tokens into the included header's
+    // string literals (regression caught by pp-sysroot-include's adjacent
+    // literal cases until this guard was added).
+    bool saved = batchPushNoLookahead;
+    batchPushNoLookahead = true;
     for (const auto &tk : temp) pushTokenBackWithConcat(tk);
+    batchPushNoLookahead = saved;
 }
 
 void Preprocessor::handleIfdef(bool wantDefined) {
@@ -1839,9 +1850,19 @@ void Preprocessor::pushTokenBackWithConcat(const PPToken& tok) {
         // fallthrough to lookahead
     }
 
-    // No previous merge occurred; perform tokenizer lookahead to merge following adjacent literals.
+    // No previous merge occurred. If we're in the middle of a batch push
+    // (handleInclude / macro expansion), DO NOT read from the parent
+    // tokenizer — the next raw token belongs to source that follows the
+    // batch and would get spliced into the batch's literal. Just append.
     PPToken merged = tok;
     normalizeLiteralToken(merged);
+    if (batchPushNoLookahead) {
+        outBuffer.push_back(merged);
+        return;
+    }
+
+    // Otherwise perform tokenizer lookahead to merge following adjacent
+    // literals (Phase 6: `"foo" "bar"` → `"foobar"`).
     std::vector<PPToken> saved; // whitespace/newline tokens between literals
 
     while (true) {

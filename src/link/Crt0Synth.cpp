@@ -121,10 +121,15 @@ void synthesize(LinkContext& ctx) {
         return;
     }
 
-    // Optional stdio flush-at-exit. Captured pre-shift (like main) so the same
-    // +kSysProcCount adjustment applies after the sys_proc imports renumber the
-    // function index space. Absent when the image has no stdio.
-    auto flushInfo = findExportedFunc(m, "__stdio_exit");
+    // #79: prefer terminating through libc `exit`, so returning from main runs
+    // atexit handlers (including stdio's self-registered flush) exactly like an
+    // explicit exit() call. The lazy-pull phase seeds `exit` for executables, so
+    // it is present whenever libc is linked. Fall back to the direct
+    // `__stdio_exit` flush when there is no libc exit (e.g. -nostdlib images).
+    // Both are captured pre-shift (like main) so the +kSysProcCount adjustment
+    // applies after the sys_proc imports renumber the function index space.
+    auto exitInfo  = findExportedFunc(m, "exit");
+    auto flushInfo = exitInfo ? std::nullopt : findExportedFunc(m, "__stdio_exit");
 
     // ----- 1. Drop env.__* imports of mem/global kind. They'll be
     //          replaced by local definitions at the same index positions.
@@ -259,7 +264,10 @@ void synthesize(LinkContext& ctx) {
     WasmVM::index_t mainShifted = mainInfo->funcIdx + kSysProcCount;
     std::optional<WasmVM::index_t> flushShifted;
     if (flushInfo) flushShifted = *flushInfo + kSysProcCount;
-    emitStartWrapper(m, sp, mainShifted, mainInfo->hasArgv, flushShifted);
+    std::optional<WasmVM::index_t> exitShifted;
+    if (exitInfo) exitShifted = *exitInfo + kSysProcCount;
+    emitStartWrapper(m, sp, mainShifted, mainInfo->hasArgv, flushShifted,
+                     exitShifted);
 }
 
 } // namespace wvmcc::link::crt0

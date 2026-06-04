@@ -29,9 +29,18 @@ namespace {
 // runtime state (memories + stack/heap globals, materialized by phaseCrt0).
 // Excluding them from the lazy-pull worklist avoids scanning archives for
 // names that can never match an export.
+//
+// The env.__* set is *exactly* the four names crt0 replaces (see
+// Crt0Synth.cpp) — matching every `__`-prefixed env name would wrongly skip
+// real libc internals like `__stdio_exit`, leaving them unresolved because
+// their defining TU is never pulled.
 bool isRuntimeProvided(const WasmVM::WasmImport& imp) {
     if (imp.module == "sys_proc" || imp.module == "sys_fs") return true;
-    if (imp.module == "env" && imp.name.rfind("__", 0) == 0) return true;
+    if (imp.module == "env" &&
+        (imp.name == "__linear_memory" || imp.name == "__stack_memory" ||
+         imp.name == "__stack_pointer" || imp.name == "__heap_base")) {
+        return true;
+    }
     return false;
 }
 
@@ -72,6 +81,24 @@ void lazyPullArchives(LinkContext& ctx,
 
     auto need = unresolvedNames(ctx.output);
 
+    // #79: an executable's crt0 terminates by calling libc `exit` (so both
+    // normal return from main and explicit exit() run atexit handlers through
+    // one path). `exit` is therefore needed even when the user code never calls
+    // it — seed the pull worklist so the defining libc member is brought in.
+    if (!ctx.opts.no_stdlib) {
+        bool hasMain = false;
+        for (const auto& ex : ctx.output.exports) {
+            if (ex.name == "main" &&
+                ex.desc == WasmVM::WasmExport::DescType::func) { hasMain = true; break; }
+        }
+        bool exitDefined = false;
+        for (const auto& ex : ctx.output.exports) {
+            if (ex.name == "exit" &&
+                ex.desc == WasmVM::WasmExport::DescType::func) { exitDefined = true; break; }
+        }
+        if (hasMain && !exitDefined) need.insert("exit");
+    }
+
     bool progress = true;
     while (progress && !need.empty()) {
         progress = false;
@@ -83,7 +110,8 @@ void lazyPullArchives(LinkContext& ctx,
                 if (!cand) { ctx.error("link: " + ar.error()); return; }
                 if (!memberSatisfies(*cand, need)) continue;
 
-                merge::mergeOne(ctx, *cand, ar.memberName(i), ar.memberRelocs(i));
+                merge::mergeOne(ctx, *cand, ar.memberName(i), ar.memberRelocs(i),
+                                ar.memberFuncPtrRelocs(i));
                 if (ctx.hasErrors()) return;
                 pulled[a][i] = 1;
                 progress = true;
@@ -114,7 +142,8 @@ void phaseMerge(LinkContext& ctx) {
     std::vector<std::unique_ptr<ArchiveReader>> archives;
     for (const auto& in : ctx.inputs) {
         if (auto* mm = std::get_if<LinkInput::InMemoryModule>(&in.source)) {
-            merge::mergeOne(ctx, mm->module, mm->origin, mm->dataRelocs);
+            merge::mergeOne(ctx, mm->module, mm->origin, mm->dataRelocs,
+                            mm->funcPtrRelocs);
             if (ctx.hasErrors()) return;
             std::ostringstream ss;
             ss << "  merged " << mm->origin
