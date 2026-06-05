@@ -502,6 +502,18 @@ bool Preprocessor::checkActiveState() {
     return true;
 }
 
+bool Preprocessor::checkParentActiveState() {
+    // Active state of every frame except the current top frame. #elif/#else
+    // operate on the already-pushed top frame, so they must AND in the parent
+    // chain (not the whole stack) when re-activating a branch — otherwise a
+    // true #elif/#else nested in an inactive block would wrongly emit output.
+    if (conditionalStack.empty()) return true;
+    for (size_t i = 0; i + 1 < conditionalStack.size(); ++i) {
+        if (!conditionalStack[i].currentlyActive) return false;
+    }
+    return true;
+}
+
 
 // Removed unused directive-routing helpers (processDirective, routeDirective, skipDirectiveWhitespace,
 // consumeUnknownDirective, handleDirectiveInclude) and literal/emit helpers (validateLiteralToken, emitIfActive).
@@ -1375,7 +1387,11 @@ bool Preprocessor::handleIfDirective(Tokenizer& tokenizer, const std::vector<PPT
 
     ConditionalFrame frame;
     frame.seenTrueBranch = *result != 0;
-    frame.currentlyActive = frame.seenTrueBranch;
+    // AND in the parent active state (over the frames pushed so far, before
+    // this one) so a true #if nested in an inactive block stays inactive —
+    // mirrors handleIfdef. checkActiveState() is correct here because the new
+    // frame has not been pushed yet.
+    frame.currentlyActive = frame.seenTrueBranch && checkActiveState();
     frame.inElse = false;
     conditionalStack.push_back(frame);
     return true;
@@ -1431,7 +1447,10 @@ bool Preprocessor::handleElifDirective(Tokenizer& tokenizer, const std::vector<P
 
     bool newActive = *result != 0;
     frame.seenTrueBranch = frame.seenTrueBranch || newActive;
-    frame.currentlyActive = newActive;
+    // Respect the parent block: a true #elif nested inside an inactive block
+    // must not re-activate output (checkParentActiveState excludes this frame,
+    // which is already on the stack).
+    frame.currentlyActive = newActive && checkParentActiveState();
     return true;
 }
 
@@ -1456,7 +1475,9 @@ bool Preprocessor::handleElseDirective() {
     }
 
     frame.inElse = true;
-    frame.currentlyActive = !frame.seenTrueBranch;
+    // Respect the parent block: a #else nested inside an inactive block must
+    // not re-activate output even when no prior branch was taken.
+    frame.currentlyActive = !frame.seenTrueBranch && checkParentActiveState();
     return true;
 }
 

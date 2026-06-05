@@ -287,6 +287,97 @@ static int test_defined() {
     return 0;
 }
 
+// Helper: write `src` to `path`, preprocess it, and report whether `needle`
+// appears as a token lexeme in the output. Returns 0 on the expected result.
+static int expect_token_presence(const char* path, const std::string& src,
+                                 const std::string& needle, bool shouldBePresent,
+                                 const char* testName) {
+    using namespace wvmcc;
+    {
+        std::ofstream ofs(path);
+        ofs << src;
+    }
+    Preprocessor pp;
+    if (!pp.open(path)) {
+        std::remove(path);
+        std::cerr << testName << ": failed to open input\n";
+        return 1;
+    }
+    std::vector<wvmcc::PPToken> tokens;
+    while (auto t = pp.next()) tokens.push_back(*t);
+    std::remove(path);
+
+    bool present = false;
+    for (const auto& t : tokens) {
+        if (t.lexeme == needle) { present = true; break; }
+    }
+    if (present != shouldBePresent) {
+        std::cerr << testName << ": expected '" << needle << "' to be "
+                  << (shouldBePresent ? "present" : "absent")
+                  << " but it was " << (present ? "present" : "absent") << "\n";
+        return 2;
+    }
+    return 0;
+}
+
+// Test 9 (#80 follow-up): a true #if nested inside an INACTIVE block must stay
+// inactive — the inner true condition must not re-activate output.
+//   #if 0 / #if 1 / INNER / #endif / OUTER / #endif / AFTER  -> only AFTER
+static int test_nested_if_in_inactive() {
+    int r = expect_token_presence(
+        "temp_nested_if_inactive.c",
+        "#if 0\n#if 1\nINNER\n#endif\nOUTER\n#endif\nAFTER\n",
+        "INNER", false, "test_nested_if_in_inactive (INNER absent)");
+    if (r) return r;
+    return expect_token_presence(
+        "temp_nested_if_inactive2.c",
+        "#if 0\n#if 1\nINNER\n#endif\nOUTER\n#endif\nAFTER\n",
+        "AFTER", true, "test_nested_if_in_inactive (AFTER present)");
+}
+
+// Test 10: a true #elif nested inside an INACTIVE block must stay inactive.
+//   #if 0 / #if 0 / #elif 1 / X / #endif / #endif / AFTER  -> only AFTER
+static int test_nested_elif_in_inactive() {
+    int r = expect_token_presence(
+        "temp_nested_elif_inactive.c",
+        "#if 0\n#if 0\n#elif 1\nX\n#endif\n#endif\nAFTER\n",
+        "X", false, "test_nested_elif_in_inactive (X absent)");
+    if (r) return r;
+    return expect_token_presence(
+        "temp_nested_elif_inactive2.c",
+        "#if 0\n#if 0\n#elif 1\nX\n#endif\n#endif\nAFTER\n",
+        "AFTER", true, "test_nested_elif_in_inactive (AFTER present)");
+}
+
+// Test 11: a #else nested inside an INACTIVE block must stay inactive.
+//   #if 0 / #if 0 / #else / Y / #endif / #endif / AFTER  -> only AFTER
+static int test_nested_else_in_inactive() {
+    int r = expect_token_presence(
+        "temp_nested_else_inactive.c",
+        "#if 0\n#if 0\n#else\nY\n#endif\n#endif\nAFTER\n",
+        "Y", false, "test_nested_else_in_inactive (Y absent)");
+    if (r) return r;
+    return expect_token_presence(
+        "temp_nested_else_inactive2.c",
+        "#if 0\n#if 0\n#else\nY\n#endif\n#endif\nAFTER\n",
+        "AFTER", true, "test_nested_else_in_inactive (AFTER present)");
+}
+
+// Test 12: nested conditionals inside an ACTIVE block still work (guard against
+// over-correcting the parent-awareness fix).
+//   #if 1 / #if 1 / INNER / #endif / #if 0 / #else / ELSE / #endif / #endif
+static int test_nested_in_active() {
+    int r = expect_token_presence(
+        "temp_nested_active.c",
+        "#if 1\n#if 1\nINNER\n#endif\n#if 0\n#else\nELSE\n#endif\n#endif\n",
+        "INNER", true, "test_nested_in_active (INNER present)");
+    if (r) return r;
+    return expect_token_presence(
+        "temp_nested_active2.c",
+        "#if 1\n#if 1\nINNER\n#endif\n#if 0\n#else\nELSE\n#endif\n#endif\n",
+        "ELSE", true, "test_nested_in_active (ELSE present)");
+}
+
 int main() {
     int result;
 
@@ -335,6 +426,30 @@ int main() {
     result = test_defined();
     if (result != 0) {
         std::cerr << "test_defined failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_nested_if_in_inactive();
+    if (result != 0) {
+        std::cerr << "test_nested_if_in_inactive failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_nested_elif_in_inactive();
+    if (result != 0) {
+        std::cerr << "test_nested_elif_in_inactive failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_nested_else_in_inactive();
+    if (result != 0) {
+        std::cerr << "test_nested_else_in_inactive failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_nested_in_active();
+    if (result != 0) {
+        std::cerr << "test_nested_in_active failed with code " << result << "\n";
         return result;
     }
 
