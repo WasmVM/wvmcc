@@ -103,6 +103,11 @@ add_e2e_test(phase5-globals          ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_glob
 # M2-13 prereq — `continue` in a for-loop must run the step (regression).
 add_e2e_test(phase5-for-continue     ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_for_continue.c)
 
+# #78 — &local dereferenced through an opaque pointer must reach the shadow
+# stack (mem[1]), not the heap (mem[0]). Covers struct/scalar/array out-params,
+# mixed stack/heap dispatch through one callee, and a local pointer var.
+add_e2e_test(phase5-addr-of-local    ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_addr_of_local.c)
+
 # M2-L4 — lazy archive pulls: link a user TU against libc.a end-to-end.
 add_link_test(libc-string            ${CMAKE_CURRENT_SOURCE_DIR}/phase5/e2e_libc_string.c)
 
