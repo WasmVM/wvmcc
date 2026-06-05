@@ -124,6 +124,33 @@ memidx  Purpose
  2–15   Reserved for future use
 ```
 
+### Tagged pointers (cross-memory dereference)
+
+A C pointer value must work no matter which memory its target lives in, yet the
+deref site (`*p`, `p->m`, `p[i]`) cannot statically know whether a given pointer
+points at the heap (mem[0]) or the shadow stack (mem[1]). To bridge the two
+memories without merging them, a pointer **value** carries its target `memidx`
+in the high nibble of the i64 (bit 60, `kMemidxShift`); the low 60 bits hold the
+byte offset (`kPtrOffMask`).
+
+- Taking an address (`&local`, array/aggregate decay) ORs in the object's tag
+  (`emitApplyTag`); mem[0] needs no tag (nibble 0), so only shadow-stack
+  addresses set a nibble.
+- A *named* lvalue resolves to a statically known memory (`addressKind` →
+  `Mem0`/`Mem1`) and uses a direct `load`/`store` with that memidx.
+- An *opaque* pointer-rooted lvalue (`addressKind` → `Dynamic`: deref, `->`,
+  pointer indexing, call results, casts, pointer arithmetic) is dispatched at
+  runtime by `emitTaggedLoad`/`emitTaggedStore`: branch on the nibble, mask it
+  off, then `load`/`store` from the selected memory.
+
+This is what makes the `&local`-passed-to-a-helper idiom work (issue #78) — it is
+pervasive in real C and in the M2 runtime libc (`vfprintf` builds a local output
+context and calls `do_format(&o, …)`, etc.). Regression coverage lives in
+`tests/integration/phase5/e2e_addr_of_local.c`. (Caveat: a pointer laundered
+through an integer *typedef* such as `<stdint.h>`'s `uintptr_t` can still mis-size
+to i32 and truncate the tag — that is the separate typedef-resolution gap, not a
+flaw in this scheme.)
+
 ## Integration with Main Pipeline
 
 The code generation is integrated into the main compilation pipeline in `src/exec/main.cpp`:
