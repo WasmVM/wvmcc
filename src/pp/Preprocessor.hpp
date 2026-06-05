@@ -178,6 +178,10 @@ private:
 
     // --- Small utility helpers used by streaming implementation --------------
     bool checkActiveState();
+    // Active state of all frames EXCEPT the current top frame — used by
+    // #elif/#else when re-activating a branch, so the re-activated branch
+    // still respects an inactive parent block.
+    bool checkParentActiveState();
     void consumeToEndOfLine(Tokenizer& tokenizer);
 
     // --- Streaming implementation details -----------------------------------
