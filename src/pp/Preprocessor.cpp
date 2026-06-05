@@ -403,20 +403,6 @@ std::vector<PPToken> Preprocessor::collectInvocationTokens() {
     return invocation;
 }
 
-void Preprocessor::skipToMatchingEndif() {
-    int depth = 1;
-    while (auto t = readRawToken()) {
-        if (t->kind == PPTokenKind::Punctuator && t->lexeme == "#") {
-            auto nt = readRawToken();
-            while (nt && nt->kind == PPTokenKind::Whitespace) nt = readRawToken();
-            if (nt && nt->kind == PPTokenKind::Identifier) {
-                if (nt->lexeme == "ifdef" || nt->lexeme == "ifndef" || nt->lexeme == "if") depth++;
-                else if (nt->lexeme == "endif") { depth--; if (depth==0) break; }
-            }
-        }
-    }
-}
-
 bool Preprocessor::handleIfOrElifDirective(const std::string& dir) {
     std::vector<PPToken> lineTokens;
     while (true) {
@@ -490,9 +476,20 @@ void Preprocessor::handleIfdef(bool wantDefined) {
         bool def = macroTable.isDefined(tok->lexeme);
         take = wantDefined ? def : !def;
     }
-    if (!take) {
-        skipToMatchingEndif();
-    }
+    // Push a conditional frame, exactly like #if (handleIfDirective): the
+    // streaming loop skips tokens while the top frame is inactive, #else/#elif
+    // flip it, and the matching #endif pops it. The previous implementation
+    // eager-skipped only the not-taken case and pushed NOTHING when taken, so
+    // a taken #ifdef/#ifndef (e.g. an include guard's first pass) left its
+    // #endif unbalanced — reported as a spurious "#endif without matching #if".
+    // currentlyActive ANDs in the parent's state (checkActiveState over the
+    // frames pushed so far) so an #ifdef nested in an inactive block stays
+    // inactive even when its own condition is true.
+    ConditionalFrame frame;
+    frame.seenTrueBranch = take;
+    frame.currentlyActive = take && checkActiveState();
+    frame.inElse = false;
+    conditionalStack.push_back(frame);
 }
 
 bool Preprocessor::checkActiveState() {

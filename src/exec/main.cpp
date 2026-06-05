@@ -210,6 +210,17 @@ void printDiagnostics(const std::vector<wvmcc::Diagnostic>& diagnostics) {
     }
 }
 
+// Exit-status policy, shared across phases (#80): any Error-severity diagnostic
+// forces a non-zero exit. Mirrors the end-of-run scans semantic/codegen/linker
+// already do, so preprocessor and parser errors stop the compile too. Warnings
+// and infos do not count.
+bool hasError(const std::vector<wvmcc::Diagnostic>& diagnostics) {
+    for (const auto& d : diagnostics) {
+        if (d.severity == wvmcc::Diagnostic::Severity::Error) return true;
+    }
+    return false;
+}
+
 void printTokenStats(const std::vector<wvmcc::parser::Token>& tokens) {
     size_t kw = 0, id = 0, intc = 0, floatc = 0, enumc = 0, chart = 0, str = 0, punct = 0;
     for (const auto& t : tokens) {
@@ -267,23 +278,34 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    // Print preprocessor diagnostics collected while opening/processing includes
-    printDiagnostics(pp.getDiagnostics());
+    // Preprocessor diagnostics are surfaced *after* the stage that drives the
+    // (lazy) preprocessor — the token pull below — not here: at this point
+    // pp.open() has run but no directives have been processed, so a `#error`
+    // deep (or even at the top) of the file hasn't been seen yet (#80).
 
     // If requested, run preprocessor-only mode: dump tokens' lexemes to stdout
     if (args.preprocessOnly) {
         while (auto tok = pp.next()) {
             std::cout << tok->lexeme;
         }
-        return 0;
+        printDiagnostics(pp.getDiagnostics());
+        return hasError(pp.getDiagnostics()) ? 1 : 0;
     }
 
     wvmcc::parser::Lexer lex(pp);
     using namespace wvmcc::parser;
     Parser parser(lex);
     TranslationUnitPtr main_translation_unit = parser.parseTranslationUnit();
-    // print parser diagnostics if any
+    // Surface preprocessor + parser diagnostics. Parsing drove the lazy
+    // preprocessor, so any `#error` / bad-directive error is now in pp's set.
+    printDiagnostics(pp.getDiagnostics());
     printDiagnostics(parser.getDiagnostics());
+    // #80: a preprocessor or parser error forces a non-zero exit, matching the
+    // policy semantic/codegen/linker already apply. Error recovery is preserved
+    // (diagnostics above were still collected/printed); only the status changes.
+    if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
+        return 1;
+    }
 
     // If requested, write AST and exit immediately
     if (args.dumpAst) {

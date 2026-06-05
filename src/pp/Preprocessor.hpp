@@ -223,7 +223,6 @@ private:
     void skipRestOfDirectiveTokens();
     bool handleSimpleDirective(const std::string& dir);
     std::vector<PPToken> collectInvocationTokens();
-    void skipToMatchingEndif();
     bool consumeOptionalWhitespaceBeforeOpenParen();
     std::optional<std::string> readDirectiveName();
 };

@@ -12,3 +12,8 @@ add_test(NAME sysroot-resolve COMMAND wvmcc-sysroot-resolve-test)
 add_executable(wvmcc-cli-flags-test cli_flags_test.cpp)
 add_dependencies(wvmcc-cli-flags-test wvmcc)
 add_test(NAME cli-flags COMMAND wvmcc-cli-flags-test)
+
+# #80: preprocessor/parser errors force a non-zero exit (warnings do not).
+add_executable(wvmcc-diagnostic-exit-status-test diagnostic_exit_status_test.cpp)
+add_dependencies(wvmcc-diagnostic-exit-status-test wvmcc)
+add_test(NAME diagnostic-exit-status COMMAND wvmcc-diagnostic-exit-status-test)
