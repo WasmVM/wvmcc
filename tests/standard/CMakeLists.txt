@@ -18,13 +18,18 @@ set(RUNTIME_INCDIR ${CMAKE_SOURCE_DIR}/runtime/include)
 # add_standard_static_assert(<name> <source>)
 #   Registers a compile-only freestanding test. Passes iff wvmcc exits 0.
 function(add_standard_static_assert name source)
+    set(status supported)
+    if(ARGC GREATER 2)
+        set(status "${ARGV2}")
+    endif()
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
     add_test(
         NAME std-${name}
         COMMAND $<TARGET_FILE:wvmcc> -ffreestanding -isystem ${RUNTIME_INCDIR}
                 ${source} -o ${out}
     )
-    set_tests_properties(std-${name} PROPERTIES LABELS "standard;static-assert" TIMEOUT 30)
+    set_tests_properties(std-${name} PROPERTIES
+        LABELS "standard;static-assert;status-${status}" TIMEOUT 30)
 endfunction()
 
 # --- §7.10 <limits.h> / §7.20 <stdint.h> / §7.18 <stdbool.h> ---
@@ -57,13 +62,38 @@ function(add_standard_run_test name source)
     if(NOT WASMVM_EXECUTABLE)
         return()
     endif()
+    set(status supported)
+    if(ARGC GREATER 2)
+        set(status "${ARGV2}")
+    endif()
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
     add_test(
         NAME std-${name}
         COMMAND ${CMAKE_COMMAND} -E env sh -c
             "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${out}' && '${WASMVM_EXECUTABLE}' '${out}'"
     )
-    set_tests_properties(std-${name} PROPERTIES LABELS "standard;run" TIMEOUT 15)
+    set_tests_properties(std-${name} PROPERTIES
+        LABELS "standard;run;status-${status}" TIMEOUT 15)
+endfunction()
+
+# add_standard_run_test2(<name> <src1> <src2> [status]) — two-TU link+run (for
+# cross-translation-unit linkage/compatibility rows).
+function(add_standard_run_test2 name src1 src2)
+    if(NOT WASMVM_EXECUTABLE)
+        return()
+    endif()
+    set(status supported)
+    if(ARGC GREATER 3)
+        set(status "${ARGV3}")
+    endif()
+    set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
+    add_test(
+        NAME std-${name}
+        COMMAND ${CMAKE_COMMAND} -E env sh -c
+            "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${src1}' '${src2}' -L '${RUNTIME_LIBDIR}' -lc -o '${out}' && '${WASMVM_EXECUTABLE}' '${out}'"
+    )
+    set_tests_properties(std-${name} PROPERTIES
+        LABELS "standard;run;status-${status}" TIMEOUT 15)
 endfunction()
 
 # §7.4 <ctype.h> — static-inline classification/mapping; no libc TU, so robust
@@ -87,13 +117,18 @@ function(add_standard_stdout_test name source expected)
     if(NOT WASMVM_EXECUTABLE)
         return()
     endif()
+    set(status supported)
+    if(ARGC GREATER 3)
+        set(status "${ARGV3}")
+    endif()
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
     add_test(
         NAME std-${name}
         COMMAND ${CMAKE_COMMAND} -E env sh -c
             "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${out}' && sh '${CMAKE_CURRENT_SOURCE_DIR}/run_standard_stdout.sh' '${WASMVM_EXECUTABLE}' '${out}' '${expected}'"
     )
-    set_tests_properties(std-${name} PROPERTIES LABELS "standard;stdout" TIMEOUT 15)
+    set_tests_properties(std-${name} PROPERTIES
+        LABELS "standard;stdout;status-${status}" TIMEOUT 15)
 endfunction()
 
 # §7.21 <stdio.h> — formatted/character output (LIBC-stdio-*). printf/puts are
@@ -119,6 +154,10 @@ add_standard_stdout_test(libc-stdio-printf-long   ${STDIO_DIR}/printf_long.c   $
 # width, non-positive array size) are missing-diagnostic gaps tracked separately
 # and stay `partial` in the catalog.
 function(add_standard_compile_fail name source)
+    set(status supported)
+    if(ARGC GREATER 2)
+        set(status "${ARGV2}")
+    endif()
     set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
     add_test(
         NAME std-${name}
@@ -126,7 +165,7 @@ function(add_standard_compile_fail name source)
                 ${source} -o ${out}
     )
     set_tests_properties(std-${name} PROPERTIES
-        WILL_FAIL TRUE LABELS "standard;compile-fail" TIMEOUT 30)
+        WILL_FAIL TRUE LABELS "standard;compile-fail;status-${status}" TIMEOUT 30)
 endfunction()
 
 # 6.4 / 6.5 expressions
@@ -152,3 +191,13 @@ add_standard_compile_fail(lang-6.8.6.4-return-void    ${CMAKE_CURRENT_SOURCE_DIR
 add_standard_compile_fail(lang-6.8.6.4-bare-return    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/bare_return_nonvoid.c)
 # 6.9 external definitions
 add_standard_compile_fail(lang-6.9.1-redefine-func    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.9_external/redefine_function.c)
+
+# --- Generated scaffold (full catalog materialization) ---
+# Each tests/standard/scaffold/<clause>.cmake registers the standard-conformance
+# tests for one clause/header group via the helpers above, passing the catalog
+# Status as the label arg. Tests assert the STANDARD; partial/deferred areas are
+# expected to FAIL (a conformance signal), filterable by `status-*` labels.
+file(GLOB _std_scaffold ${CMAKE_CURRENT_SOURCE_DIR}/scaffold/*.cmake)
+foreach(_sc ${_std_scaffold})
+    include(${_sc})
+endforeach()
