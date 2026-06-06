@@ -80,3 +80,49 @@ endforeach()
 # interpreter issue is resolved.
 add_standard_run_test(libc-string-strlen ${CMAKE_CURRENT_SOURCE_DIR}/libc/string/strlen.c)
 add_standard_run_test(libc-string-strcmp ${CMAKE_CURRENT_SOURCE_DIR}/libc/string/strcmp.c)
+
+# --- `compile-fail` Verify mode (unblocked by #80) ---
+# An ill-formed (constraint/syntax-violating) TU must be REJECTED. The test
+# command is just `wvmcc`; WILL_FAIL inverts it, so the test passes iff wvmcc
+# exits non-zero. Message text is not asserted (no stable diagnostic IDs).
+#
+# Only constraints wvmcc actually diagnoses today are listed here (each was
+# empirically confirmed to be rejected). Constraints wvmcc does not yet detect
+# (e.g. sizeof(void), assign-to-const, ptr+ptr, `.` on non-struct, tag-kind
+# mismatch, too-many-args, redefinition of a block-scope object, bad bit-field
+# width, non-positive array size) are missing-diagnostic gaps tracked separately
+# and stay `partial` in the catalog.
+function(add_standard_compile_fail name source)
+    set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
+    add_test(
+        NAME std-${name}
+        COMMAND $<TARGET_FILE:wvmcc> -ffreestanding -isystem ${RUNTIME_INCDIR}
+                ${source} -o ${out}
+    )
+    set_tests_properties(std-${name} PROPERTIES
+        WILL_FAIL TRUE LABELS "standard;compile-fail" TIMEOUT 30)
+endfunction()
+
+# 6.4 / 6.5 expressions
+add_standard_compile_fail(lang-6.4-stray-token        ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/stray_token.c)
+add_standard_compile_fail(lang-6.5.1-undeclared       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/undeclared_identifier.c)
+add_standard_compile_fail(lang-6.5.2.1-subscript      ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/subscript_non_array.c)
+add_standard_compile_fail(lang-6.5.3.2-deref          ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/deref_non_pointer.c)
+# 6.7 declarations
+add_standard_compile_fail(lang-6.7-empty-decl         ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/empty_declaration.c)
+add_standard_compile_fail(lang-6.7-incompatible-redecl ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/incompatible_redecl.c)
+add_standard_compile_fail(lang-6.7.2.2-enum-dup       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/enum_duplicate.c)
+add_standard_compile_fail(lang-6.7.2.3-redefine-struct ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/redefine_struct.c)
+add_standard_compile_fail(lang-6.7.9-excess-init      ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/excess_initializer.c)
+add_standard_compile_fail(lang-6.7.10-sassert-zero    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/static_assert_zero.c)
+add_standard_compile_fail(lang-6.7.10-sassert-nonconst ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/static_assert_nonconst.c)
+# 6.8 statements
+add_standard_compile_fail(lang-6.8.1-case-outside     ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/case_outside_switch.c)
+add_standard_compile_fail(lang-6.8.4.2-dup-case       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/dup_case_label.c)
+add_standard_compile_fail(lang-6.8.6.1-goto-undef     ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/goto_undefined_label.c)
+add_standard_compile_fail(lang-6.8.6.2-continue       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/continue_outside_loop.c)
+add_standard_compile_fail(lang-6.8.6.3-break          ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/break_outside.c)
+add_standard_compile_fail(lang-6.8.6.4-return-void    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/return_value_in_void.c)
+add_standard_compile_fail(lang-6.8.6.4-bare-return    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/bare_return_nonvoid.c)
+# 6.9 external definitions
+add_standard_compile_fail(lang-6.9.1-redefine-func    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.9_external/redefine_function.c)
