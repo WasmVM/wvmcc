@@ -10,9 +10,18 @@ Schema: **ID · Spec § · Entity · Kind · Test case · Category · Status · 
 > **Build progress.** Complete — all C17 library headers §§7.2–7.31. Headers are presented in
 > (roughly) freestanding-first order so the compile-time-verifiable surface comes first.
 
+> **Reality checks (from materializing the suite — `tests/standard/`).**
+> - **`<float.h>`, `<iso646.h>`, `<stdalign.h>`, `<stdnoreturn.h>` are not yet present in
+>   `runtime/include`** (freestanding-required per 4p6) — their rows are `deferred` until the headers
+>   land, flagged per section.
+> - **`sizeof`/`_Alignof`/casts are rejected in `_Static_assert`** (wvmcc ICE-evaluator gap, **#81**),
+>   so type-width/alignment/signedness `static-assert` rows cannot be verified yet. Only
+>   integer-constant-**macro** rows are live; affected rows note `#81`. `<stddef.h>` has no live
+>   `static-assert` row as a result.
+>
 > **Status basis.** `supported`/`partial` reflect the `runtime/` libc; the minimal freestanding
-> headers (`<float.h> <iso646.h> <limits.h> <stdalign.h> <stdarg.h> <stdbool.h> <stddef.h>
-> <stdint.h> <stdnoreturn.h>`, per 4p6) are testable in `-ffreestanding`. `<complex.h>`,
+> headers (`<limits.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h>`, per 4p6) are present and
+> testable in `-ffreestanding`. `<complex.h>`,
 > `<tgmath.h>`, `<stdatomic.h>`, `<threads.h>`, `<fenv.h>`, `<uchar.h>`, `<wchar.h>`,
 > `<wctype.h>`, `<locale.h>`, `<signal.h>`, `<setjmp.h>` are `deferred`/`by-design` per
 > `docs/spec.md`.
@@ -24,6 +33,9 @@ Schema: **ID · Spec § · Entity · Kind · Test case · Category · Status · 
 Characteristics of floating types. All macros are `obj-macro` constant expressions; the integer
 ones are `#if`-usable. Values follow IEEE-754 binary32/binary64 with `long double` aliased to
 `double` (`docs/spec.md`). See also 5.2.4.2.2.
+
+> ⚠ **Not yet provided by `runtime/include`** (freestanding-required, 4p6). Every row below is
+> effectively **`deferred`** until `<float.h>` lands; the listed Status is the intended end state.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -47,7 +59,7 @@ Alternative spellings — eleven object-like macros for operator tokens.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-iso646-and-01` | 7.9p1 | and / and_eq / bitand / bitor / compl / not / not_eq / or / or_eq / xor / xor_eq | obj-macro | Each expands to its operator (`and`→`&&`, `bitand`→`&`, `compl`→`~`, …) | Positive | supported | static-assert | freestanding-required (4p6) |
+| `LIBC-iso646-and-01` | 7.9p1 | and / and_eq / bitand / bitor / compl / not / not_eq / or / or_eq / xor / xor_eq | obj-macro | Each expands to its operator (`and`→`&&`, `bitand`→`&`, `compl`→`~`, …) | Positive | deferred | static-assert | **not yet in `runtime/include`** (freestanding-required, 4p6) |
 
 ## `<limits.h>` (7.10)
 
@@ -59,7 +71,7 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 | `LIBC-limits-CHAR_BIT-01` | 5.2.4.2.1 | CHAR_BIT | obj-macro | `== 8` | B-impl | supported | static-assert | |
 | `LIBC-limits-SCHAR-01` | 5.2.4.2.1 | SCHAR_MIN / SCHAR_MAX / UCHAR_MAX | obj-macro | `-128 / 127 / 255` | B-impl | supported | static-assert | `docs/spec.md`: signed `char` |
 | `LIBC-limits-CHAR-01` | 5.2.4.2.1p2 | CHAR_MIN / CHAR_MAX | obj-macro | Equal to `SCHAR_*` (signed `char`) | B-impl | supported | static-assert | `docs/spec.md`: signed `char` default |
-| `LIBC-limits-MB_LEN_MAX-01` | 5.2.4.2.1 | MB_LEN_MAX | obj-macro | `== 1` | B-impl | supported | static-assert | UTF-8 byte; no multibyte locales |
+| `LIBC-limits-MB_LEN_MAX-01` | 5.2.4.2.1 | MB_LEN_MAX | obj-macro | `>= 1` (wvmcc: 4) | B-impl | supported | static-assert | `runtime/include/limits.h` defines **4** (UTF-8 max bytes); standard floor is 1 |
 | `LIBC-limits-SHRT-01` | 5.2.4.2.1 | SHRT_MIN / SHRT_MAX / USHRT_MAX | obj-macro | `-32768 / 32767 / 65535` | B-impl | supported | static-assert | 16-bit |
 | `LIBC-limits-INT-01` | 5.2.4.2.1 | INT_MIN / INT_MAX / UINT_MAX | obj-macro | `-2147483648 / 2147483647 / 4294967295` | B-impl | supported | static-assert | 32-bit |
 | `LIBC-limits-LONG-01` | 5.2.4.2.1 | LONG_MIN / LONG_MAX / ULONG_MAX | obj-macro | 64-bit bounds (LP64) | B-impl | supported | static-assert | `docs/spec.md`: `long` 64-bit |
@@ -68,11 +80,15 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 
 ## `<stdalign.h>` (7.15)
 
+> ⚠ **Not yet provided by `runtime/include`** (freestanding-required, 4p6); rows below are `deferred`
+> until the header lands. (`_Alignas`/`_Alignof` keywords work; `_Alignof` in an ICE is additionally
+> gated by #81.)
+
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdalign-alignas-01` | 7.15p2 | alignas | obj-macro | Expands to `_Alignas` | Positive | partial | static-assert | freestanding-required; runtime over-alignment partial |
-| `LIBC-stdalign-alignof-01` | 7.15p2 | alignof | obj-macro | Expands to `_Alignof` | Positive | supported | static-assert | |
-| `LIBC-stdalign-defined-01` | 7.15p3 | __alignas_is_defined / __alignof_is_defined | obj-macro | Each defined as `1` | Positive | partial | static-assert | |
+| `LIBC-stdalign-alignas-01` | 7.15p2 | alignas | obj-macro | Expands to `_Alignas` | Positive | deferred | static-assert | header absent; runtime over-alignment partial |
+| `LIBC-stdalign-alignof-01` | 7.15p2 | alignof | obj-macro | Expands to `_Alignof` | Positive | deferred | static-assert | header absent; `_Alignof` in ICE also blocked on #81 |
+| `LIBC-stdalign-defined-01` | 7.15p3 | __alignas_is_defined / __alignof_is_defined | obj-macro | Each defined as `1` | Positive | deferred | static-assert | header absent |
 
 ## `<stdarg.h>` (7.16)
 
@@ -89,7 +105,7 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdbool-bool-01` | 7.18p1 | bool | obj-macro | Expands to `_Bool` | Positive | supported | static-assert | freestanding-required |
+| `LIBC-stdbool-bool-01` | 7.18p1 | bool | obj-macro | Expands to `_Bool` | Positive | supported | static-assert | freestanding-required; `sizeof(bool)`/cast-normalization checks **blocked on #81** |
 | `LIBC-stdbool-true-01` | 7.18p1 | true / false | obj-macro | Expand to `1` / `0` | Positive | supported | static-assert | |
 | `LIBC-stdbool-defined-01` | 7.18p1 | __bool_true_false_are_defined | obj-macro | Defined as `1` | Positive | supported | static-assert | |
 
@@ -97,12 +113,12 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stddef-size_t-01` | 7.19p2 | size_t | type | Unsigned `sizeof` result type | B-impl | supported | static-assert | `docs/spec.md` LP64: 64-bit |
-| `LIBC-stddef-ptrdiff_t-01` | 7.19p2 | ptrdiff_t | type | Signed pointer-difference type | B-impl | supported | static-assert | LP64: 64-bit signed |
-| `LIBC-stddef-max_align_t-01` | 7.19p2 | max_align_t | type | Type with the greatest fundamental alignment | B-impl | supported | static-assert | `_Alignof(max_align_t) == 8` |
-| `LIBC-stddef-wchar_t-01` | 7.19p2 | wchar_t | type | Wide-character type | B-impl | partial | static-assert | `docs/spec.md`: define & size |
-| `LIBC-stddef-NULL-01` | 7.19p3 | NULL | obj-macro | A null pointer constant | Positive | supported | static-assert | |
-| `LIBC-stddef-offsetof-01` | 7.19p3 | offsetof | fn-macro | Byte offset of a member; ICE | Positive | supported | static-assert | |
+| `LIBC-stddef-size_t-01` | 7.19p2 | size_t | type | Unsigned `sizeof` result type | B-impl | supported | static-assert | LP64: 64-bit. `#define` (typedef-gap workaround). Size check via `sizeof` **blocked on #81** |
+| `LIBC-stddef-ptrdiff_t-01` | 7.19p2 | ptrdiff_t | type | Signed pointer-difference type | B-impl | supported | static-assert | LP64: 64-bit signed. Size check **blocked on #81** |
+| `LIBC-stddef-max_align_t-01` | 7.19p2 | max_align_t | type | Type with the greatest fundamental alignment | B-impl | deferred | static-assert | **not yet in `runtime/include/stddef.h`**; intended `_Alignof == 8` |
+| `LIBC-stddef-wchar_t-01` | 7.19p2 | wchar_t | type | Wide-character type | B-impl | partial | static-assert | wvmcc placeholder `int` (`#define`). Size check **blocked on #81** |
+| `LIBC-stddef-NULL-01` | 7.19p3 | NULL | obj-macro | A null pointer constant | Positive | supported | exit | `(void*)0`; verified at runtime (pointer comparison is not an ICE) |
+| `LIBC-stddef-offsetof-01` | 7.19p3 | offsetof | fn-macro | Byte offset of a member | Positive | supported | exit | wvmcc's `offsetof` is the null-pointer trick → address constant, **not an ICE**; verify at runtime, not via `_Static_assert` |
 
 ## `<stdint.h>` (7.20)
 
@@ -111,21 +127,21 @@ LP64 (`docs/spec.md`).
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdint-intN_t-01` | 7.20.1.1 | int8_t / int16_t / int32_t / int64_t (+ unsigned) | type | Exact-width two's-complement types; `sizeof` is exactly N/8 | Positive | supported | static-assert | |
-| `LIBC-stdint-int_leastN_t-01` | 7.20.1.2 | int_least8_t … int_least64_t (+ unsigned) | type | Minimum-width types; `sizeof` ≥ N/8 | Positive | supported | static-assert | |
-| `LIBC-stdint-int_fastN_t-01` | 7.20.1.3 | int_fast8_t … int_fast64_t (+ unsigned) | type | Fastest minimum-width types | B-impl | supported | static-assert | impl chooses underlying type |
-| `LIBC-stdint-intptr_t-01` | 7.20.1.4 | intptr_t / uintptr_t | type | Integer types that round-trip an object pointer | B-impl | supported | static-assert | LP64: 64-bit |
-| `LIBC-stdint-intmax_t-01` | 7.20.1.5 | intmax_t / uintmax_t | type | Greatest-width integer types | B-impl | supported | static-assert | 64-bit |
+| `LIBC-stdint-intN_t-01` | 7.20.1.1 | int8_t / int16_t / int32_t / int64_t (+ unsigned) | type | Exact-width two's-complement types; `sizeof` is exactly N/8 | Positive | supported | static-assert | width via `sizeof` **blocked on #81** |
+| `LIBC-stdint-int_leastN_t-01` | 7.20.1.2 | int_least8_t … int_least64_t (+ unsigned) | type | Minimum-width types; `sizeof` ≥ N/8 | Positive | supported | static-assert | width via `sizeof` **blocked on #81** |
+| `LIBC-stdint-int_fastN_t-01` | 7.20.1.3 | int_fast8_t … int_fast64_t (+ unsigned) | type | Fastest minimum-width types | B-impl | supported | static-assert | impl chooses underlying type; width via `sizeof` **blocked on #81** |
+| `LIBC-stdint-intptr_t-01` | 7.20.1.4 | intptr_t / uintptr_t | type | Integer types that round-trip an object pointer | B-impl | supported | static-assert | LP64: 64-bit; width via `sizeof` **blocked on #81** |
+| `LIBC-stdint-intmax_t-01` | 7.20.1.5 | intmax_t / uintmax_t | type | Greatest-width integer types | B-impl | supported | static-assert | 64-bit; width via `sizeof` **blocked on #81** |
 | `LIBC-stdint-INTN_limits-01` | 7.20.2.1 | INT8_MIN … INT64_MAX / UINTN_MAX | obj-macro | Exact-width limit macros; `#if`-usable | Positive | supported | static-assert | |
 | `LIBC-stdint-INT_LEAST/FAST-01` | 7.20.2.2,7.20.2.3 | INT_LEASTN_* / INT_FASTN_* limit macros | obj-macro | Least/fast-width limit macros | Positive | supported | static-assert | |
 | `LIBC-stdint-other-limits-01` | 7.20.2.4,7.20.2.5 | INTPTR_* / INTMAX_* / PTRDIFF_* / SIZE_MAX / SIG_ATOMIC_* / WCHAR_* / WINT_* | obj-macro | Other-type limit macros (`SIZE_MAX`, `PTRDIFF_MAX`, …) | B-impl | partial | static-assert | LP64 values |
-| `LIBC-stdint-INTN_C-01` | 7.20.4 | INT8_C … INTMAX_C / UINTN_C | fn-macro | Integer-constant builder macros yield the right type/value | Positive | supported | static-assert | |
+| `LIBC-stdint-INTN_C-01` | 7.20.4 | INT8_C … INTMAX_C / UINTN_C | fn-macro | Integer-constant builder macros yield the right type/value | Positive | supported | static-assert | value landed; type/width via `sizeof` **blocked on #81** |
 
 ## `<stdnoreturn.h>` (7.23)
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdnoreturn-noreturn-01` | 7.23p1 | noreturn | obj-macro | Expands to `_Noreturn`; a `noreturn` function does not return | Positive | supported | exit | freestanding-required; emits trailing `unreachable` |
+| `LIBC-stdnoreturn-noreturn-01` | 7.23p1 | noreturn | obj-macro | Expands to `_Noreturn`; a `noreturn` function does not return | Positive | deferred | exit | **`<stdnoreturn.h>` not yet in `runtime/include`** (the `_Noreturn` keyword itself works, emitting trailing `unreachable`); freestanding-required (4p6) |
 
 ## `<assert.h>` (7.2)
 
