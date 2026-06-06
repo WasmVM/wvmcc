@@ -17,7 +17,7 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 |---|---|---|---|---|---|---|
 | `LANG-4-01` | 4p4 | `#error` in a non-skipped group must fail translation (non-zero exit) | Negative | partial | compile-fail | pp `#error` implemented; **CLI exit-code gap** — pp errors currently exit 0 (see README follow-ups) |
 | `LANG-4-02` | 4p4 | `#error` inside a skipped (`#if 0`) group does **not** fail translation | Positive | supported | exit | conditional inclusion skips it; also unit-xref `pp_directives_test` |
-| `LANG-4-03` | 4p6 | The freestanding-required headers (`<float.h> <iso646.h> <limits.h> <stdalign.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h> <stdnoreturn.h>`) are each includable in `-ffreestanding` | Positive | partial | static-assert | per-header detail in `libc.md`; here = includability + a key macro each |
+| `LANG-4-03` | 4p6 | The freestanding-required headers (`<float.h> <iso646.h> <limits.h> <stdalign.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h> <stdnoreturn.h>`) are each includable in `-ffreestanding` | Positive | partial | static-assert | present: `limits`/`stdarg`/`stdbool`/`stddef`/`stdint`; **missing: `float`/`iso646`/`stdalign`/`stdnoreturn`** (see libc.md) |
 
 ## Clause 5 — Environment
 
@@ -75,7 +75,7 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 | `LANG-5.2.1-03` | 5.2.1p2 | Null character (all-zero byte) exists and terminates strings (`'\0'==0`) | Positive | supported | static-assert | |
 | `LANG-5.2.1-04` | 5.2.1p3 | A stray character outside identifier/literal/comment/header/never-converted-token | B-undef | supported | none | documentation |
 | `LANG-5.2.1.1-01` | 5.2.1.1p1 | All nine trigraph sequences are replaced in phase 1 | Positive | supported | unit-xref | `pp_basic_test` (trigraphs) |
-| `LANG-5.2.1.2-01` | 5.2.1.2p1 | Each basic-set char is one byte; null byte is not part of a multibyte char | Positive | supported | static-assert | `MB_LEN_MAX==1` (`docs/spec.md`) |
+| `LANG-5.2.1.2-01` | 5.2.1.2p1 | Each basic-set char is one byte; null byte is not part of a multibyte char | Positive | supported | static-assert | basic chars are 1 byte; `runtime/include/limits.h` sets `MB_LEN_MAX` = 4 (UTF-8 max) |
 | `LANG-5.2.1.2-02` | 5.2.1.2p1 | Encoding/meaning of extended (additional) members is locale-specific | B-impl | by-design | none | `docs/spec.md`: UTF-8, no shift states |
 
 ### 5.2.2 Character display semantics
@@ -206,7 +206,7 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.2.8-01` | 6.2.8p1 | Each complete object type has an implementation-defined alignment | B-impl | supported | static-assert | `docs/spec.md`: `char`1 `short`2 `int`/`float`4 `long`/`double`8 |
-| `LANG-6.2.8-02` | 6.2.8p2 | Fundamental alignments (≤ `_Alignof(max_align_t)`) are supported for all storage durations | Positive | supported | static-assert | `docs/spec.md`: `max_align_t` = 8 |
+| `LANG-6.2.8-02` | 6.2.8p2 | Fundamental alignments (≤ `_Alignof(max_align_t)`) are supported for all storage durations | Positive | partial | static-assert | `docs/spec.md`: `max_align_t` = 8, but it is **not yet in `<stddef.h>`** (see libc.md); `_Alignof` in an ICE also gated by #81 |
 | `LANG-6.2.8-03` | 6.2.8p1 | `_Alignas` requests a stricter alignment | Positive | partial | static-assert | unit-xref `sema_alignas_test`; runtime over-alignment partial |
 | `LANG-6.2.8-04` | 6.2.8p3 | Extended (over-)alignment beyond `max_align_t` | B-impl | partial | static-assert | support for over-alignment partial |
 

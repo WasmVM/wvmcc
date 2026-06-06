@@ -144,7 +144,12 @@ pass, not this catalog.
 | `language.md` (Clause 4, 5, 6.2–6.11) | complete |
 | `libc.md` (7.2–7.31) | complete |
 
-The catalog is exhaustive across C17 Clauses 4–7 and the reachable Annex J behavior items. Next
-steps live outside this catalog (see plan): a prerequisite compiler fix so preprocessor/parser
-errors force a non-zero exit (`compile-fail` rows depend on it), then the test-writing pass that
-materializes each row under `tests/standard/` per the ID→path convention above.
+The catalog is exhaustive across C17 Clauses 4–7 and the reachable Annex J behavior items. The
+test-writing pass materializes each row under `tests/standard/` per the ID→path convention above
+(the first `static-assert` batch has landed). Known prerequisites surfaced while materializing it:
+
+- **#80** — preprocessor/parser errors must force a non-zero exit (gates `compile-fail` rows).
+- **#81** — the `_Static_assert` ICE evaluator must accept `sizeof`/`_Alignof`/casts (gates the
+  type-width/alignment/signedness `static-assert` rows; only macro-value rows are live until then).
+- **Missing freestanding headers** — `<float.h>`, `<iso646.h>`, `<stdalign.h>`, `<stdnoreturn.h>`
+  (required per 4p6) are not yet in `runtime/include`; their rows stay `deferred`.
