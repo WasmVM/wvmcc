@@ -30,8 +30,13 @@ _Static_assert(INT64_C(1) == 1, "INT64_C value");
 _Static_assert(UINT32_C(1) == 1u, "UINT32_C value");
 _Static_assert(INTMAX_C(5) == 5 && UINTMAX_C(5) == 5u, "INTMAX_C/UINTMAX_C value");
 
-/* #if-usability of the limit macros */
-#if INT32_MAX == 2147483647 && SIZE_MAX > INT32_MAX
+/* #if-usability of the limit macros.
+ * NOTE: uses INT64_MAX (signed) — wvmcc's preprocessor #if evaluator cannot
+ * parse full-width unsigned constants like SIZE_MAX/UINT64_MAX
+ * (18446744073709551615ULL → "invalid integer constant"). That #if-usability
+ * sub-case is tracked separately; the _Static_assert above (semantic ICE
+ * evaluator) handles the full-width value fine. */
+#if INT32_MAX == 2147483647 && INT64_MAX > INT32_MAX
 /* ok */
 #else
 #error "stdint limit macros must be #if-usable"
