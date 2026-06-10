@@ -81,6 +81,32 @@ endforeach()
 add_standard_run_test(libc-string-strlen ${CMAKE_CURRENT_SOURCE_DIR}/libc/string/strlen.c)
 add_standard_run_test(libc-string-strcmp ${CMAKE_CURRENT_SOURCE_DIR}/libc/string/strcmp.c)
 
+# --- `stdout` Verify mode: run on wasmvm and diff captured stdout vs a fixture ---
+# add_standard_stdout_test(<name> <source> <expected-file>)
+function(add_standard_stdout_test name source expected)
+    if(NOT WASMVM_EXECUTABLE)
+        return()
+    endif()
+    set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
+    add_test(
+        NAME std-${name}
+        COMMAND ${CMAKE_COMMAND} -E env sh -c
+            "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${out}' && sh '${CMAKE_CURRENT_SOURCE_DIR}/run_standard_stdout.sh' '${WASMVM_EXECUTABLE}' '${out}' '${expected}'"
+    )
+    set_tests_properties(std-${name} PROPERTIES LABELS "standard;stdout" TIMEOUT 15)
+endfunction()
+
+# §7.21 <stdio.h> — formatted/character output (LIBC-stdio-*). printf/puts are
+# exercised by existing integration tests, so the call graph is wasmvm-safe.
+set(STDIO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdio)
+add_standard_stdout_test(libc-stdio-puts          ${STDIO_DIR}/puts.c          ${STDIO_DIR}/puts.expected)
+add_standard_stdout_test(libc-stdio-putchar       ${STDIO_DIR}/putchar.c       ${STDIO_DIR}/putchar.expected)
+add_standard_stdout_test(libc-stdio-printf-int    ${STDIO_DIR}/printf_int.c    ${STDIO_DIR}/printf_int.expected)
+add_standard_stdout_test(libc-stdio-printf-width  ${STDIO_DIR}/printf_width.c  ${STDIO_DIR}/printf_width.expected)
+add_standard_stdout_test(libc-stdio-printf-flags  ${STDIO_DIR}/printf_flags.c  ${STDIO_DIR}/printf_flags.expected)
+add_standard_stdout_test(libc-stdio-printf-string ${STDIO_DIR}/printf_string.c ${STDIO_DIR}/printf_string.expected)
+add_standard_stdout_test(libc-stdio-printf-long   ${STDIO_DIR}/printf_long.c   ${STDIO_DIR}/printf_long.expected)
+
 # --- `compile-fail` Verify mode (unblocked by #80) ---
 # An ill-formed (constraint/syntax-violating) TU must be REJECTED. The test
 # command is just `wvmcc`; WILL_FAIL inverts it, so the test passes iff wvmcc
