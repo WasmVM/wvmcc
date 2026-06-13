@@ -23,6 +23,10 @@ variables:
   WASMVM_PREFIX: "$CI_PROJECT_DIR/.wasmvm"
   DEBIAN_FRONTEND: "noninteractive"
   GIT_DEPTH: "0"
+  # Cache namespace — bump to discard caches built with an older toolchain/image.
+  # u2404 = ubuntu 24.04 / GCC 13. (GCC 11 on 22.04 miscompiled WasmVM's value-
+  # type serialization, so wvmcc emitted modules its own readwasm rejected.)
+  CACHE_NS: "u2404"
 
 # Run on: MRs targeting master, and pushes to parser / master. The middle rule
 # suppresses the redundant branch pipeline while an MR for that branch is open,
@@ -36,12 +40,14 @@ workflow:
     - if: '$CI_COMMIT_BRANCH == "master" && $CI_PIPELINE_SOURCE == "push"'
 
 default:
-  image: ubuntu:22.04
+  # GCC 13. Do NOT downgrade to ubuntu:22.04 — its GCC 11 miscompiles WasmVM's
+  # value-type encode/decode, so every wvmcc-emitted module fails validation.
+  image: ubuntu:24.04
   # The WasmVM install prefix is cached across pipelines, keyed on WASMVM_REF.
   # before_script rebuilds it on a cache miss, so the cache is purely a speedup
   # and never a correctness dependency.
   cache:
-    - key: "wasmvm-$WASMVM_REF"
+    - key: "wasmvm-$WASMVM_REF-$CACHE_NS"
       paths:
         - .wasmvm/
   before_script:
@@ -78,10 +84,10 @@ build:
   # mechanism — it also carries the emitted .wasm to validate). The `cache` entry
   # is an additional cross-pipeline speedup for incremental rebuilds.
   cache:
-    - key: "wasmvm-$WASMVM_REF"
+    - key: "wasmvm-$WASMVM_REF-$CACHE_NS"
       paths:
         - .wasmvm/
-    - key: "build-$CI_COMMIT_REF_SLUG"
+    - key: "build-$CI_COMMIT_REF_SLUG-$CACHE_NS"
       paths:
         - build/
   script:
@@ -106,10 +112,10 @@ test:
   stage: test
   needs: ["build"]
   cache:
-    - key: "wasmvm-$WASMVM_REF"
+    - key: "wasmvm-$WASMVM_REF-$CACHE_NS"
       paths:
         - .wasmvm/
-    - key: "build-$CI_COMMIT_REF_SLUG"
+    - key: "build-$CI_COMMIT_REF_SLUG-$CACHE_NS"
       paths:
         - build/
   script:
