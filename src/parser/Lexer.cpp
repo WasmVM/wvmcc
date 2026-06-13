@@ -1,4 +1,5 @@
 // Lexer implementation moved out of header
+#include <cstdint>
 #include "Lexer.hpp"
 #include <unordered_set>
 #include <limits>

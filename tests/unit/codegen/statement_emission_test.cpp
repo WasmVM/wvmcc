@@ -1,3 +1,4 @@
+#include <cstdint>
 #include <iostream>
 #include "../../../src/codegen/FunctionCodegen.hpp"
 #include "../../../src/codegen/TypeMap.hpp"

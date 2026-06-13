@@ -101,7 +101,10 @@ build:
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG"
         -DCMAKE_PREFIX_PATH="$WASMVM_PREFIX"
-    - ninja -C build -j "$JOBS"
+    # -k 0: keep compiling after the first error so one run reports ALL compile
+    # failures (the job still fails if any did). Cheap insurance against
+    # one-error-per-pipeline round-trips on toolchain-portability fixes.
+    - ninja -C build -k 0 -j "$JOBS"
   artifacts:
     paths:
       - build/

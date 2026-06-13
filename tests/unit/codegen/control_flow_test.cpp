@@ -1,4 +1,5 @@
 // Phase 3 control-flow tests: switch, do-while, break, continue, goto/label.
+#include <cstdint>
 #include <iostream>
 #include "../../../src/codegen/FunctionCodegen.hpp"
 #include "../../../src/codegen/TypeMap.hpp"

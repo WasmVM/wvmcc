@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "Parser.hpp"
 #include <cassert>
 #include <algorithm>

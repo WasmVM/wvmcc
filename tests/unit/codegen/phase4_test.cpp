@@ -3,6 +3,7 @@
 // locals / designated initializers for declarations) are covered by the
 // integration tests under tests/integration/phase4 because they need a real
 // translation unit.
+#include <cstdint>
 #include <iostream>
 #include "../../../src/codegen/FunctionCodegen.hpp"
 #include "../../../src/codegen/TypeMap.hpp"

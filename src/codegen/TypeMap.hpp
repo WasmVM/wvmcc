@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "LayoutEngine.hpp"
 #include "../parser/AST.hpp"
 #include <WasmVM.hpp>

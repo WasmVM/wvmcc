@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include "TypeMap.hpp"
 #include "SymbolTable.hpp"
 #include "TypeIndexCache.hpp"

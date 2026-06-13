@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "Preprocessor.hpp"
 #include "ConstExprParser.hpp"
 
