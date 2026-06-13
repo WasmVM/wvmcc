@@ -25,6 +25,9 @@ public:
 
     void traverseExpr(const ExprPtr &e);
 
+    // Report a full (top-level) expression: invokes onExpr once, then recurses.
+    void traverseFullExpr(const ExprPtr &e);
+
 protected:
     // callback hooks
     virtual void onIdent(const IdentifierExprPtr &/*id*/) {}
@@ -35,6 +38,17 @@ protected:
     virtual void onEnterFunction(const FunctionDefPtr &/*f*/) {}
     virtual void onExitFunction(const FunctionDefPtr &/*f*/) {}
     virtual void onDeclaration(const DeclarationPtr &/*d*/) {}
+    // Called once for each *full* expression encountered in an evaluated
+    // context (expression statement, controlling expression, return value,
+    // initializer expression, etc.). Subexpressions are NOT reported here —
+    // the hook receives the top of the expression tree so a consumer can run a
+    // single recursive type/constraint analysis per full expression without
+    // duplicating diagnostics. Default: no-op.
+    virtual void onExpr(const ExprPtr &/*e*/) {}
+    // Called when entering/exiting a block (compound-statement) scope. Lets a
+    // consumer track block-scope symbol tables for redefinition diagnostics.
+    virtual void onEnterBlock() {}
+    virtual void onExitBlock() {}
 };
 
 } // namespace wvmcc::parser

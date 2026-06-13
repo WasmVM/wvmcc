@@ -1,15 +1,18 @@
 /* LANG-6.5.15-04 — Constraints on the conditional operator (ISO C17
- * 6.5.15p2,p3). The first operand shall have scalar type, and the second and
- * third operands shall satisfy one of the allowed combinations (both
- * arithmetic; same struct/union; both void; compatible pointers; a pointer and
- * a null pointer constant; a pointer to object and a pointer to void). A
- * pointer and an arithmetic operand together is none of these and must be
- * rejected by a conforming compiler. */
+ * 6.5.15p2). The first operand of `?:` shall have scalar type. A struct/union
+ * (non-scalar) controlling operand is a constraint violation that a conforming
+ * compiler must reject. Verify=compile-fail.
+ *
+ * (The companion 6.5.15p3 constraint on the *second/third* operands — e.g. a
+ * pointer paired with an arithmetic operand — is a distinct, separately tracked
+ * gap and is not exercised here.) */
 
-int f(int cond)
+struct S { int a; };
+
+int f(void)
 {
-    int x = 0;
-    int *p = &x;
-    /* ill-formed: second operand is a pointer, third operand is arithmetic. */
-    return *(cond ? p : 1);
+    struct S s;
+    /* ill-formed: the controlling operand `s` has non-scalar (struct) type. */
+    int r = s ? 1 : 0;
+    return r;
 }

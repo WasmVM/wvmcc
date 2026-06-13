@@ -362,6 +362,20 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
             tag_registry[*tagName] = su;
         } else {
             auto existing = it->second;
+            // C 6.7.2.3p2: a tag declared with one kind (struct/union) shall not
+            // be re-used with a different kind. The tag registry stores the
+            // first-seen specifier, so detect the mismatch here (the just-parsed
+            // `su->kind` versus the registered `existing->kind`) before merging.
+            if (existing && existing->kind != su->kind) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                const char *want = su->kind == StructOrUnionSpecifier::Kind::Union ? "union" : "struct";
+                const char *prev = existing->kind == StructOrUnionSpecifier::Kind::Union ? "union" : "struct";
+                d.message = std::string("'") + *tagName + "' defined as wrong kind of tag ('"
+                            + want + "' but previously declared as '" + prev + "')";
+                if (kw) d.span = kw->span;
+                diagnostics.push_back(std::move(d));
+            }
             if (existing && existing->hasBody && hasBodyNow) {
                 // duplicate tag definition -- move reporting to Semantic
                 // leave registry unchanged
