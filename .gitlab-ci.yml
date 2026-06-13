@@ -72,6 +72,8 @@ default:
 
 build:
   stage: build
+  # Fail fast instead of burning the runner if a compile ever hangs again.
+  timeout: 25m
   # build/ is handed to later stages via `artifacts` (the reliable cross-stage
   # mechanism — it also carries the emitted .wasm to validate). The `cache` entry
   # is an additional cross-pipeline speedup for incremental rebuilds.
@@ -83,8 +85,17 @@ build:
       paths:
         - build/
   script:
-    - cmake -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$WASMVM_PREFIX"
-    - ninja -C build
+    # The unit tests recompile the heavy TUs (Parser/Preprocessor/codegen) once
+    # per test target — 660 objects total. At -O3 with unbounded parallelism GCC
+    # OOM-thrashes/stalls on a constrained runner, so build wvmcc at -O1 (keeping
+    # NDEBUG) and cap ninja to 2 jobs to bound peak memory. wvmcc only has to
+    # compile tiny test C programs, so its own -O level is irrelevant to runtime.
+    - JOBS=$(nproc 2>/dev/null || echo 2); if [ "$JOBS" -gt 2 ]; then JOBS=2; fi
+    - cmake -B build -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_CXX_FLAGS_RELEASE="-O1 -DNDEBUG"
+        -DCMAKE_PREFIX_PATH="$WASMVM_PREFIX"
+    - ninja -C build -j "$JOBS"
   artifacts:
     paths:
       - build/
