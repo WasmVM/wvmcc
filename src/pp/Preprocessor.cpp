@@ -1,6 +1,7 @@
 #include "Preprocessor.hpp"
 #include "ConstExprParser.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
