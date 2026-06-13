@@ -62,4 +62,16 @@ private:
     std::string err_;
 };
 
+// Load a standalone linkable object (a `-c` artifact: a wasm module with
+// `reloc.CODE` / `reloc.FUNCPTR` custom sections appended) from disk into a
+// LinkInput::InMemoryModule, mirroring what the driver builds for a freshly
+// compiled user TU. `origin` is stored for diagnostics. On failure returns
+// nullopt and sets `err`.
+//
+// This is the on-disk counterpart of the compile path: it lets object inputs
+// (.o / linkable .wasm) named on the command line be linked instead of being
+// re-parsed as C source.
+std::optional<LinkInput::InMemoryModule> loadObjectFile(const std::string& path,
+                                                        std::string& err);
+
 } // namespace wvmcc::link
