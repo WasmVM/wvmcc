@@ -123,37 +123,18 @@ bool readULEB(const char* buf, size_t end, size_t& pos, uint64_t& out) {
     return false;
 }
 
-} // namespace
-
-const std::vector<DataPtrSite>& ArchiveReader::memberRelocs(size_t i) {
-    return parseRelocSection(i, "reloc.CODE", /*hasSymAndAddend=*/true,
-                             relocCache_);
-}
-
-const std::vector<DataPtrSite>& ArchiveReader::memberFuncPtrRelocs(size_t i) {
-    return parseRelocSection(i, "reloc.FUNCPTR", /*hasSymAndAddend=*/false,
-                             funcPtrRelocCache_);
-}
-
-const std::vector<DataPtrSite>& ArchiveReader::parseRelocSection(
-    size_t i, const std::string& sectionName, bool hasSymAndAddend,
-    std::vector<std::optional<std::vector<DataPtrSite>>>& cache) {
-    static const std::vector<DataPtrSite> empty;
-    if (i >= names_.size()) return empty;
-    if (cache[i].has_value()) return *cache[i];
-    cache[i].emplace(); // default to empty; fill if we find the section
-    auto& out = *cache[i];
-
-    const char* buf = bytes_.data();
-    const size_t fileSize = bytes_.size();
-    // Member wasm bytes: skip the 8-byte module_size word at dataOffset_[i].
-    size_t off = dataOffset_[i];
-    uint64_t modSize = 0;
-    if (!readLE(buf, fileSize, off, modSize)) return out;
-    const size_t modStart = off;
-    const size_t modEnd = modStart + (size_t)modSize;
-    if (modEnd > fileSize || modSize < 8) return out;
-
+// Walk the custom sections of the wasm module occupying buf[modStart, modEnd)
+// and collect the (funcIdx, instrIdx) relocation sites recorded in the named
+// `reloc.*` section. `hasSymAndAddend` consumes the trailing symbol-index and
+// addend fields (present in reloc.CODE, absent in reloc.FUNCPTR). Shared by the
+// archive-member path (ArchiveReader::parseRelocSection) and the standalone
+// object path (loadObjectFile) so both decode relocs identically.
+std::vector<DataPtrSite> parseRelocSites(const char* buf, size_t modStart,
+                                         size_t modEnd,
+                                         const std::string& sectionName,
+                                         bool hasSymAndAddend) {
+    std::vector<DataPtrSite> out;
+    if (modEnd < modStart + 8) return out;
     // Skip the 8-byte wasm header (magic + version), then walk sections.
     size_t pos = modStart + 8;
     while (pos < modEnd) {
@@ -193,6 +174,88 @@ const std::vector<DataPtrSite>& ArchiveReader::parseRelocSection(
         pos = secEnd;
     }
     return out;
+}
+
+} // namespace
+
+const std::vector<DataPtrSite>& ArchiveReader::memberRelocs(size_t i) {
+    return parseRelocSection(i, "reloc.CODE", /*hasSymAndAddend=*/true,
+                             relocCache_);
+}
+
+const std::vector<DataPtrSite>& ArchiveReader::memberFuncPtrRelocs(size_t i) {
+    return parseRelocSection(i, "reloc.FUNCPTR", /*hasSymAndAddend=*/false,
+                             funcPtrRelocCache_);
+}
+
+const std::vector<DataPtrSite>& ArchiveReader::parseRelocSection(
+    size_t i, const std::string& sectionName, bool hasSymAndAddend,
+    std::vector<std::optional<std::vector<DataPtrSite>>>& cache) {
+    static const std::vector<DataPtrSite> empty;
+    if (i >= names_.size()) return empty;
+    if (cache[i].has_value()) return *cache[i];
+    cache[i].emplace(); // default to empty; fill if we find the section
+    auto& out = *cache[i];
+
+    const char* buf = bytes_.data();
+    const size_t fileSize = bytes_.size();
+    // Member wasm bytes: skip the 8-byte module_size word at dataOffset_[i].
+    size_t off = dataOffset_[i];
+    uint64_t modSize = 0;
+    if (!readLE(buf, fileSize, off, modSize)) return out;
+    const size_t modStart = off;
+    const size_t modEnd = modStart + (size_t)modSize;
+    if (modEnd > fileSize || modSize < 8) return out;
+
+    out = parseRelocSites(buf, modStart, modEnd, sectionName, hasSymAndAddend);
+    return out;
+}
+
+std::optional<LinkInput::InMemoryModule> loadObjectFile(const std::string& path,
+                                                        std::string& err) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f) {
+        err = "cannot open object file: " + path;
+        return std::nullopt;
+    }
+    std::vector<char> bytes(std::istreambuf_iterator<char>(f),
+                            std::istreambuf_iterator<char>{});
+
+    // A linkable object is a base wasm module (which module_decode reads, then
+    // stops at the trailing custom sections) followed by reloc.CODE /
+    // reloc.FUNCPTR. Validate the wasm magic before decoding so a stray text
+    // file named *.o produces a clear error rather than a decode throw.
+    if (bytes.size() < 8 ||
+        std::memcmp(bytes.data(), "\0asm", 4) != 0) {
+        err = "not a wasm object (bad magic): " + path;
+        return std::nullopt;
+    }
+
+    LinkInput::InMemoryModule mod;
+    mod.origin = path;
+    std::string body(bytes.data(), bytes.size());
+    std::istringstream in(body, std::ios::binary);
+    try {
+        mod.module = WasmVM::module_decode(in);
+    } catch (const std::exception& e) {
+        err = "decode failed for object '" + path + "': " + e.what();
+        return std::nullopt;
+    } catch (...) {
+        err = "decode failed for object '" + path + "'";
+        return std::nullopt;
+    }
+
+    // Parse the reloc sections that module_decode dropped, so the merge phase
+    // can rebase data pointers (reloc.CODE) and funcref-table slots
+    // (reloc.FUNCPTR) exactly as it does for archive members.
+    const char* buf = bytes.data();
+    const size_t modStart = 0;
+    const size_t modEnd = bytes.size();
+    mod.dataRelocs =
+        parseRelocSites(buf, modStart, modEnd, "reloc.CODE", /*hasSymAndAddend=*/true);
+    mod.funcPtrRelocs = parseRelocSites(buf, modStart, modEnd, "reloc.FUNCPTR",
+                                        /*hasSymAndAddend=*/false);
+    return mod;
 }
 
 } // namespace wvmcc::link

@@ -36,6 +36,10 @@ add_standard_static_assert(lang-6.2.6.2-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/
 add_standard_run_test(lang-6.2.6.2-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.6.2_twos_complement.c supported)
 add_standard_static_assert(lang-6.2.6.2-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.6.2_all_zero_is_zero.c supported)
 add_standard_static_assert(lang-6.2.6.2-06 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.6.2_width_precision.c supported)
+# Cross-TU object external linkage (#84): two-TU link+run. The file-scope
+# object `shared` (external linkage) is defined in the main TU and referenced
+# via `extern` by the aux TU; both denote the same object.
+add_standard_run_test2(lang-6.2.2-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.2_object_external_linkage.c ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.2_object_external_linkage_aux.c supported)
 add_standard_compile_fail(lang-6.2.7-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.7_incompatible_redeclaration.c supported)
 add_standard_run_test(lang-6.2.7-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.7_composite_type.c partial)
 add_standard_static_assert(lang-6.2.8-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_object_type_alignment.c supported)
@@ -43,7 +47,11 @@ add_standard_static_assert(lang-6.2.8-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.
 add_standard_static_assert(lang-6.2.8-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_alignas_stricter_alignment.c partial)
 add_standard_static_assert(lang-6.2.8-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_extended_overalignment.c partial)
 
-# Blocked on multi-object user-TU linking (driver parses .o as C source):
-#   lang-6.2.2-01
-#   lang-6.2.2-03
-#   lang-6.2.7-01
+# Multi-object user-TU linking now works (#84): lang-6.2.2-03 (object external
+# linkage) is registered above and passes. The remaining two cross-TU rows link
+# fine but are blocked on pre-existing *codegen* gaps (not linking):
+#   lang-6.2.2-01  — address-of a file-scope `static` object miscompiles
+#                    (`func[1]: empty validate value stack` at -c on its own TU).
+#   lang-6.2.7-01  — struct-by-value parameter/return miscompiles even single-TU
+#                    (mk()/sum() return wrong values; the by-value arg case
+#                    produces an invalid module). Register once codegen is fixed.

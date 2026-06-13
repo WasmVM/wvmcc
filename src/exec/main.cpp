@@ -18,6 +18,7 @@
 #include "../codegen/ModuleCodegen.hpp"
 #include "../codegen/RelocSection.hpp"
 #include "../link/Linker.hpp"
+#include "../link/ArchiveReader.hpp"
 #include "Sysroot.hpp"
 
 static bool write_module_to_file(const WasmVM::WasmModule& module,
@@ -39,7 +40,9 @@ static bool write_module_to_file(const WasmVM::WasmModule& module,
 
 struct CommandLineArgs {
     std::string outPath;
-    std::optional<std::string> inputPath;
+    // All non-flag inputs in command-line order. May mix `.c` sources (compiled
+    // to in-memory modules) and `.o`/`.wasm` objects (loaded as link inputs).
+    std::vector<std::string> inputPaths;
     std::vector<std::string> includePaths;       // -I
     std::vector<std::string> systemIncludePaths; // -isystem
     std::vector<std::string> libraryPaths;       // -L
@@ -102,9 +105,9 @@ bool parseOutputPath(int& i, int argc, char** argv, std::string& outPath) {
     return false;
 }
 
-void parseInputPath(const std::string& arg, std::optional<std::string>& inputPath) {
-    if (arg.size() > 0 && arg[0] != '-' && !inputPath.has_value()) {
-        inputPath = arg;
+void parseInputPath(const std::string& arg, std::vector<std::string>& inputPaths) {
+    if (arg.size() > 0 && arg[0] != '-') {
+        inputPaths.push_back(arg);
     }
 }
 
@@ -198,9 +201,25 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
             args.sysrootFlag = arg.substr(std::string("--sysroot=").size());
             continue;
         }
-        parseInputPath(arg, args.inputPath);
+        parseInputPath(arg, args.inputPaths);
     }
     return -1;
+}
+
+// Classify a command-line input by extension. `.c` (and `.i`, a preprocessed
+// source) is compiled; `.o`/`.wasm`/`.obj` is a linkable object loaded into the
+// link directly. Unknown extensions default to "compile as C source", matching
+// the historical single-input behaviour.
+enum class InputKind { Source, Object };
+InputKind classifyInput(const std::string& path) {
+    auto dot = path.find_last_of('.');
+    auto slash = path.find_last_of("/\\");
+    if (dot == std::string::npos || (slash != std::string::npos && dot < slash)) {
+        return InputKind::Source; // no extension -> treat as source
+    }
+    std::string ext = path.substr(dot);
+    if (ext == ".o" || ext == ".wasm" || ext == ".obj") return InputKind::Object;
+    return InputKind::Source;
 }
 
 void printDiagnostics(const std::vector<wvmcc::Diagnostic>& diagnostics) {
@@ -243,12 +262,91 @@ void printTokenStats(const std::vector<wvmcc::parser::Token>& tokens) {
               << " strings=" << str << " punctuators=" << punct << std::endl;
 }
 
+// Outcome of compiling one `.c` translation unit. `ok==false` means a
+// diagnostic was already printed and the caller should exit non-zero. The
+// reloc vectors are copied out of the (transient) ModuleCodegen so they can be
+// handed to the linker after codegen is destroyed.
+struct CompileResult {
+    bool ok = false;
+    WasmVM::WasmModule module;
+    std::vector<wvmcc::link::DataPtrSite> dataRelocs;
+    std::vector<wvmcc::link::DataPtrSite> funcPtrRelocs;
+};
+
+// Compile a single source TU (preprocess → parse → semantic → codegen) into a
+// WasmModule, in the given compile mode. Diagnostics are printed here; on the
+// first error `ok` stays false. Each call gets a fresh Preprocessor so multiple
+// TUs in one invocation do not share macro/include state.
+static CompileResult compileSource(const std::string& path,
+                                   const CommandLineArgs& args,
+                                   const std::optional<std::string>& sysroot,
+                                   bool freestanding) {
+    CompileResult result;
+
+    wvmcc::Preprocessor pp;
+    for (const auto& p : args.includePaths) pp.addIncludePath(p);
+    for (const auto& p : args.systemIncludePaths) pp.addSystemIncludePath(p);
+    if (sysroot) pp.setSysroot(*sysroot);
+
+    if (!pp.open(path)) {
+        std::cerr << "preprocess error: failed to open input: " << path << std::endl;
+        return result;
+    }
+
+    wvmcc::parser::Lexer lex(pp);
+    wvmcc::parser::Parser parser(lex);
+    wvmcc::parser::TranslationUnitPtr tu = parser.parseTranslationUnit();
+    printDiagnostics(pp.getDiagnostics());
+    printDiagnostics(parser.getDiagnostics());
+    if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
+        return result;
+    }
+
+    wvmcc::parser::Semantic sem(tu, false);
+    if (!sem.run(parser.getDiagnosticsRef())) {
+        printDiagnostics(parser.getDiagnostics());
+        return result;
+    }
+
+    wvmcc::codegen::ModuleCodegen codegen(sem);
+    if (freestanding) {
+        codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
+    }
+    result.module = codegen.generate(tu);
+
+    const auto& codegenDiags = codegen.getDiagnostics();
+    if (!codegenDiags.empty()) {
+        printDiagnostics(codegenDiags);
+        for (const auto& d : codegenDiags) {
+            if (d.severity == wvmcc::Diagnostic::Severity::Error) return result;
+        }
+    }
+
+    if (auto err = WasmVM::module_validate(result.module)) {
+        std::cerr << "error: module validation failed: " << err->what() << std::endl;
+        return result;
+    }
+
+    // M2-L8 / #79: copy the data-pointer and function-pointer reloc sites out
+    // of codegen so the linker can rebase them after this codegen is gone.
+    for (const auto& rel : codegen.getRelocations()) {
+        result.dataRelocs.push_back(
+            {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+    }
+    for (const auto& rel : codegen.getFuncPtrRelocs()) {
+        result.funcPtrRelocs.push_back(
+            {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+    }
+    result.ok = true;
+    return result;
+}
+
 int main(int argc, char** argv) {
     CommandLineArgs args;
     int parseResult = parseCommandLine(argc, argv, args);
     if (parseResult >= 0) return parseResult;
 
-    if (!args.inputPath.has_value()) {
+    if (args.inputPaths.empty()) {
         std::cerr << "error: no input file specified\n";
         showHelp();
         return 2;
@@ -256,127 +354,147 @@ int main(int argc, char** argv) {
 
     // Resolve sysroot (4-tier: --sysroot > WVMCC_SYSROOT > argv[0]-relative
     // > unset). The result feeds preprocessor include search (M2-I) and the
-    // future link phase.
+    // link phase.
     wvmcc::SysrootEnv srEnv;
     srEnv.cliFlag = args.sysrootFlag;
     srEnv.envVar  = std::getenv("WVMCC_SYSROOT");
     srEnv.argv0   = argc > 0 ? argv[0] : nullptr;
     auto sysroot = wvmcc::resolveSysroot(srEnv);
 
-    wvmcc::Preprocessor pp;
-    for (const auto& p : args.includePaths) {
-        pp.addIncludePath(p);
-    }
-    for (const auto& p : args.systemIncludePaths) {
-        pp.addSystemIncludePath(p);
-    }
-    if (sysroot) {
-        pp.setSysroot(*sysroot);
-    }
-    
-    if (!pp.open(*args.inputPath)) {
-        std::cerr << "preprocess error: failed to open input" << std::endl;
-        return 1;
-    }
-
-    // Preprocessor diagnostics are surfaced *after* the stage that drives the
-    // (lazy) preprocessor — the token pull below — not here: at this point
-    // pp.open() has run but no directives have been processed, so a `#error`
-    // deep (or even at the top) of the file hasn't been seen yet (#80).
-
-    // If requested, run preprocessor-only mode: dump tokens' lexemes to stdout
-    if (args.preprocessOnly) {
-        while (auto tok = pp.next()) {
-            std::cout << tok->lexeme;
+    // ---------------------------------------------------------------------
+    // Single-source early-exit modes (-E, --ast). These act on exactly one
+    // source TU and write to stdout / an AST file; they are not link inputs.
+    // ---------------------------------------------------------------------
+    if (args.preprocessOnly || args.dumpAst) {
+        if (args.inputPaths.size() != 1) {
+            std::cerr << "error: " << (args.preprocessOnly ? "-E" : "--ast")
+                      << " accepts a single input file\n";
+            return 2;
         }
+        const std::string& input = args.inputPaths.front();
+
+        wvmcc::Preprocessor pp;
+        for (const auto& p : args.includePaths) pp.addIncludePath(p);
+        for (const auto& p : args.systemIncludePaths) pp.addSystemIncludePath(p);
+        if (sysroot) pp.setSysroot(*sysroot);
+        if (!pp.open(input)) {
+            std::cerr << "preprocess error: failed to open input" << std::endl;
+            return 1;
+        }
+
+        if (args.preprocessOnly) {
+            while (auto tok = pp.next()) std::cout << tok->lexeme;
+            printDiagnostics(pp.getDiagnostics());
+            return hasError(pp.getDiagnostics()) ? 1 : 0;
+        }
+
+        // --ast
+        wvmcc::parser::Lexer lex(pp);
+        wvmcc::parser::Parser parser(lex);
+        wvmcc::parser::TranslationUnitPtr tu = parser.parseTranslationUnit();
         printDiagnostics(pp.getDiagnostics());
-        return hasError(pp.getDiagnostics()) ? 1 : 0;
-    }
-
-    wvmcc::parser::Lexer lex(pp);
-    using namespace wvmcc::parser;
-    Parser parser(lex);
-    TranslationUnitPtr main_translation_unit = parser.parseTranslationUnit();
-    // Surface preprocessor + parser diagnostics. Parsing drove the lazy
-    // preprocessor, so any `#error` / bad-directive error is now in pp's set.
-    printDiagnostics(pp.getDiagnostics());
-    printDiagnostics(parser.getDiagnostics());
-    // #80: a preprocessor or parser error forces a non-zero exit, matching the
-    // policy semantic/codegen/linker already apply. Error recovery is preserved
-    // (diagnostics above were still collected/printed); only the status changes.
-    if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
-        return 1;
-    }
-
-    // If requested, write AST and exit immediately
-    if (args.dumpAst) {
-        std::string astPath = "ast.xml";
-        const std::string &in = *args.inputPath;
-        size_t slash = in.find_last_of("/\\");
-        size_t dot = in.find_last_of('.');
-        std::string base;
-        if (dot != std::string::npos && (slash == std::string::npos || dot > slash)) base = in.substr(0, dot);
-        else base = in;
-        astPath = base + "_ast.xml";
-
+        printDiagnostics(parser.getDiagnostics());
+        if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
+            return 1;
+        }
+        size_t slash = input.find_last_of("/\\");
+        size_t dot = input.find_last_of('.');
+        std::string base =
+            (dot != std::string::npos && (slash == std::string::npos || dot > slash))
+                ? input.substr(0, dot) : input;
+        std::string astPath = base + "_ast.xml";
         std::ofstream ofs(astPath);
         if (!ofs) {
             std::cerr << "error: cannot open AST output file: " << astPath << std::endl;
             return 1;
         }
         wvmcc::parser::ASTPrinter printer(ofs);
-        printer.print(main_translation_unit);
+        printer.print(tu);
         ofs.flush();
         return 0;
     }
 
-    // Not dumping AST: run semantic checks and continue compiler passes
-    wvmcc::parser::Semantic sem(main_translation_unit, false);
-    bool sem_ok = sem.run(parser.getDiagnosticsRef());
-    if (!sem_ok) {
-        printDiagnostics(parser.getDiagnostics());
-        return 1;
-    }
-
-    wvmcc::codegen::ModuleCodegen codegen(sem);
-    // M2-F: pass the explicit -ffreestanding flag down to codegen. Default
-    // mode in M2-D is Linkable; -ffreestanding flips it back to M1's
-    // self-contained layout.
-    if (args.freestanding) {
-        codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
-    }
-    auto module = codegen.generate(main_translation_unit);
-
-    // Surface codegen diagnostics first: a codegen error (unimplemented
-    // construct, undeclared identifier, …) is the root cause, whereas the
-    // subsequent module_validate failure is just its downstream symptom.
-    const auto& codegenDiags = codegen.getDiagnostics();
-    if (!codegenDiags.empty()) {
-        printDiagnostics(codegenDiags);
-        bool hasError = false;
-        for (const auto& d : codegenDiags) {
-            if (d.severity == wvmcc::Diagnostic::Severity::Error) { hasError = true; break; }
-        }
-        if (hasError) return 1;
-    }
-
-    if (auto err = WasmVM::module_validate(module)) {
-        std::cerr << "error: module validation failed: " << err->what() << std::endl;
-        return 1;
-    }
-
-    const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
-
-    // Three output paths:
-    //   -ffreestanding  → self-contained module straight to disk (M1 path)
-    //   -c              → linkable object straight to disk (with reloc.CODE)
-    //   neither         → run the integrated linker (M2-L1..L10)
+    // ---------------------------------------------------------------------
+    // -ffreestanding / -c: emit one object per source straight to disk. These
+    // are per-TU and never run the linker. With `-o`, only a single input is
+    // allowed (the output name is unambiguous then). The codegen object is kept
+    // alive here so write_module_to_file can append its reloc/linking sections.
+    // ---------------------------------------------------------------------
     if (args.freestanding || args.compileOnly) {
-        if (!write_module_to_file(module, target, &codegen)) return 1;
+        const char* mode = args.freestanding ? "-ffreestanding" : "-c";
+        for (const auto& input : args.inputPaths) {
+            if (classifyInput(input) == InputKind::Object) {
+                std::cerr << "error: object input '" << input
+                          << "' cannot be used with " << mode << "\n";
+                return 2;
+            }
+        }
+        if (args.inputPaths.size() != 1 && !args.outPath.empty()) {
+            std::cerr << "error: cannot specify -o with multiple inputs in "
+                      << mode << " mode\n";
+            return 2;
+        }
+        for (const auto& input : args.inputPaths) {
+            wvmcc::Preprocessor pp;
+            for (const auto& p : args.includePaths) pp.addIncludePath(p);
+            for (const auto& p : args.systemIncludePaths) pp.addSystemIncludePath(p);
+            if (sysroot) pp.setSysroot(*sysroot);
+            if (!pp.open(input)) {
+                std::cerr << "preprocess error: failed to open input: " << input
+                          << std::endl;
+                return 1;
+            }
+            wvmcc::parser::Lexer lex(pp);
+            wvmcc::parser::Parser parser(lex);
+            wvmcc::parser::TranslationUnitPtr tu = parser.parseTranslationUnit();
+            printDiagnostics(pp.getDiagnostics());
+            printDiagnostics(parser.getDiagnostics());
+            if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
+                return 1;
+            }
+            wvmcc::parser::Semantic sem(tu, false);
+            if (!sem.run(parser.getDiagnosticsRef())) {
+                printDiagnostics(parser.getDiagnostics());
+                return 1;
+            }
+            wvmcc::codegen::ModuleCodegen codegen(sem);
+            if (args.freestanding) {
+                codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
+            }
+            auto module = codegen.generate(tu);
+            const auto& codegenDiags = codegen.getDiagnostics();
+            if (!codegenDiags.empty()) {
+                printDiagnostics(codegenDiags);
+                for (const auto& d : codegenDiags) {
+                    if (d.severity == wvmcc::Diagnostic::Severity::Error) return 1;
+                }
+            }
+            if (auto err = WasmVM::module_validate(module)) {
+                std::cerr << "error: module validation failed: " << err->what()
+                          << std::endl;
+                return 1;
+            }
+            std::string outFile = args.outPath;
+            if (outFile.empty()) {
+                size_t slash = input.find_last_of("/\\");
+                size_t dot = input.find_last_of('.');
+                std::string base =
+                    (dot != std::string::npos &&
+                     (slash == std::string::npos || dot > slash))
+                        ? input.substr(0, dot) : input;
+                outFile = base + (args.freestanding ? ".wasm" : ".o");
+            }
+            if (!write_module_to_file(module, outFile, &codegen)) return 1;
+        }
         return 0;
     }
 
-    // Linker path.
+    // ---------------------------------------------------------------------
+    // Link path: compile every `.c` source, load every `.o`/`.wasm` object,
+    // then run the integrated linker over all of them plus the archives.
+    // ---------------------------------------------------------------------
+    const std::string target = args.outPath.empty() ? std::string("a.wasm") : args.outPath;
+
     wvmcc::link::LinkOptions linkOpts;
     linkOpts.verbose = args.verbose;
     linkOpts.no_stdlib = args.noStdLib;
@@ -384,24 +502,31 @@ int main(int argc, char** argv) {
     if (sysroot) linkOpts.sysroot = *sysroot;
 
     std::vector<wvmcc::link::LinkInput> linkInputs;
-    {
-        wvmcc::link::LinkInput::InMemoryModule mod{std::move(module), *args.inputPath, {}};
-        // M2-L8: hand the linker this TU's data-pointer sites so it can shift
-        // the i64.const constants if it rebases the TU's data.
-        for (const auto& rel : codegen.getRelocations()) {
-            mod.dataRelocs.push_back(
-                {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+    for (const auto& input : args.inputPaths) {
+        if (classifyInput(input) == InputKind::Object) {
+            // Object input: decode + parse its reloc sections, link directly.
+            std::string err;
+            auto obj = wvmcc::link::loadObjectFile(input, err);
+            if (!obj) {
+                std::cerr << "error: " << err << "\n";
+                return 1;
+            }
+            wvmcc::link::LinkInput in;
+            in.source = std::move(*obj);
+            linkInputs.push_back(std::move(in));
+            continue;
         }
-        // #79: function-pointer sites — the linker rebases the embedded
-        // funcref-table slot when merging per-TU tables.
-        for (const auto& rel : codegen.getFuncPtrRelocs()) {
-            mod.funcPtrRelocs.push_back(
-                {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
-        }
+        // Source input: compile to an in-memory linkable module.
+        CompileResult cr = compileSource(input, args, sysroot, /*freestanding=*/false);
+        if (!cr.ok) return 1;
+        wvmcc::link::LinkInput::InMemoryModule mod{
+            std::move(cr.module), input, std::move(cr.dataRelocs),
+            std::move(cr.funcPtrRelocs)};
         wvmcc::link::LinkInput in;
         in.source = std::move(mod);
         linkInputs.push_back(std::move(in));
     }
+
     // Resolve a `-l<name>` to `lib<name>.a` under a `-L` dir or <sysroot>/lib.
     auto resolveLib = [&](const std::string& name) -> std::optional<std::string> {
         const std::string file = "lib" + name + ".a";
