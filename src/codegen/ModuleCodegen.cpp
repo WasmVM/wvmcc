@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "ModuleCodegen.hpp"
 #include "FunctionCodegen.hpp"
 #include "StartWrapper.hpp"

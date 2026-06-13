@@ -1,4 +1,5 @@
 #include "pp/Preprocessor.hpp"
+#include <algorithm>
 #include <fstream>
 #include <string>
 #include <iostream>

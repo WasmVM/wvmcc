@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "ConstExprParser.hpp"
 
 #include <string>

@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "FunctionCodegen.hpp"
 #include "ModuleCodegen.hpp"
 #include "AddressTakenAnalyzer.hpp"

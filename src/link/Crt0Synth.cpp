@@ -1,3 +1,4 @@
+#include <cstdint>
 #include "Crt0Synth.hpp"
 #include "../codegen/StartWrapper.hpp"
 

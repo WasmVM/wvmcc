@@ -1,6 +1,8 @@
+#include <cstdint>
 #include "Preprocessor.hpp"
 #include "ConstExprParser.hpp"
 
+#include <algorithm>
 #include <cstdlib>
 #include <ctime>
 #include <filesystem>
@@ -974,8 +976,8 @@ void Preprocessor::collectVariadicArgs(std::vector<std::vector<PPToken>>& args, 
         if (vIdx > m->params.size()) {
             variadicArg.push_back(PPToken{
                 .kind = PPTokenKind::Punctuator,
-                .lexeme = ",",
-                .span = {}
+                .span = {},
+                .lexeme = ","
             });
         }
         for (const auto& tok : args[vIdx]) {
