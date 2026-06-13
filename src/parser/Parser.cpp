@@ -1723,6 +1723,22 @@ ExprPtr Parser::parsePrimary() {
         // auto-detect the radix for the rare path where the variant is absent.
         if (auto* itok = std::get_if<IntegerToken>(&tok.v)) {
             il->value = (std::int64_t)itok->info.value;
+            // Carry the lexer-resolved signedness so the constant-expression
+            // evaluator can apply unsigned semantics (6.4.4.1p5). The resolved
+            // type already accounts for both an explicit u/U suffix and a value
+            // too large for the signed candidate types.
+            using RT = IntegerInfo::ResolvedType;
+            switch (itok->info.resolved) {
+                case RT::UnsignedInt:
+                case RT::UnsignedLong:
+                case RT::UnsignedLongLong:
+                    il->isUnsigned = true;
+                    break;
+                default:
+                    il->isUnsigned =
+                        (itok->info.flags & IntegerInfo::FLAG_UNSIGNED) != 0;
+                    break;
+            }
         } else {
             try { il->value = std::stoll(il->raw, nullptr, 0); } catch (...) { il->value = 0; }
         }

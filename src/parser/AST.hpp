@@ -269,7 +269,15 @@ struct Expr : Node {
 };
 
 struct IdentifierExpr : Expr { std::string name; };
-struct IntegerLiteral : Expr { std::int64_t value; std::string raw; };
+struct IntegerLiteral : Expr {
+    std::int64_t value;
+    std::string raw;
+    // True when the literal has unsigned type (u/U suffix, or — per 6.4.4.1p5 —
+    // its value exceeds the largest signed type that could hold it). Threaded
+    // through to the constant-expression evaluator so comparisons / division /
+    // shifts of full-width unsigned constants use unsigned semantics.
+    bool isUnsigned{false};
+};
 struct StringLiteral : Expr { std::string value; };
 struct CharLiteral : Expr { char value; };
 struct FloatLiteral : Expr {
