@@ -28,6 +28,14 @@ void ASTVisitor::traverseExternalDecl(const ExternalDeclPtr &ext) {
     }
 }
 
+// Report a *full* expression to onExpr (once, at the top of the tree) and then
+// recurse for the per-node hooks (onIdent, etc.).
+void ASTVisitor::traverseFullExpr(const ExprPtr &e) {
+    if (!e) return;
+    onExpr(e);
+    traverseExpr(e);
+}
+
 void ASTVisitor::traverseFunction(const FunctionDefPtr &f) {
     if (!f) return;
     onEnterFunction(f);
@@ -35,7 +43,8 @@ void ASTVisitor::traverseFunction(const FunctionDefPtr &f) {
     for (const auto &p : f->params) {
         if (p.defaultValue) traverseExpr(p.defaultValue.value());
     }
-    // body
+    // body — the function body is itself a block scope
+    onEnterBlock();
     for (const auto &bi : f->body) {
         if (std::holds_alternative<DeclarationPtr>(bi->item)) {
             auto d = std::get<DeclarationPtr>(bi->item);
@@ -50,6 +59,7 @@ void ASTVisitor::traverseFunction(const FunctionDefPtr &f) {
             traverseStmt(std::get<StmtPtr>(bi->item));
         }
     }
+    onExitBlock();
     onExitFunction(f);
 }
 
@@ -60,7 +70,7 @@ void ASTVisitor::traverseDeclaration(const DeclarationPtr &d) {
 
 void ASTVisitor::traverseInit(const InitializerPtr &in) {
     if (!in) return;
-    if (in->kind == Initializer::Kind::Expr) traverseExpr(in->expr);
+    if (in->kind == Initializer::Kind::Expr) traverseFullExpr(in->expr);
     else {
         for (const auto &c : in->clauses) {
             for (const auto &des : c.designators) {
@@ -76,12 +86,13 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
     switch (s->kind) {
         case Stmt::Kind::Expr: {
             auto es = std::dynamic_pointer_cast<ExprStmt>(s);
-            if (es && es->expr) traverseExpr(es->expr);
+            if (es && es->expr) traverseFullExpr(es->expr);
             break;
         }
         case Stmt::Kind::Compound: {
             auto cs = std::dynamic_pointer_cast<CompoundStmt>(s);
             if (cs) {
+                onEnterBlock();
                 for (const auto &bi : cs->items) {
                     if (std::holds_alternative<DeclarationPtr>(bi->item)) {
                         auto d = std::get<DeclarationPtr>(bi->item);
@@ -94,13 +105,14 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
                         if (sa && sa->message) traverseExpr(sa->message);
                     } else traverseStmt(std::get<StmtPtr>(bi->item));
                 }
+                onExitBlock();
             }
             break;
         }
         case Stmt::Kind::If: {
             auto ifs = std::dynamic_pointer_cast<IfStmt>(s);
             if (ifs) {
-                traverseExpr(ifs->cond);
+                traverseFullExpr(ifs->cond);
                 traverseStmt(ifs->thenStmt);
                 if (ifs->elseStmt) traverseStmt(ifs->elseStmt.value());
             }
@@ -109,7 +121,7 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
         case Stmt::Kind::While: {
             auto ws = std::dynamic_pointer_cast<WhileStmt>(s);
             if (ws) {
-                traverseExpr(ws->cond);
+                traverseFullExpr(ws->cond);
                 traverseStmt(ws->body);
             }
             break;
@@ -117,6 +129,10 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
         case Stmt::Kind::For: {
             auto fs = std::dynamic_pointer_cast<ForStmt>(s);
             if (fs) {
+                // A `for` statement introduces its own block scope: a
+                // declaration in the init-clause is local to the loop (C
+                // 6.8.5p5), so it must not collide with prior sibling loops.
+                onEnterBlock();
                 if (fs->init) {
                     auto bi = fs->init.value();
                     if (std::holds_alternative<DeclarationPtr>(bi->item)) {
@@ -125,29 +141,30 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
                         traverseDeclaration(d);
                     } else traverseStmt(std::get<StmtPtr>(bi->item));
                 }
-                if (fs->cond) traverseExpr(fs->cond.value());
-                if (fs->step) traverseExpr(fs->step.value());
+                if (fs->cond) traverseFullExpr(fs->cond.value());
+                if (fs->step) traverseFullExpr(fs->step.value());
                 traverseStmt(fs->body);
+                onExitBlock();
             }
             break;
         }
         case Stmt::Kind::Return: {
             auto rs = std::dynamic_pointer_cast<ReturnStmt>(s);
-            if (rs && rs->value) traverseExpr(rs->value.value());
+            if (rs && rs->value) traverseFullExpr(rs->value.value());
             break;
         }
         case Stmt::Kind::DoWhile: {
             auto dws = std::dynamic_pointer_cast<DoWhileStmt>(s);
             if (dws) {
                 traverseStmt(dws->body);
-                traverseExpr(dws->cond);
+                traverseFullExpr(dws->cond);
             }
             break;
         }
         case Stmt::Kind::Switch: {
             auto ss = std::dynamic_pointer_cast<SwitchStmt>(s);
             if (ss) {
-                traverseExpr(ss->cond);
+                traverseFullExpr(ss->cond);
                 traverseStmt(ss->body);
             }
             break;
@@ -155,7 +172,7 @@ void ASTVisitor::traverseStmt(const StmtPtr &s) {
         case Stmt::Kind::Case: {
             auto cs = std::dynamic_pointer_cast<CaseStmt>(s);
             if (cs) {
-                traverseExpr(cs->value);
+                traverseFullExpr(cs->value);
                 traverseStmt(cs->stmt);
             }
             break;

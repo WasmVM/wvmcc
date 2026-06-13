@@ -148,11 +148,13 @@ add_standard_stdout_test(libc-stdio-printf-long   ${STDIO_DIR}/printf_long.c   $
 # exits non-zero. Message text is not asserted (no stable diagnostic IDs).
 #
 # Only constraints wvmcc actually diagnoses today are listed here (each was
-# empirically confirmed to be rejected). Constraints wvmcc does not yet detect
-# (e.g. sizeof(void), assign-to-const, ptr+ptr, `.` on non-struct, tag-kind
-# mismatch, too-many-args, redefinition of a block-scope object, bad bit-field
-# width, non-positive array size) are missing-diagnostic gaps tracked separately
-# and stay `partial` in the catalog.
+# empirically confirmed to be rejected). The semantic constraint diagnostics
+# added for issue #83 — sizeof(void), assign-to-const/array, sizeof(function),
+# pointer + pointer, `.` on a non-struct, struct/union tag-kind mismatch,
+# too-many-arguments, redefinition of a block-scope object, negative/too-wide/
+# non-integral bit-field width, non-positive array size, and a non-scalar `?:`
+# controlling operand — are now enforced (their catalog rows are `supported`
+# and materialized by the generated scaffold below).
 function(add_standard_compile_fail name source)
     set(status supported)
     if(ARGC GREATER 2)
@@ -175,6 +177,10 @@ add_standard_compile_fail(lang-6.5.2.1-subscript      ${CMAKE_CURRENT_SOURCE_DIR
 add_standard_compile_fail(lang-6.5.3.2-deref          ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/deref_non_pointer.c)
 # 6.7 declarations
 add_standard_compile_fail(lang-6.7-empty-decl         ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/empty_declaration.c)
+# 6.7.2.1p4 — a bit-field's width must be a nonnegative ICE (issue #83). The
+# scaffold covers the "exceeds type width" sub-case (lang-6.7.2.1-05); this
+# pins the negative-width sub-case as well.
+add_standard_compile_fail(lang-6.7.2.1-negwidth       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2.1_bitfield_negative_width.c)
 add_standard_compile_fail(lang-6.7-incompatible-redecl ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/incompatible_redecl.c)
 add_standard_compile_fail(lang-6.7.2.2-enum-dup       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/enum_duplicate.c)
 add_standard_compile_fail(lang-6.7.2.3-redefine-struct ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/redefine_struct.c)

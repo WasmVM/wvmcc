@@ -46,6 +46,27 @@ private:
     // function enter/exit hooks for block-scope checks
     void onEnterFunction(const FunctionDefPtr &f) override;
     void onExitFunction(const FunctionDefPtr &f) override;
+    // full-expression and block-scope hooks (constraint diagnostics)
+    void onExpr(const ExprPtr &e) override;
+    void onEnterBlock() override;
+    void onExitBlock() override;
+
+    // Local (block-scope) symbol information used by typeOfExpr / constraint
+    // checks. File-scope objects use declaredTypeRepr; block-scope objects are
+    // not recorded there, so they are tracked here in a scope stack.
+    struct LocalSym {
+        std::shared_ptr<TypeNode> type; // canonical type of the object
+        bool isConst{false};            // top-level const-qualified object
+        wvmcc::SourceSpan span{};       // declaration span (for redefinition diag)
+    };
+    // Stack of block scopes (innermost last). Each maps name -> LocalSym.
+    std::vector<std::unordered_map<std::string, LocalSym>> localScopes{};
+    // Look up a name in the local scope stack (innermost first). Returns
+    // nullptr if not found.
+    const LocalSym *lookupLocal(const std::string &name) const;
+    // Record a block-scope object in the current scope; returns false (and does
+    // not overwrite) if the name already exists in the *current* scope.
+    bool declareLocal(const std::string &name, const LocalSym &sym);
     // internal (static) definitions tracking: name -> (span, definitive)
     std::unordered_map<std::string, std::pair<wvmcc::SourceSpan, bool>> internalDefs{};
     // pointers to StructOrUnionSpecifier objects already recorded as definitions
@@ -54,6 +75,17 @@ private:
     // recorded tag definitions: tag name -> span (for struct/union and enum definitions)
     std::unordered_map<std::string, wvmcc::SourceSpan> structUnionTagDefs{};
     std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};
+    // recorded tag *kind* per tag name for tag-kind-mismatch detection
+    // (C 6.7.2.3p2): a tag may only be re-used with the same kind. Value is one
+    // of 's' (struct), 'u' (union), 'e' (enum).
+    std::unordered_map<std::string, char> tagKinds_{};
+    // Scan declaration/function specifiers for struct/union/enum tag references
+    // and emit a diagnostic when a tag is used with a different kind than it was
+    // first introduced with.
+    void checkTagKinds(const DeclarationSpecifiers &specs, const wvmcc::SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics);
+    // Validate bit-field widths (C 6.7.2.1p4) in any struct/union specifier with
+    // a body appearing in `specs` (recurses into nested aggregates and _Atomic).
+    void checkBitfields(const DeclarationSpecifiers &specs, std::vector<wvmcc::Diagnostic> &diagnostics);
     // restrict associations: object name -> (restrict pointer name, span)
     std::unordered_map<std::string, std::pair<std::string, wvmcc::SourceSpan>> restrictAssoc{};
     // Function declaration summary per TU for inline rules
@@ -93,6 +125,7 @@ private:
         bool isLvalue{false};
         bool isFunctionDesignator{false};
         bool isVoid{false};
+        bool isConst{false}; // lvalue designates a const-qualified object
     };
 public:
     // Compute the type and value category of an expression for semantic checks.
