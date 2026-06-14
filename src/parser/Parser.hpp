@@ -100,6 +100,12 @@ private:
     std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> tag_registry{};
     // tag registry for enum names -> specifier (incomplete or complete)
     std::unordered_map<std::string, std::shared_ptr<DeclarationSpecifiers::TypeSpecifier::EnumSpecifier>> enum_tag_registry{};
+    // enumeration constant name -> value, so enum constants fold to integer
+    // constants in constant expressions parsed before semantic analysis.
+    std::unordered_map<std::string, long long> enum_constants{};
+    // Block nesting depth (0 = file scope). Enum-constant folding is limited to
+    // file scope, where the name cannot be shadowed by a local variable.
+    int blockDepth{0};
     // labels seen in the current function (to enforce uniqueness)
     std::unordered_set<std::string> labels_in_current_function{};
     // gotos recorded in the current function (label name + span)

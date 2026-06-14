@@ -421,6 +421,8 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
         hasBodyNow = true;
         en->hasBody = true;
 
+        // Running value for enumerators without an explicit `= expr` (6.7.2.2p3).
+        long long nextEnumValue = 0;
         // parse enumerator list
         while (auto p = lex.peek()) {
             if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
@@ -434,6 +436,19 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseEnumSpecifier() {
                 if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "=") {
                     lex.next();
                     ev.value = parseConditionalExpression();
+                }
+                // Track the enumeration constant's value so it folds in later
+                // constant expressions (including subsequent enumerators that
+                // reference it). An explicit `= expr` sets the running value;
+                // otherwise it is the previous value plus one, starting at 0.
+                {
+                    long long val = nextEnumValue;
+                    if (ev.value) {
+                        auto v = ConstExprEvaluator::evalIntegerConstantExpr(*ev.value);
+                        if (v.has_value()) val = *v;
+                    }
+                    enum_constants[ev.name] = val;
+                    nextEnumValue = val + 1;
                 }
                 en->enumerators.push_back(std::move(ev));
                 // optional trailing comma
@@ -1226,6 +1241,13 @@ std::vector<DeclarationPtr> Parser::parseInitDeclaratorList(const DeclarationSpe
 }
 
 std::vector<BlockItemPtr> Parser::parseCompoundBody() {
+    // Track block nesting so enum-constant folding is confined to file scope,
+    // where an identifier naming an enum constant cannot also be a variable
+    // (they share the ordinary namespace). Inside a function body a local may
+    // shadow an enum constant, so we leave such identifiers for scope-aware
+    // resolution in semantic analysis / codegen.
+    ++blockDepth;
+    struct DepthGuard { int &d; ~DepthGuard() { --d; } } _depthGuard{blockDepth};
     std::vector<BlockItemPtr> body;
     while (auto p = lex.peek()) {
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
@@ -1790,6 +1812,20 @@ ExprPtr Parser::parsePrimary() {
     }
     if (t->kind() == TokenKind::Identifier) {
         auto tok = *lex.next();
+        // An enumeration constant has type int and is itself an integer
+        // constant (6.4.4.3 / 6.6p6). Fold it to its value so it is usable in
+        // constant expressions (_Static_assert, case labels, array bounds)
+        // that are evaluated before semantic analysis runs.
+        auto ec = enum_constants.find(tok.lexeme());
+        if (blockDepth == 0 && ec != enum_constants.end()) {
+            auto il = make_ast<IntegerLiteral>();
+            il->span = tok.span;
+            il->value = ec->second;
+            il->raw = tok.lexeme();
+            il->isUnsigned = false;
+            il->kind = Expr::Kind::Integer;
+            return il;
+        }
         auto id = make_ast<IdentifierExpr>();
         id->span = tok.span;
         id->name = tok.lexeme();
@@ -2468,7 +2504,11 @@ ExprPtr Parser::parseMultiplicativeExpression() {
         std::string op = lex.peek()->lexeme();
         if (op != "*" && op != "/" && op != "%") break;
         lex.next();
-        ExprPtr rhs = parseUnaryExpression();
+        // multiplicative-expression: ... ('*'|'/'|'%') cast-expression.
+        // The RHS is a cast-expression, not merely a unary-expression, so a
+        // cast such as `x / (int)y` binds the cast to the divisor instead of
+        // mis-parsing the trailing tokens.
+        ExprPtr rhs = parseCastExpression();
         auto be = make_ast<BinaryExpr>();
         be->op = op;
         be->lhs = lhs;
@@ -2560,6 +2600,7 @@ ExprPtr Parser::parseCastExpression() {
                 // try to stringify first specifier
                 auto &ts = specs.typeSpecifiers.front();
                 if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) { tn->kind = TypeNode::Kind::Enum; }
                 else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
                 else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
             } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
