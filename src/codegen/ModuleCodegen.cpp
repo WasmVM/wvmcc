@@ -888,32 +888,47 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
         return;
     }
 
-    // Already registered (e.g. the runtime globals, or a repeated tentative
-    // definition).
-    if (symbolTable_.lookup(name).has_value()) return;
+    std::shared_ptr<wvmcc::parser::TypeNode> typeNode;
+    size_t addr = 0;
+    size_t size = 0;
 
-    auto typeNode = semantic_.canonicalTypeRepr(decl->specifiers, decl->declarator);
-    if (!typeNode) return;
+    if (auto existing = symbolTable_.lookup(name); existing.has_value()) {
+        // Already registered (a runtime global, an earlier tentative definition,
+        // or an earlier initialized one). Per 6.9.2 the tentative definitions
+        // share the storage of the single initialized definition; so the only
+        // declaration with work left to do is one that carries an initializer —
+        // apply it to the existing storage. Repeated tentatives are no-ops.
+        if (!decl->initializer || !*decl->initializer) return;
+        auto* gm = std::get_if<GlobalMem>(&*existing);
+        if (!gm || gm->isImport) return; // imported extern: no local storage
+        typeNode = gm->type;
+        addr = gm->address;
+        size = typeMap_.byteSize(typeNode);
+        if (size == 0) size = 4;
+    } else {
+        typeNode = semantic_.canonicalTypeRepr(decl->specifiers, decl->declarator);
+        if (!typeNode) return;
 
-    size_t size  = typeMap_.byteSize(typeNode);
-    size_t align = typeMap_.byteAlignment(typeNode);
-    if (size == 0) size = 4;
-    if (align == 0) align = 4;
+        size = typeMap_.byteSize(typeNode);
+        size_t align = typeMap_.byteAlignment(typeNode);
+        if (size == 0) size = 4;
+        if (align == 0) align = 4;
 
-    size_t addr = dataAllocator_.allocate(size, align);
+        addr = dataAllocator_.allocate(size, align);
 
-    GlobalMem gm;
-    gm.type = typeNode;
-    gm.dataSegmentIndex = -1;
-    gm.address = addr;
-    gm.name = name;
-    symbolTable_.define(name, gm);
+        GlobalMem gm;
+        gm.type = typeNode;
+        gm.dataSegmentIndex = -1;
+        gm.address = addr;
+        gm.name = name;
+        symbolTable_.define(name, gm);
 
-    // Export this definition's address as a Wasm global so other TUs' `extern`
-    // references resolve to it at link time. Materialized after firstPass (once
-    // all global imports are counted) so its global index is stable.
-    if (compileMode_ == CompileMode::Linkable) {
-        exportedDataGlobals_.push_back({name, addr});
+        // Export this definition's address as a Wasm global so other TUs'
+        // `extern` references resolve to it at link time. Materialized after
+        // firstPass (once all global imports are counted) so the index is stable.
+        if (compileMode_ == CompileMode::Linkable) {
+            exportedDataGlobals_.push_back({name, addr});
+        }
     }
 
     // Initializer: C requires a constant expression at file scope. Encode

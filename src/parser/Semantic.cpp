@@ -1265,9 +1265,20 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             // Compute canonical alignment and numeric value (if possible)
             auto [maybeVal, canon] = computeAlignFromSpecsTU(d->specifiers);
             std::string alignStr = canon;
+            // A file-scope object with no initializer and no `extern` is a
+            // *tentative* definition (6.9.2p2). Any number of them may appear,
+            // and they may coexist with a single initialized definition, so
+            // they must not be counted as external definitions for the
+            // multiple-definitions check — but they still provide a definition.
+            bool isTentative = isDef
+                && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)
+                && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+                && !d->initializer.has_value()
+                && !(d->declarator && d->declarator->kind == Declarator::Kind::Function);
             // record definition marker
             if (isDef && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
-                recordDef(rname, d->declarator->span);
+                if (isTentative) tentativeDefs.insert(rname);
+                else recordDef(rname, d->declarator->span);
             }
 
             if (!rname.empty()) {
@@ -1548,6 +1559,7 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
     // clear any previous state for external def/use collection
     defCount.clear();
     firstDefSpan.clear();
+    tentativeDefs.clear();
     usedNames.clear();
     declaredSignatures.clear();
 
@@ -1574,7 +1586,9 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
     for (const auto &name : usedNames) {
         auto it = defCount.find(name);
         int count = (it == defCount.end()) ? 0 : it->second;
-        if (count == 0) {
+        // A tentative definition provides an external definition (it becomes a
+        // zero-initialized definition at end of translation unit, 6.9.2p2).
+        if (count == 0 && tentativeDefs.find(name) == tentativeDefs.end()) {
             // If all file-scope declarations for this function are inline (no extern),
             // they do not provide an external definition and we should not warn here.
             if (functionDecls.find(name) != functionDecls.end()) {
