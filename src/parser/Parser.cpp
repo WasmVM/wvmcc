@@ -94,6 +94,34 @@ std::vector<GnuAttribute> Parser::parseGnuAttributeSpecifierList() {
     return result;
 }
 
+void Parser::recordTypedef(const std::string &name, const DeclarationSpecifiers &specs, const DeclaratorPtr &declr) {
+    typedef_names.insert(name);
+    // Only capture an underlying simple type when the declarator is a *bare*
+    // identifier — no pointer/array/function adornment. A complex declarator
+    // such as `(*F)(int)` keeps the Identifier kind at its root but carries the
+    // adornments in `inner`/`function`/`array`, and must NOT be mistaken for a
+    // scalar alias. The specifiers must also name exactly one scalar
+    // type-specifier, directly (`unsigned long`) or via another simple typedef
+    // (`typedef size_t my_size_t;`).
+    if (!declr || declr->kind != Declarator::Kind::Identifier) return;
+    // A bare identifier still carries an `inner` optional, but holding a null
+    // declarator (the empty pointer prefix); a *non-null* inner means real
+    // pointer/function/array adornment.
+    if (declr->inner.has_value() && *declr->inner) return;
+    if (declr->function.hasParamTypeList || !declr->function.params.empty()
+        || !declr->function.identifierList.empty()) return;
+    if (declr->array.size.has_value() || declr->array.isStar) return;
+    if (specs.typeSpecifiers.size() != 1) return;
+    const auto &ts = specs.typeSpecifiers.front();
+    using K = DeclarationSpecifiers::TypeSpecifier::Kind;
+    if (ts.kind == K::Simple) {
+        typedef_simple[name] = ts.simple;
+    } else if (ts.kind == K::TypedefName) {
+        auto it = typedef_simple.find(ts.text);
+        if (it != typedef_simple.end()) typedef_simple[name] = it->second;
+    }
+}
+
 DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
     DeclarationSpecifiers specs;
 
@@ -133,6 +161,20 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
                     DeclarationSpecifiers::TypeSpecifier ts;
                     ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
                     ts.simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Long);
+                    specs.typeSpecifiers.push_back(ts);
+                    lex.next();
+                    continue;
+                }
+                // A typedef-name that aliases a plain scalar type resolves to
+                // that builtin type, so it is usable in constant expressions
+                // (sizeof/_Alignof/casts/_Generic) evaluated before semantics.
+                // Aggregate / pointer typedefs keep their TypedefName form and
+                // are resolved later by semantic analysis.
+                auto tsimple = typedef_simple.find(t->lexeme());
+                if (tsimple != typedef_simple.end()) {
+                    DeclarationSpecifiers::TypeSpecifier ts;
+                    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+                    ts.simple = tsimple->second;
                     specs.typeSpecifiers.push_back(ts);
                     lex.next();
                     continue;
@@ -1129,7 +1171,7 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     // recognition in `parseDeclarationSpecifiers()`.
     if (specs.hasStorage(StorageClass::Typedef)) {
         if (decl->declarator && !decl->declarator->id.name.empty()) {
-            typedef_names.insert(decl->declarator->id.name);
+            recordTypedef(decl->declarator->id.name, specs, decl->declarator);
         }
     }
 
@@ -1177,7 +1219,7 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     }
     if (specs.hasStorage(StorageClass::Typedef)) {
         if (decl->declarator && !decl->declarator->id.name.empty()) {
-            typedef_names.insert(decl->declarator->id.name);
+            recordTypedef(decl->declarator->id.name, specs, decl->declarator);
         }
     }
     // Constraint C 6.7.2.2: require declarator/tag/enum-members for declarations
@@ -1218,7 +1260,7 @@ std::vector<DeclarationPtr> Parser::parseInitDeclaratorList(const DeclarationSpe
         // a declared typedef-name must be recognized for later declarations
         if (specs.hasStorage(StorageClass::Typedef)
             && decl->declarator && !decl->declarator->id.name.empty()) {
-            typedef_names.insert(decl->declarator->id.name);
+            recordTypedef(decl->declarator->id.name, specs, decl->declarator);
         }
         out.push_back(std::move(decl));
 

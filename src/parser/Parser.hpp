@@ -103,6 +103,15 @@ private:
     // enumeration constant name -> value, so enum constants fold to integer
     // constants in constant expressions parsed before semantic analysis.
     std::unordered_map<std::string, long long> enum_constants{};
+    // typedef-name -> underlying simple-type specifiers, but only for typedefs
+    // that name a plain scalar type (e.g. `typedef unsigned long size_t;`).
+    // Lets such typedef-names resolve to their builtin type in constant
+    // expressions (sizeof/_Alignof/casts/_Generic) parsed before semantics.
+    std::unordered_map<std::string, std::vector<DeclarationSpecifiers::SimpleTypeSpecifier>> typedef_simple{};
+    // Record `name` as a typedef; if its declarator is a plain identifier and
+    // its specifiers name a scalar type (directly or via another simple
+    // typedef), remember the underlying simple specifiers in typedef_simple.
+    void recordTypedef(const std::string &name, const DeclarationSpecifiers &specs, const DeclaratorPtr &declr);
     // Block nesting depth (0 = file scope). Enum-constant folding is limited to
     // file scope, where the name cannot be shadowed by a local variable.
     int blockDepth{0};

@@ -416,7 +416,15 @@ static TypeNodePtr inferExprType(const ExprPtr &e) {
             if (ue->op == "!") return mkBuiltin({STS::Int});
             if (ue->op == "-" || ue->op == "+" || ue->op == "~")
                 return promoteScalar(canonScalarOf(inferExprType(ue->rhs)));
-            return nullptr; // &/* and others need type info we lack here
+            if (ue->op == "&") {
+                // The address-of operator yields a pointer regardless of the
+                // operand's (possibly unknown) type. We only need "is a pointer"
+                // for pointer subtraction below, so the pointee is left null.
+                auto p = std::make_shared<TypeNode>();
+                p->kind = TypeNode::Kind::Pointer;
+                return p;
+            }
+            return nullptr; // *deref and others need type info we lack here
         }
         case Expr::Kind::Ternary: {
             auto te = std::static_pointer_cast<TernaryExpr>(e);
@@ -437,6 +445,17 @@ static TypeNodePtr inferExprType(const ExprPtr &e) {
             // Shift result has the (promoted) type of the left operand.
             if (op == "<<" || op == ">>")
                 return promoteScalar(canonScalarOf(inferExprType(be->lhs)));
+            // Pointer difference (pointer - pointer) has type ptrdiff_t, which
+            // is `long` in the LP64 model. (pointer - integer stays a pointer,
+            // which is not an integer type and so not an ICE operand here.)
+            if (op == "-") {
+                auto lt = inferExprType(be->lhs);
+                auto rt = inferExprType(be->rhs);
+                bool lp = lt && lt->kind == TypeNode::Kind::Pointer;
+                bool rp = rt && rt->kind == TypeNode::Kind::Pointer;
+                if (lp && rp) return mkBuiltin({STS::Long});
+                if (lp || rp) return nullptr; // pointer ± integer: not an integer type
+            }
             // Other arithmetic/bitwise: usual arithmetic conversions — the
             // higher-ranked promoted operand type wins.
             Scalar l = canonScalarOf(inferExprType(be->lhs));
