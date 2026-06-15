@@ -538,8 +538,14 @@ void FunctionCodegen::emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& ex
     for (char c : expr.raw) {
         if (c == 'l' || c == 'L') { forceLong = true; break; }
     }
-    bool fitsI32 = expr.value >= std::numeric_limits<int32_t>::min()
-                   && expr.value <= std::numeric_limits<int32_t>::max();
+    // The literal's type (6.4.4.1) decides its wasm width: a value that fits the
+    // 32-bit form of its signedness is `int`/`unsigned int` (i32), otherwise it
+    // is a 64-bit type (i64). For unsigned literals the bound is UINT32_MAX, not
+    // INT32_MAX — so `4294967295u` is a 32-bit `unsigned int`, not an i64.
+    bool fitsI32 = expr.isUnsigned
+                       ? (std::uint64_t)expr.value <= 0xFFFFFFFFULL
+                       : (expr.value >= std::numeric_limits<int32_t>::min()
+                          && expr.value <= std::numeric_limits<int32_t>::max());
     if (!forceLong && fitsI32) {
         emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)expr.value});
     } else {
@@ -689,6 +695,10 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                         emit(WasmVM::Instr::I32_const{0});
                         emit(WasmVM::Instr::I32_ne{});
                     }
+                    // Assignment converts the value to the lvalue's type
+                    // (6.5.16.1); for a char/short local that means truncating
+                    // to its width (raw i32 locals carry no width on their own).
+                    emitIntegerNarrow(sl->type);
                     emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)sl->localIndex});
                     return;
                 }
@@ -879,6 +889,18 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
               : WasmVM::ValueType::i32)
         : arithCommonType(lhsValueType, rhsValueType);
 
+    // Signedness for the operations that differ by it (division, remainder,
+    // ordered comparison, right shift). Per the usual arithmetic conversions
+    // (6.3.1.8), an operand pair is treated as unsigned when either operand is
+    // unsigned; a right shift looks only at the (left) value being shifted.
+    bool lhsUnsigned = typeMap_.isUnsignedScalarInteger(getExprTypeNode(expr.lhs));
+    bool rhsUnsigned = typeMap_.isUnsignedScalarInteger(getExprTypeNode(expr.rhs));
+    bool opUnsigned = lhsUnsigned || rhsUnsigned;
+    // Pick the unsigned or signed form of an instruction by a signedness flag.
+    auto emitSU = [&](bool uns, auto unsignedInstr, auto signedInstr) {
+        if (uns) emit(unsignedInstr); else emit(signedInstr);
+    };
+
     emitExpr(expr.lhs, false);
     emitConvert(this, lhsValueType, commonType);
     emitExpr(expr.rhs, false);
@@ -904,15 +926,15 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_mul{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "/") {
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_div_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_div_s{});
+        if (commonType == VT::i32) emitSU(opUnsigned, WasmVM::Instr::I32_div_u{}, WasmVM::Instr::I32_div_s{});
+        else if (commonType == VT::i64) emitSU(opUnsigned, WasmVM::Instr::I64_div_u{}, WasmVM::Instr::I64_div_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_div{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_div{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "%") {
         // C: % is integer-only; floats are a constraint violation.
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_rem_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_rem_s{});
+        if (commonType == VT::i32) emitSU(opUnsigned, WasmVM::Instr::I32_rem_u{}, WasmVM::Instr::I32_rem_s{});
+        else if (commonType == VT::i64) emitSU(opUnsigned, WasmVM::Instr::I64_rem_u{}, WasmVM::Instr::I64_rem_s{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "==") {
         if (commonType == VT::i32) emit(WasmVM::Instr::I32_eq{});
@@ -927,26 +949,26 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_ne{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "<") {
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_lt_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_lt_s{});
+        if (commonType == VT::i32) emitSU(opUnsigned, WasmVM::Instr::I32_lt_u{}, WasmVM::Instr::I32_lt_s{});
+        else if (commonType == VT::i64) emitSU(opUnsigned, WasmVM::Instr::I64_lt_u{}, WasmVM::Instr::I64_lt_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_lt{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_lt{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == ">") {
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_gt_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_gt_s{});
+        if (commonType == VT::i32) emitSU(opUnsigned, WasmVM::Instr::I32_gt_u{}, WasmVM::Instr::I32_gt_s{});
+        else if (commonType == VT::i64) emitSU(opUnsigned, WasmVM::Instr::I64_gt_u{}, WasmVM::Instr::I64_gt_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_gt{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_gt{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == "<=") {
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_le_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_le_s{});
+        if (commonType == VT::i32) emitSU(opUnsigned, WasmVM::Instr::I32_le_u{}, WasmVM::Instr::I32_le_s{});
+        else if (commonType == VT::i64) emitSU(opUnsigned, WasmVM::Instr::I64_le_u{}, WasmVM::Instr::I64_le_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_le{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_le{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == ">=") {
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_ge_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_ge_s{});
+        if (commonType == VT::i32) emitSU(opUnsigned, WasmVM::Instr::I32_ge_u{}, WasmVM::Instr::I32_ge_s{});
+        else if (commonType == VT::i64) emitSU(opUnsigned, WasmVM::Instr::I64_ge_u{}, WasmVM::Instr::I64_ge_s{});
         else if (commonType == VT::f32) emit(WasmVM::Instr::F32_ge{});
         else if (commonType == VT::f64) emit(WasmVM::Instr::F64_ge{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
@@ -967,8 +989,10 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         else if (commonType == VT::i64) emit(WasmVM::Instr::I64_shl{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else if (expr.op == ">>") {
-        if (commonType == VT::i32) emit(WasmVM::Instr::I32_shr_s{});
-        else if (commonType == VT::i64) emit(WasmVM::Instr::I64_shr_s{});
+        // Right shift uses the signedness of the value being shifted (the left
+        // operand): logical for unsigned, arithmetic for signed.
+        if (commonType == VT::i32) emitSU(lhsUnsigned, WasmVM::Instr::I32_shr_u{}, WasmVM::Instr::I32_shr_s{});
+        else if (commonType == VT::i64) emitSU(lhsUnsigned, WasmVM::Instr::I64_shr_u{}, WasmVM::Instr::I64_shr_s{});
         else emitUnimplemented("codegen: unsupported operand type for binary operator '" + expr.op + "'", expr.span);
     } else {
         emitUnimplemented("codegen not implemented: binary operator '" + expr.op + "'", expr.span);
@@ -1091,14 +1115,38 @@ void FunctionCodegen::emitPostfixUnaryExpr(const wvmcc::parser::PostfixUnaryExpr
     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tmp}); // push old value
 }
 
+// True when `type` (qualifiers stripped) is the `_Bool` builtin.
+static bool isBoolTypeNode(const wvmcc::parser::TypeNodePtr& type) {
+    using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+    auto t = type;
+    while (t && t->kind == wvmcc::parser::TypeNode::Kind::Qualified) t = t->pointee;
+    if (!t || t->kind != wvmcc::parser::TypeNode::Kind::Builtin) return false;
+    for (auto s : t->simple) if (s == STS::Bool) return true;
+    return false;
+}
+
 void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
     emitExpr(expr.expr, false);
 
     auto targetType = typeMap_.toWasmType(expr.type);
     auto sourceType = getExprType(expr.expr);
 
+    // Cast to _Bool (6.3.1.2): the result is 0 if the operand compares equal to
+    // 0, and 1 otherwise — a normalization, not a truncation. Test on the source
+    // representation (before any lossy wrap) so high bits of a wide operand
+    // still count.
+    if (isBoolTypeNode(expr.type)) {
+        switch (sourceType) {
+            case WasmVM::ValueType::i64: emit(WasmVM::Instr::I64_eqz{}); emit(WasmVM::Instr::I32_eqz{}); break;
+            case WasmVM::ValueType::f32: emit(WasmVM::Instr::F32_const{0}); emit(WasmVM::Instr::F32_ne{}); break;
+            case WasmVM::ValueType::f64: emit(WasmVM::Instr::F64_const{0}); emit(WasmVM::Instr::F64_ne{}); break;
+            default:                     emit(WasmVM::Instr::I32_eqz{}); emit(WasmVM::Instr::I32_eqz{}); break;
+        }
+        return;
+    }
+
     if (sourceType == targetType) {
-        // no-op
+        // no-op (width narrowing below still applies for char/short targets)
     } else if (sourceType == WasmVM::ValueType::i32 && targetType == WasmVM::ValueType::i64) {
         emit(WasmVM::Instr::I64_extend_i32_s{});
     } else if (sourceType == WasmVM::ValueType::i64 && targetType == WasmVM::ValueType::i32) {
@@ -1125,6 +1173,25 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
         emit(WasmVM::Instr::F32_demote_f64{});
     } else {
         emitUnimplemented("codegen: unsupported cast conversion", expr.span);
+    }
+
+    // Conversion to a narrow integer type (6.3.1.3): char/short are represented
+    // as i32, so the value must additionally be reduced to the target width.
+    emitIntegerNarrow(expr.type);
+}
+
+void FunctionCodegen::emitIntegerNarrow(const wvmcc::parser::TypeNodePtr& targetType) {
+    if (!targetType) return;
+    if (typeMap_.toWasmType(targetType) != WasmVM::ValueType::i32) return; // only i32-width ints
+    if (isBoolTypeNode(targetType)) return; // _Bool normalizes to 0/1 elsewhere
+    size_t width = typeMap_.byteSize(targetType);
+    bool isUnsigned = typeMap_.isUnsignedScalarInteger(targetType);
+    if (width == 1) {
+        if (isUnsigned) { emit(WasmVM::Instr::I32_const{0xFF}); emit(WasmVM::Instr::I32_and{}); }
+        else { emit(WasmVM::Instr::I32_const{24}); emit(WasmVM::Instr::I32_shl{}); emit(WasmVM::Instr::I32_const{24}); emit(WasmVM::Instr::I32_shr_s{}); }
+    } else if (width == 2) {
+        if (isUnsigned) { emit(WasmVM::Instr::I32_const{0xFFFF}); emit(WasmVM::Instr::I32_and{}); }
+        else { emit(WasmVM::Instr::I32_const{16}); emit(WasmVM::Instr::I32_shl{}); emit(WasmVM::Instr::I32_const{16}); emit(WasmVM::Instr::I32_shr_s{}); }
     }
 }
 
@@ -2656,20 +2723,23 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         return tn;
     }
     case K::Integer: {
-        // Match emitIntegerLiteral's encoding: values outside int32 range
-        // get an i64.const, so the *type* should be long. The L/LL/U
-        // suffix in raw is also honored.
+        // Must agree with emitIntegerLiteral's width (6.4.4.1): an unsigned
+        // literal is 32-bit (i32) up to UINT32_MAX; a signed literal up to
+        // INT32_MAX. An L/LL suffix forces the 64-bit (long) form. Disagreement
+        // here would make callers insert a spurious i32<->i64 conversion.
+        using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
         const auto& il = static_cast<const wvmcc::parser::IntegerLiteral&>(*expr);
-        bool isLong = (il.value > std::numeric_limits<int32_t>::max()
-                       || il.value < std::numeric_limits<int32_t>::min());
+        bool isLong = il.isUnsigned
+                          ? (std::uint64_t)il.value > 0xFFFFFFFFULL
+                          : (il.value > std::numeric_limits<int32_t>::max()
+                             || il.value < std::numeric_limits<int32_t>::min());
         for (char c : il.raw) {
             if (c == 'l' || c == 'L') { isLong = true; break; }
         }
         auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
         tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
-        tn->simple.push_back(isLong
-            ? wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Long
-            : wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+        if (il.isUnsigned) tn->simple.push_back(STS::Unsigned);
+        tn->simple.push_back(isLong ? STS::Long : STS::Int);
         return tn;
     }
     case K::Char: {

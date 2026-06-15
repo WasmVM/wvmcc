@@ -21,6 +21,10 @@ public:
     
     // Get the byte size of a type
     size_t byteSize(const wvmcc::parser::TypeNodePtr& type) const;
+
+    // Whether an integer scalar type is unsigned (e.g. controls narrow-load
+    // extension and integer-narrowing cast behaviour).
+    bool isUnsignedScalarInteger(const wvmcc::parser::TypeNodePtr& type) const;
     
     // Get the byte alignment of a type
     size_t byteAlignment(const wvmcc::parser::TypeNodePtr& type) const;
@@ -48,9 +52,6 @@ private:
     // Helper to get the base type for a node
     WasmVM::ValueType getBaseType(const wvmcc::parser::TypeNodePtr& type) const;
 
-    // Whether an integer scalar is unsigned (controls narrow-load extension)
-    bool isUnsignedScalarInteger(const wvmcc::parser::TypeNodePtr& type) const;
-    
     // Helper to get size for a simple type
     size_t getSimpleTypeSize(const wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier& simpleType) const;
     
