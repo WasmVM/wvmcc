@@ -294,6 +294,181 @@ static bool applyIntegerCast(const TypeNodePtr &target, ICEValue in, ICEValue &o
     return true;
 }
 
+// Canonical scalar-type identity, used both to size types and to match the
+// controlling type of a `_Generic` selection against its associations. Spelling
+// variants (`long unsigned` vs `unsigned long`, `signed` vs `int`) collapse to
+// the same code; `long double` stays distinct from `double` for type-matching
+// even though wvmcc lowers it to double.
+enum class Scalar {
+    Unknown, Void, Bool, Char, SChar, UChar, Short, UShort,
+    Int, UInt, Long, ULong, LongLong, ULongLong, Float, Double, LongDouble
+};
+
+static Scalar canonScalar(const std::vector<STS> &simple) {
+    if (simple.empty()) return Scalar::Int; // bare `int`
+    bool uns = false, sig = false, ch = false, sh = false, vo = false,
+         bo = false, fl = false, db = false;
+    int lng = 0;
+    for (auto s : simple) {
+        switch (s) {
+            case STS::Unsigned: uns = true; break;
+            case STS::Signed:   sig = true; break;
+            case STS::Char:     ch = true; break;
+            case STS::Short:    sh = true; break;
+            case STS::Long:     lng++; break;
+            case STS::Void:     vo = true; break;
+            case STS::Bool:     bo = true; break;
+            case STS::Float:    fl = true; break;
+            case STS::Double:   db = true; break;
+            default: break;
+        }
+    }
+    if (vo) return Scalar::Void;
+    if (bo) return Scalar::Bool;
+    if (db) return lng ? Scalar::LongDouble : Scalar::Double;
+    if (fl) return Scalar::Float;
+    if (ch) return uns ? Scalar::UChar : (sig ? Scalar::SChar : Scalar::Char);
+    if (sh) return uns ? Scalar::UShort : Scalar::Short;
+    if (lng >= 2) return uns ? Scalar::ULongLong : Scalar::LongLong;
+    if (lng == 1) return uns ? Scalar::ULong : Scalar::Long;
+    return uns ? Scalar::UInt : Scalar::Int;
+}
+
+// Canonical scalar identity of a TypeNode (Builtin/Enum), or Unknown when the
+// type is not a self-contained scalar (pointer, struct, typedef-name, …).
+static Scalar canonScalarOf(const TypeNodePtr &t) {
+    if (!t) return Scalar::Unknown;
+    TypeNodePtr c = t;
+    while (c && c->kind == TypeNode::Kind::Qualified) c = c->pointee;
+    if (!c) return Scalar::Unknown;
+    if (c->kind == TypeNode::Kind::Enum) return Scalar::Int; // enum constants/type are int
+    if (c->kind != TypeNode::Kind::Builtin) return Scalar::Unknown;
+    if (c->simple.empty()) return Scalar::Unknown; // typedef-name / textual
+    return canonScalar(c->simple);
+}
+
+static TypeNodePtr mkBuiltin(std::initializer_list<STS> specs) {
+    auto tn = std::make_shared<TypeNode>();
+    tn->kind = TypeNode::Kind::Builtin;
+    tn->simple.assign(specs);
+    return tn;
+}
+
+// Integer-promote a scalar type (6.3.1.1): types of lower rank than int become
+// int. Used for sizeof/_Generic of promoted operands.
+static TypeNodePtr promoteScalar(Scalar s) {
+    switch (s) {
+        case Scalar::Bool: case Scalar::Char: case Scalar::SChar:
+        case Scalar::UChar: case Scalar::Short: case Scalar::UShort:
+        case Scalar::Int:
+            return mkBuiltin({STS::Int});
+        case Scalar::UInt:      return mkBuiltin({STS::Unsigned});
+        case Scalar::Long:      return mkBuiltin({STS::Long});
+        case Scalar::ULong:     return mkBuiltin({STS::Unsigned, STS::Long});
+        case Scalar::LongLong:  return mkBuiltin({STS::Long, STS::Long});
+        case Scalar::ULongLong: return mkBuiltin({STS::Unsigned, STS::Long, STS::Long});
+        case Scalar::Float:     return mkBuiltin({STS::Float});
+        case Scalar::Double:    return mkBuiltin({STS::Double});
+        case Scalar::LongDouble:return mkBuiltin({STS::Long, STS::Double});
+        default:                return nullptr;
+    }
+}
+
+static int scalarRank(Scalar s) {
+    switch (s) {
+        case Scalar::Int: case Scalar::UInt: return 1;
+        case Scalar::Long: case Scalar::ULong: return 2;
+        case Scalar::LongLong: case Scalar::ULongLong: return 3;
+        case Scalar::Float: return 4;
+        case Scalar::Double: return 5;
+        case Scalar::LongDouble: return 6;
+        default: return 0;
+    }
+}
+
+// Infer the (self-contained) type of an expression used as the operand of
+// `sizeof` or the controlling expression of `_Generic`. Returns null when the
+// type needs information we do not have at parse time (an identifier's declared
+// type, a member access, a typedef-name). The operand is never evaluated; only
+// its type matters (6.5.3.4p2 / 6.5.1.1).
+static TypeNodePtr inferExprType(const ExprPtr &e) {
+    if (!e) return nullptr;
+    switch (e->kind) {
+        case Expr::Kind::Integer: {
+            auto il = std::static_pointer_cast<IntegerLiteral>(e);
+            return il->isUnsigned ? mkBuiltin({STS::Unsigned}) : mkBuiltin({STS::Int});
+        }
+        case Expr::Kind::Char:
+            return mkBuiltin({STS::Int}); // a character constant has type int (6.4.4.4p10)
+        case Expr::Kind::Float: {
+            auto fl = std::static_pointer_cast<FloatLiteral>(e);
+            return fl->isFloat ? mkBuiltin({STS::Float}) : mkBuiltin({STS::Double});
+        }
+        case Expr::Kind::Cast: {
+            auto ce = std::static_pointer_cast<CastExpr>(e);
+            return ce->type;
+        }
+        case Expr::Kind::Sizeof:
+        case Expr::Kind::AlignOf:
+            return mkBuiltin({STS::Unsigned, STS::Long}); // size_t (LP64)
+        case Expr::Kind::Unary: {
+            auto ue = std::static_pointer_cast<UnaryExpr>(e);
+            if (ue->op == "!") return mkBuiltin({STS::Int});
+            if (ue->op == "-" || ue->op == "+" || ue->op == "~")
+                return promoteScalar(canonScalarOf(inferExprType(ue->rhs)));
+            if (ue->op == "&") {
+                // The address-of operator yields a pointer regardless of the
+                // operand's (possibly unknown) type. We only need "is a pointer"
+                // for pointer subtraction below, so the pointee is left null.
+                auto p = std::make_shared<TypeNode>();
+                p->kind = TypeNode::Kind::Pointer;
+                return p;
+            }
+            return nullptr; // *deref and others need type info we lack here
+        }
+        case Expr::Kind::Ternary: {
+            auto te = std::static_pointer_cast<TernaryExpr>(e);
+            auto a = inferExprType(te->thenExpr);
+            auto b = inferExprType(te->elseExpr);
+            Scalar sa = canonScalarOf(a), sb = canonScalarOf(b);
+            if (sa == Scalar::Unknown) return b;
+            if (sb == Scalar::Unknown) return a;
+            return scalarRank(sb) > scalarRank(sa) ? promoteScalar(sb) : promoteScalar(sa);
+        }
+        case Expr::Kind::Binary: {
+            auto be = std::static_pointer_cast<BinaryExpr>(e);
+            const std::string &op = be->op;
+            // Relational / equality / logical operators yield int.
+            if (op == "<" || op == ">" || op == "<=" || op == ">=" ||
+                op == "==" || op == "!=" || op == "&&" || op == "||")
+                return mkBuiltin({STS::Int});
+            // Shift result has the (promoted) type of the left operand.
+            if (op == "<<" || op == ">>")
+                return promoteScalar(canonScalarOf(inferExprType(be->lhs)));
+            // Pointer difference (pointer - pointer) has type ptrdiff_t, which
+            // is `long` in the LP64 model. (pointer - integer stays a pointer,
+            // which is not an integer type and so not an ICE operand here.)
+            if (op == "-") {
+                auto lt = inferExprType(be->lhs);
+                auto rt = inferExprType(be->rhs);
+                bool lp = lt && lt->kind == TypeNode::Kind::Pointer;
+                bool rp = rt && rt->kind == TypeNode::Kind::Pointer;
+                if (lp && rp) return mkBuiltin({STS::Long});
+                if (lp || rp) return nullptr; // pointer ± integer: not an integer type
+            }
+            // Other arithmetic/bitwise: usual arithmetic conversions — the
+            // higher-ranked promoted operand type wins.
+            Scalar l = canonScalarOf(inferExprType(be->lhs));
+            Scalar r = canonScalarOf(inferExprType(be->rhs));
+            if (l == Scalar::Unknown || r == Scalar::Unknown) return nullptr;
+            Scalar hi = scalarRank(r) > scalarRank(l) ? r : l;
+            return promoteScalar(hi);
+        }
+        default:
+            return nullptr;
+    }
+}
+
 // Core recursive evaluator returning the signed/unsigned-tagged value.
 static std::optional<ICEValue> evalICE(const ExprPtr &e) {
     if (!e) return std::nullopt;
@@ -325,10 +500,25 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
             return std::nullopt;
         case Expr::Kind::Cast: {
             auto ce = std::static_pointer_cast<CastExpr>(e);
-            auto inner = evalICE(ce->expr);
-            if (!inner.has_value()) return std::nullopt;
+            ICEValue inner;
+            // A floating constant is permitted in an ICE only as the operand of
+            // a cast to an integer type (6.6p6). Evaluate it here rather than in
+            // the general evaluator so floats cannot leak into bare arithmetic.
+            if (ce->expr && ce->expr->kind == Expr::Kind::Float) {
+                auto fl = std::static_pointer_cast<FloatLiteral>(ce->expr);
+                // A cast to _Bool yields 0/1 by comparing the (un-truncated)
+                // value to 0, so a nonzero fraction like 0.5 becomes 1. Any
+                // other integer target truncates toward zero.
+                if (canonScalarOf(ce->type) == Scalar::Bool)
+                    return ICEValue{ fl->value != 0.0 ? 1LL : 0LL, false };
+                inner = ICEValue{ (long long)fl->value, false };
+            } else {
+                auto iv = evalICE(ce->expr);
+                if (!iv.has_value()) return std::nullopt;
+                inner = *iv;
+            }
             ICEValue out;
-            if (!applyIntegerCast(ce->type, *inner, out)) return std::nullopt;
+            if (!applyIntegerCast(ce->type, inner, out)) return std::nullopt;
             return out;
         }
         case Expr::Kind::Sizeof: {
@@ -338,9 +528,17 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
                 opType = typeNodeFromSpecs(*so->typeSpecs);
             } else if (so->type.has_value()) {
                 opType = *so->type;
+            } else if (so->expr) {
+                // sizeof of an expression (6.5.3.4p2): the operand is not
+                // evaluated; only its type determines the size.
+                if (so->expr->kind == Expr::Kind::String) {
+                    // String literal has type char[len+1]; value is the decoded
+                    // content (escapes resolved), so size is value.size()+1.
+                    auto sl = std::static_pointer_cast<StringLiteral>(so->expr);
+                    return ICEValue{ (long long)sl->value.size() + 1, true };
+                }
+                opType = inferExprType(so->expr);
             } else {
-                // sizeof of an expression — not resolvable self-contained
-                // (would need full type inference); treat as non-ICE.
                 return std::nullopt;
             }
             if (!opType) return std::nullopt;
@@ -426,6 +624,23 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
             auto c = evalICE(te->cond);
             if (!c.has_value()) return std::nullopt;
             return c->v ? evalICE(te->thenExpr) : evalICE(te->elseExpr);
+        }
+        case Expr::Kind::GenericSelection: {
+            // _Generic (6.5.1.1): select the association whose type is
+            // compatible with the controlling expression's type (which is not
+            // evaluated), then evaluate the selected expression as the ICE.
+            auto ge = std::static_pointer_cast<GenericSelectionExpr>(e);
+            Scalar ctrl = canonScalarOf(inferExprType(ge->controlling));
+            if (ctrl == Scalar::Unknown) return std::nullopt;
+            const GenericAssociation *chosen = nullptr;
+            const GenericAssociation *deflt = nullptr;
+            for (const auto &a : ge->assocs) {
+                if (a.isDefault) { deflt = &a; continue; }
+                if (canonScalarOf(a.type) == ctrl) { chosen = &a; break; }
+            }
+            if (!chosen) chosen = deflt;
+            if (!chosen) return std::nullopt;
+            return evalICE(chosen->expr);
         }
         default:
             return std::nullopt;
