@@ -31,6 +31,11 @@ private:
     TranslationUnitPtr tu_{};
     std::unordered_map<std::string, int> defCount{};
     std::unordered_map<std::string, wvmcc::SourceSpan> firstDefSpan{};
+    // File-scope object names with at least one tentative definition (6.9.2):
+    // an uninitialized, non-extern declaration. Tentative definitions collapse,
+    // so they do not count toward the multiple-definitions check, but they DO
+    // provide an external definition (so no "used but undefined" warning).
+    std::unordered_set<std::string> tentativeDefs{};
     std::unordered_set<std::string> usedNames{};
     // recorded declaration signatures for compatibility checks
     std::unordered_map<std::string, std::string> declaredSignatures{};
