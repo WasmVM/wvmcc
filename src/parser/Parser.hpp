@@ -112,6 +112,18 @@ private:
     // its specifiers name a scalar type (directly or via another simple
     // typedef), remember the underlying simple specifiers in typedef_simple.
     void recordTypedef(const std::string &name, const DeclarationSpecifiers &specs, const DeclaratorPtr &declr);
+    // Build a TypeNode for a type-name's base specifiers (Simple/struct/union/
+    // enum/typedef-name) wrapped in `pointerDepth` pointer layers. Used by the
+    // sizeof/_Alignof type-name forms to support abstract pointer declarators
+    // (`sizeof(T *)`). Returns null if the base specifiers are empty.
+    TypeNodePtr buildTypeNameNode(const DeclarationSpecifiers &specs, int pointerDepth,
+                                  const std::vector<ExprPtr> &arrayDims = {});
+    // Consume the pointer part of an abstract declarator (`*` `const`* …) and
+    // return the pointer depth. Leaves any following tokens (e.g. `)`) in place.
+    int parseAbstractPointerDepth();
+    // Consume trailing array dimensions of an abstract declarator (`[N][M]…`),
+    // appending each size expression (outermost first). Leaves other tokens.
+    void parseAbstractArrayDims(std::vector<ExprPtr> &dims);
     // Block nesting depth (0 = file scope). Enum-constant folding is limited to
     // file scope, where the name cannot be shadowed by a local variable.
     int blockDepth{0};

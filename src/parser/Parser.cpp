@@ -94,6 +94,73 @@ std::vector<GnuAttribute> Parser::parseGnuAttributeSpecifierList() {
     return result;
 }
 
+int Parser::parseAbstractPointerDepth() {
+    int depth = 0;
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "*") {
+        lex.next();
+        depth++;
+        // Skip type-qualifiers after `*` (`const`/`volatile`/`restrict`/`_Atomic`).
+        while (lex.peek() && lex.peek()->kind() == TokenKind::Keyword) {
+            const auto &kw = lex.peek()->lexeme();
+            if (kw == "const" || kw == "volatile" || kw == "restrict" || kw == "_Atomic") lex.next();
+            else break;
+        }
+    }
+    return depth;
+}
+
+void Parser::parseAbstractArrayDims(std::vector<ExprPtr> &dims) {
+    while (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "[") {
+        lex.next();
+        ExprPtr sz = nullptr;
+        if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "]")) {
+            sz = parseAssignmentExpression();
+        }
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "]") lex.next();
+        dims.push_back(sz);
+    }
+}
+
+TypeNodePtr Parser::buildTypeNameNode(const DeclarationSpecifiers &specs, int pointerDepth,
+                                      const std::vector<ExprPtr> &arrayDims) {
+    if (specs.typeSpecifiers.empty()) return nullptr;
+    const auto &ts = specs.typeSpecifiers.front();
+    using K = DeclarationSpecifiers::TypeSpecifier::Kind;
+    auto tn = make_ast<TypeNode>();
+    if (ts.kind == K::Simple) {
+        tn->kind = TypeNode::Kind::Builtin;
+        tn->simple = ts.simple;
+    } else if (ts.kind == K::StructOrUnion && ts.su) {
+        tn->kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct)
+                       ? TypeNode::Kind::Struct : TypeNode::Kind::Union;
+        tn->su = ts.su;
+    } else if (ts.kind == K::Enum) {
+        tn->kind = TypeNode::Kind::Enum;
+    } else {
+        // typedef-name / other: keep the spelling so codegen can resolve it.
+        tn->kind = TypeNode::Kind::Builtin;
+        tn->text = ts.text;
+    }
+    // Pointers bind innermost (`int *[10]` is array-of-pointer), so apply the
+    // pointer layers before the array dimensions.
+    for (int i = 0; i < pointerDepth; ++i) {
+        auto p = make_ast<TypeNode>();
+        p->kind = TypeNode::Kind::Pointer;
+        p->pointee = tn;
+        tn = p;
+    }
+    // Array dimensions: the outermost dimension is listed first, so wrap from
+    // the innermost (last) dimension outward.
+    for (auto it = arrayDims.rbegin(); it != arrayDims.rend(); ++it) {
+        auto a = make_ast<TypeNode>();
+        a->kind = TypeNode::Kind::Array;
+        a->element = tn;
+        if (*it) a->sizeExpr = *it;
+        tn = a;
+    }
+    return tn;
+}
+
 void Parser::recordTypedef(const std::string &name, const DeclarationSpecifiers &specs, const DeclaratorPtr &declr) {
     typedef_names.insert(name);
     // Only capture an underlying simple type when the declarator is a *bare*
@@ -1294,6 +1361,18 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
     while (auto p = lex.peek()) {
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
 
+        // Nested compound statement (block, 6.8.2). Without this the leading '{'
+        // falls through to the expression-statement path below, which cannot
+        // parse it and desyncs the whole translation unit. parseStmt builds the
+        // CompoundStmt (and recurses through parseCompoundBody).
+        if (p->kind() == TokenKind::Punctuator && p->lexeme() == "{") {
+            StmtPtr st = parseStmt();
+            auto bi = make_ast<BlockItem>();
+            bi->item = st;
+            body.push_back(bi);
+            continue;
+        }
+
         if (p->kind() == TokenKind::Keyword && p->lexeme() == "return") {
             lex.next();
             auto rs = make_ast<ReturnStmt>();
@@ -2158,7 +2237,10 @@ ExprPtr Parser::parseUnaryExpression() {
                 if (lex.peek()) {
                     auto u = lex.peek();
                     if (u->kind() == TokenKind::Keyword) {
-                        static const std::unordered_set<std::string> types = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum"};
+                        static const std::unordered_set<std::string> types = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum",
+                            // A type-name may begin with a type-qualifier, e.g.
+                            // `sizeof(const char *)`.
+                            "const","volatile","restrict","_Atomic"};
                         if (types.count(u->lexeme())) isType = true;
                     } else if (u->kind() == TokenKind::Identifier) {
                         if (typedef_names.count(u->lexeme())) isType = true;
@@ -2166,11 +2248,21 @@ ExprPtr Parser::parseUnaryExpression() {
                 }
                 if (isType) {
                     auto specs = parseDeclarationSpecifiers();
+                    int ptrDepth = parseAbstractPointerDepth();
+                    std::vector<ExprPtr> arrayDims;
+                    parseAbstractArrayDims(arrayDims);
                     if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
                         if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in sizeof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
                     } else lex.next();
                     auto se = make_ast<SizeofExpr>();
-                    se->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
+                    if (ptrDepth > 0 || !arrayDims.empty()) {
+                        // Abstract pointer/array declarator (`sizeof(T *)`,
+                        // `sizeof(T[N])`): resolve the full type here rather than
+                        // through the typeSpecs path (which has no declarator).
+                        se->type = buildTypeNameNode(specs, ptrDepth, arrayDims);
+                    } else {
+                        se->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
+                    }
                     se->expr = nullptr;
                     se->kind = Expr::Kind::Sizeof;
                     se->span = t->span;
@@ -2204,13 +2296,21 @@ ExprPtr Parser::parseUnaryExpression() {
             }
             lex.next();
             auto specs = parseDeclarationSpecifiers();
+            int aoPtrDepth = parseAbstractPointerDepth();
+            std::vector<ExprPtr> aoArrayDims;
+            parseAbstractArrayDims(aoArrayDims);
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
                 if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in _Alignof"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
             } else lex.next();
             auto ae = make_ast<AlignOfExpr>();
-            ae->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
-            ae->type = make_ast<TypeNode>();
-            ae->type->kind = TypeNode::Kind::Builtin; ae->type->text = "type";
+            if (aoPtrDepth > 0 || !aoArrayDims.empty()) {
+                // Abstract pointer/array declarator.
+                ae->type = buildTypeNameNode(specs, aoPtrDepth, aoArrayDims);
+            } else {
+                ae->typeSpecs = specs; // codegen resolves via canonicalTypeRepr
+                ae->type = make_ast<TypeNode>();
+                ae->type->kind = TypeNode::Kind::Builtin; ae->type->text = "type";
+            }
             // build a simple textual representation of the parsed type-specifiers
             auto makeTypeText = [&](const DeclarationSpecifiers &specs)->std::string {
                 std::string out;
