@@ -22,6 +22,11 @@ static bool exprIsStaticInitConstant(const ExprPtr &e) {
     if (!e) return false;
     if (e->kind == Expr::Kind::String) return true;
     if (e->kind == Expr::Kind::Float) return true;      // floating constant
+    // A bare identifier may name an array or function, which decays to an
+    // address constant (`static int *p = arr;`). The parser has no type
+    // information to tell that from a non-constant scalar object, so it defers
+    // the decision to semantic analysis, which re-checks with full types.
+    if (e->kind == Expr::Kind::Ident) return true;
     if (ConstExprEvaluator::isIntegerConstantExpr(e)) return true;
     if (e->kind == Expr::Kind::Cast) {
         return exprIsStaticInitConstant(std::static_pointer_cast<CastExpr>(e)->expr);

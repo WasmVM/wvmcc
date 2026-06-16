@@ -36,6 +36,11 @@ private:
     // so they do not count toward the multiple-definitions check, but they DO
     // provide an external definition (so no "used but undefined" warning).
     std::unordered_set<std::string> tentativeDefs{};
+    // File-scope names that decay to an address constant (arrays and functions),
+    // collected up front so the static-initializer-constant check (which runs
+    // before per-expression types are computed) can accept `static int *p = arr;`
+    // and `static fn_t f = func;`.
+    std::unordered_set<std::string> addressConstantNames_{};
     std::unordered_set<std::string> usedNames{};
     // recorded declaration signatures for compatibility checks
     std::unordered_map<std::string, std::string> declaredSignatures{};
@@ -135,6 +140,13 @@ private:
 public:
     // Compute the type and value category of an expression for semantic checks.
     ExprTypeResult typeOfExpr(const ExprPtr &e) const;
+    // Whether an expression / initializer is a valid constant for an object with
+    // static storage duration (6.6p7-9). Members (not free functions) so the
+    // identifier case can consult typeOfExpr: a bare identifier naming an array
+    // or function decays to an address constant, while a scalar object's value
+    // is not constant.
+    bool exprIsStaticInitConstant(const ExprPtr &e) const;
+    bool initializerIsConstant(const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics) const;
     // Build a TypeNode from a declaration-specifiers + declarator.
     // `inParamPrototype` indicates parameter prototype scope (affects VLA handling).
     // Public so static helper functions in Semantic.cpp can call it.

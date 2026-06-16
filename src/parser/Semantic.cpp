@@ -330,11 +330,18 @@ bool Semantic::typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::sha
 // constant, an address constant, or such combined with an integer constant.
 // Broader than an integer constant expression — e.g. `(void (*)(int))0` (a
 // null pointer constant cast to a function-pointer type) and `&obj` qualify.
-static bool exprIsStaticInitConstant(const ExprPtr &e) {
+bool Semantic::exprIsStaticInitConstant(const ExprPtr &e) const {
     if (!e) return false;
     if (e->kind == Expr::Kind::String) return true;
     if (e->kind == Expr::Kind::Float) return true;     // floating constant
     if (ConstExprEvaluator::isIntegerConstantExpr(e)) return true;
+    // A bare identifier naming an array or function decays to an address
+    // constant (`static int *p = arr;`, `static fn_t f = func;`); a scalar
+    // object's value is not a constant.
+    if (e->kind == Expr::Kind::Ident) {
+        auto id = std::static_pointer_cast<IdentifierExpr>(e);
+        return addressConstantNames_.count(id->name) != 0;
+    }
     if (e->kind == Expr::Kind::Cast) {
         auto ce = std::static_pointer_cast<CastExpr>(e);
         return exprIsStaticInitConstant(ce->expr); // a cast of a constant is constant
@@ -360,7 +367,7 @@ static bool exprIsStaticInitConstant(const ExprPtr &e) {
     return false;
 }
 
-static bool initializerIsConstant(const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics) {
+bool Semantic::initializerIsConstant(const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics) const {
     if (!init) return false;
     if (init->kind == Initializer::Kind::Expr) {
         if (!init->expr) return false;
@@ -1583,6 +1590,23 @@ void Semantic::onExpr(const ExprPtr &e) {
 
 bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!tu_) return true;
+    // Collect file-scope names that decay to an address constant (arrays and
+    // functions) before any checks, so the static-initializer-constant check
+    // can recognise `static int *p = arr;` / `static fn_t f = func;`.
+    addressConstantNames_.clear();
+    for (auto &ext : tu_->externals) {
+        if (!ext) continue;
+        if (auto fd = std::get_if<FunctionDefPtr>(&ext->decl)) {
+            if (*fd && (*fd)->declarator) addressConstantNames_.insert(declaratorName((*fd)->declarator));
+        } else if (auto dp = std::get_if<DeclarationPtr>(&ext->decl)) {
+            if (*dp && (*dp)->declarator) {
+                auto k = (*dp)->declarator->kind;
+                if (k == Declarator::Kind::Array || k == Declarator::Kind::Function)
+                    addressConstantNames_.insert(declaratorName((*dp)->declarator));
+            }
+        }
+    }
+
     // First pass: per-external checks (tags/enums, storage-class constraints,
     // collect internal (static) definitions for duplicate checking)
     internalDefs.clear();
@@ -1986,8 +2010,10 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         diagnostics.push_back(std::move(diag));
     }
 
-    // static storage duration initializers must be constant at external scope
-    if (d->initializer.has_value() && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
+    // Static / thread storage duration initializers must be constant (6.7.9p4).
+    if (d->initializer.has_value()
+        && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+            || d->specifiers.hasStorage(wvmcc::parser::StorageClass::ThreadLocal))) {
         if (!initializerIsConstant(d->initializer.value(), diagnostics)) {
             Diagnostic diag;
             diag.severity = Diagnostic::Severity::Error;
@@ -2129,10 +2155,10 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
                 size_t members = 0;
                 if (typeNode->su && typeNode->su->hasBody) {
                     for (const auto &m : typeNode->su->members) {
+                        // Count every named declarator: a single struct-declaration
+                        // may declare several members (`int a, b;` is two).
                         for (const auto &sd : m.declarators) {
-                            if (sd.declarator) {
-                                if (!declaratorName(sd.declarator).empty()) { members++; break; }
-                            }
+                            if (sd.declarator && !declaratorName(sd.declarator).empty()) members++;
                         }
                     }
                 }
