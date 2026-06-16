@@ -325,12 +325,46 @@ bool Semantic::typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::sha
     return false;
 }
 // Helper: determine whether an initializer is a constant (or composed of constants).
+// Whether an expression is a valid constant for an object with static storage
+// duration (6.6p7-9): an arithmetic constant expression, a null pointer
+// constant, an address constant, or such combined with an integer constant.
+// Broader than an integer constant expression — e.g. `(void (*)(int))0` (a
+// null pointer constant cast to a function-pointer type) and `&obj` qualify.
+static bool exprIsStaticInitConstant(const ExprPtr &e) {
+    if (!e) return false;
+    if (e->kind == Expr::Kind::String) return true;
+    if (e->kind == Expr::Kind::Float) return true;     // floating constant
+    if (ConstExprEvaluator::isIntegerConstantExpr(e)) return true;
+    if (e->kind == Expr::Kind::Cast) {
+        auto ce = std::static_pointer_cast<CastExpr>(e);
+        return exprIsStaticInitConstant(ce->expr); // a cast of a constant is constant
+    }
+    if (e->kind == Expr::Kind::Unary) {
+        auto ue = std::static_pointer_cast<UnaryExpr>(e);
+        if (ue->op == "&") return true;            // address constant: &object
+        if (ue->op == "+" || ue->op == "-" || ue->op == "~" || ue->op == "!")
+            return exprIsStaticInitConstant(ue->rhs);
+    }
+    if (e->kind == Expr::Kind::Binary) {
+        auto be = std::static_pointer_cast<BinaryExpr>(e);
+        if (be->op != ",")
+            return exprIsStaticInitConstant(be->lhs) && exprIsStaticInitConstant(be->rhs);
+    }
+    if (e->kind == Expr::Kind::Ternary) {
+        auto te = std::static_pointer_cast<TernaryExpr>(e);
+        return exprIsStaticInitConstant(te->cond)
+            && exprIsStaticInitConstant(te->thenExpr)
+            && exprIsStaticInitConstant(te->elseExpr);
+    }
+    if (e->kind == Expr::Kind::Sizeof || e->kind == Expr::Kind::AlignOf) return true;
+    return false;
+}
+
 static bool initializerIsConstant(const InitializerPtr &init, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!init) return false;
     if (init->kind == Initializer::Kind::Expr) {
         if (!init->expr) return false;
-        if (init->expr->kind == Expr::Kind::String) return true;
-        return ConstExprEvaluator::isIntegerConstantExpr(init->expr);
+        return exprIsStaticInitConstant(init->expr);
     }
     // list: all clauses' inits must be constant
     for (const auto &cl : init->clauses) {

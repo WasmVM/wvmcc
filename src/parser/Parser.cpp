@@ -14,12 +14,46 @@ Parser::Parser(Lexer &lexer) : lex(lexer) {
     typedef_names.insert("__builtin_va_list");
 }
 
+// Whether an expression is a valid static-storage-duration initializer constant
+// (6.6p7-9): an arithmetic constant expression, a null pointer constant, an
+// address constant, or such combined with an integer constant — broader than an
+// integer constant expression (e.g. `(void (*)(int))0` or `&obj`).
+static bool exprIsStaticInitConstant(const ExprPtr &e) {
+    if (!e) return false;
+    if (e->kind == Expr::Kind::String) return true;
+    if (e->kind == Expr::Kind::Float) return true;      // floating constant
+    if (ConstExprEvaluator::isIntegerConstantExpr(e)) return true;
+    if (e->kind == Expr::Kind::Cast) {
+        return exprIsStaticInitConstant(std::static_pointer_cast<CastExpr>(e)->expr);
+    }
+    if (e->kind == Expr::Kind::Unary) {
+        auto ue = std::static_pointer_cast<UnaryExpr>(e);
+        if (ue->op == "&") return true;                 // address constant: &object
+        if (ue->op == "+" || ue->op == "-" || ue->op == "~" || ue->op == "!")
+            return exprIsStaticInitConstant(ue->rhs);
+    }
+    if (e->kind == Expr::Kind::Binary) {
+        // An arithmetic constant expression: both operands constant under any
+        // arithmetic / bitwise / relational / logical operator.
+        auto be = std::static_pointer_cast<BinaryExpr>(e);
+        if (be->op != ",")
+            return exprIsStaticInitConstant(be->lhs) && exprIsStaticInitConstant(be->rhs);
+    }
+    if (e->kind == Expr::Kind::Ternary) {
+        auto te = std::static_pointer_cast<TernaryExpr>(e);
+        return exprIsStaticInitConstant(te->cond)
+            && exprIsStaticInitConstant(te->thenExpr)
+            && exprIsStaticInitConstant(te->elseExpr);
+    }
+    if (e->kind == Expr::Kind::Sizeof || e->kind == Expr::Kind::AlignOf) return true;
+    return false;
+}
+
 static bool initializerIsConstant(const InitializerPtr &init) {
     if (!init) return false;
     if (init->kind == Initializer::Kind::Expr) {
         if (!init->expr) return false;
-        if (init->expr->kind == Expr::Kind::String) return true;
-        return ConstExprEvaluator::isIntegerConstantExpr(init->expr);
+        return exprIsStaticInitConstant(init->expr);
     }
     // list: all clauses' inits must be constant
     for (const auto &cl : init->clauses) {
@@ -2664,6 +2698,15 @@ ExprPtr Parser::parseMultiplicativeExpression() {
 }
 
 // cast-expression: unary-expression | ( type-name ) cast-expression
+// True if any layer of the (possibly abstract) declarator chain is a pointer,
+// e.g. `(*)(int)` (pointer to function) or `(*)[3]` (pointer to array).
+static bool declaratorContainsPointer(const DeclaratorPtr &d) {
+    for (auto cur = d; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (cur->kind == Declarator::Kind::Pointer) return true;
+    }
+    return false;
+}
+
 ExprPtr Parser::parseCastExpression() {
     if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
         // consume '('
@@ -2704,6 +2747,14 @@ ExprPtr Parser::parseCastExpression() {
                     if (kw == "const" || kw == "volatile" || kw == "restrict") lex.next();
                     else break;
                 }
+            }
+            // A parenthesized abstract declarator such as `(*)(int)` (a pointer
+            // to function) or `(*)[3]` (a pointer to array): parse it with the
+            // declarator parser and, since the cast target is then a pointer
+            // (i64), fold it into the pointer depth.
+            if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
+                auto absDecl = parseDeclarator();
+                if (declaratorContainsPointer(absDecl) && castPointerDepth == 0) castPointerDepth = 1;
             }
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
                 if (lex.peek()) {
