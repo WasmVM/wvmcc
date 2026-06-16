@@ -100,6 +100,12 @@ public:
     void emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool needLValue = false);
     void emitPostfixUnaryExpr(const wvmcc::parser::PostfixUnaryExpr& expr, bool needLValue = false);
     void emitCastExpr(const wvmcc::parser::CastExpr& expr);
+    // Reduce the i32 value on top of the stack to the width of `targetType` when
+    // it is a narrow integer type (char/short) — masking for unsigned, sign-
+    // extending for signed. No-op for wider types, non-integers, or _Bool (whose
+    // 0/1 normalization is handled separately). Used by both explicit casts and
+    // assignment/initialization conversions (6.3.1.3 / 6.5.16.1).
+    void emitIntegerNarrow(const wvmcc::parser::TypeNodePtr& targetType);
     void emitCallExpr(const wvmcc::parser::CallExpr& expr);
     void emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue = false);
     void emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, bool needLValue = false);
