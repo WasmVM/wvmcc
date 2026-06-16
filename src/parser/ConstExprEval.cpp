@@ -642,6 +642,24 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
             if (!chosen) return std::nullopt;
             return evalICE(chosen->expr);
         }
+        case Expr::Kind::Index: {
+            // Subscripting a string literal with a constant index, e.g.
+            // `"&="[0]`, is an integer constant expression yielding the indexed
+            // character (the byte at value.size() is the terminating '\0').
+            auto ix = std::static_pointer_cast<IndexExpr>(e);
+            ExprPtr strE, idxE;
+            if (ix->base && ix->base->kind == Expr::Kind::String) { strE = ix->base; idxE = ix->index; }
+            else if (ix->index && ix->index->kind == Expr::Kind::String) { strE = ix->index; idxE = ix->base; }
+            else return std::nullopt;
+            auto k = evalICE(idxE);
+            if (!k.has_value()) return std::nullopt;
+            auto sl = std::static_pointer_cast<StringLiteral>(strE);
+            long long i = k->v;
+            if (i < 0 || (size_t)i > sl->value.size()) return std::nullopt; // out of range
+            // The element type is `char` (signed by default in wvmcc).
+            char c = (i == (long long)sl->value.size()) ? '\0' : sl->value[(size_t)i];
+            return ICEValue{ (long long)(std::int8_t)c, false };
+        }
         default:
             return std::nullopt;
     }
