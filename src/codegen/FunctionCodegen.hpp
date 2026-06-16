@@ -192,6 +192,10 @@ private:
     // to i64 when the function signature says ssize_t/long. Unset for
     // void-returning functions (no return value to coerce).
     std::optional<WasmVM::ValueType> returnWasmType_;
+    // C scalar return type node, so emitReturnStmt can apply the conversion-as-
+    // by-assignment to the return value (narrowing to char/short width, _Bool
+    // normalization). Null for struct/void returns.
+    wvmcc::parser::TypeNodePtr returnScalarType_;
 
     std::unordered_set<std::string> addressTakenNames_;
 
