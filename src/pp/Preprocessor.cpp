@@ -248,7 +248,7 @@ bool Preprocessor::handleInactiveConditionalToken(const PPToken& tok) {
         return true;
     }
     if (atLineStart && tok.kind == PPTokenKind::Punctuator && tok.lexeme == "#") {
-        handleDirective();
+        handleDirective(/*inactiveConditional=*/true);
         return true;
     }
     // Otherwise skip silently
@@ -335,10 +335,20 @@ void Preprocessor::skipLineFromToken(PPToken t) {
     while ((tn = readRawToken())) { if (tn->kind == PPTokenKind::Newline) break; }
 }
 
-void Preprocessor::handleDirective() {
+void Preprocessor::handleDirective(bool inactiveConditional) {
     auto nameOpt = readDirectiveName();
     if (!nameOpt.has_value()) return;
     std::string dir = *nameOpt;
+
+    // In a skipped conditional branch only the directives that manage the
+    // conditional nesting are honored (C 6.10p6); #define/#undef/#include/#error
+    // and the like must be ignored so they never take effect on the not-taken
+    // path. (#ifdef/#ifndef route through handleSimpleDirective below.)
+    if (inactiveConditional && dir != "if" && dir != "ifdef" && dir != "ifndef"
+        && dir != "elif" && dir != "else" && dir != "endif") {
+        skipRestOfDirectiveTokens();
+        return;
+    }
 
     // Fast-path wrappers for simple directives handled by streaming layer
     if (handleSimpleDirective(dir)) return;

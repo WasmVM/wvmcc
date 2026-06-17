@@ -216,7 +216,11 @@ private:
     void pushTokenFrontWithConcat(const PPToken& tok);
 
     // Runtime-facing directive handlers used by the streaming `ensureBuffer`
-    void handleDirective();            // dispatches to the specific directive parsers
+    // Dispatch a directive. When `inactiveConditional` is true the line lies in a
+    // skipped conditional branch, where only conditional-control directives
+    // (#if/#ifdef/#ifndef/#elif/#else/#endif) run — every other directive
+    // (#define, #undef, #include, #error, …) must be ignored (C 6.10p6).
+    void handleDirective(bool inactiveConditional = false);
     void skipLineFromToken(PPToken t);
     void handleDefine();               // wrapper used by streaming layer
     void handleUndef();                // wrapper used by streaming layer
