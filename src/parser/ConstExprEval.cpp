@@ -429,7 +429,11 @@ static TypeNodePtr inferExprType(const ExprPtr &e) {
                 p->kind = TypeNode::Kind::Pointer;
                 return p;
             }
-            return nullptr; // *deref and others need type info we lack here
+            // `*deref` (and any other unary) needs the operand's real type, which
+            // the standalone evaluator lacks — defer to the semantic resolver so
+            // e.g. `sizeof *p` can be sized.
+            if (g_typeResolver && *g_typeResolver) return (*g_typeResolver)(e);
+            return nullptr;
         }
         case Expr::Kind::Ternary: {
             auto te = std::static_pointer_cast<TernaryExpr>(e);
