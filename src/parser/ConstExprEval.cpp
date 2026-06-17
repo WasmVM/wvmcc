@@ -18,6 +18,11 @@ struct ICEValue {
 
 using STS = DeclarationSpecifiers::SimpleTypeSpecifier;
 
+// #81: the active type resolver (null at parser time; set by the semantic pass
+// via ResolverScope so `sizeof obj` can resolve the object's type). Single-
+// threaded compiler, so a plain file-scope pointer suffices.
+static ConstExprEvaluator::TypeResolver *g_typeResolver = nullptr;
+
 // Forward declarations for the mutually-recursive size/align helpers.
 static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, bool wantAlign);
 static long long typeNodeSize(const TypeNodePtr &t, bool wantAlign);
@@ -465,6 +470,11 @@ static TypeNodePtr inferExprType(const ExprPtr &e) {
             return promoteScalar(hi);
         }
         default:
+            // #81: identifiers, member accesses, array subscripts, etc. carry no
+            // type in the standalone evaluator. When the semantic pass has
+            // installed a resolver, use it so `sizeof obj` / `sizeof a[0]` /
+            // `sizeof s.m` can determine the operand's type.
+            if (g_typeResolver && *g_typeResolver) return (*g_typeResolver)(e);
             return nullptr;
     }
 }
@@ -671,6 +681,53 @@ std::optional<long long> ConstExprEvaluator::evalIntegerConstantExpr(const ExprP
     auto r = evalICE(e);
     if (!r.has_value()) return std::nullopt;
     return r->v;
+}
+
+ConstExprEvaluator::ResolverScope::ResolverScope(TypeResolver r) {
+    static TypeResolver storage;
+    storage = std::move(r);
+    g_typeResolver = &storage;
+}
+ConstExprEvaluator::ResolverScope::~ResolverScope() {
+    g_typeResolver = nullptr;
+}
+
+bool ConstExprEvaluator::dependsOnUnresolvedSizeof(const ExprPtr &e) {
+    if (!e) return false;
+    using K = Expr::Kind;
+    switch (e->kind) {
+        case K::Sizeof: {
+            auto so = std::static_pointer_cast<SizeofExpr>(e);
+            // A type-name operand (`sizeof(int)`) resolves without symbols; an
+            // expression operand other than a string literal needs one.
+            if (so->typeSpecs.has_value()) return false;
+            if (so->expr && so->expr->kind != K::String) return true;
+            return false;
+        }
+        case K::AlignOf: {
+            auto ao = std::static_pointer_cast<AlignOfExpr>(e);
+            // _Alignof always takes a type-name in C, so it resolves without
+            // symbols; nothing to defer.
+            (void)ao;
+            return false;
+        }
+        case K::Unary:
+            return dependsOnUnresolvedSizeof(std::static_pointer_cast<UnaryExpr>(e)->rhs);
+        case K::Cast:
+            return dependsOnUnresolvedSizeof(std::static_pointer_cast<CastExpr>(e)->expr);
+        case K::Binary: {
+            auto be = std::static_pointer_cast<BinaryExpr>(e);
+            return dependsOnUnresolvedSizeof(be->lhs) || dependsOnUnresolvedSizeof(be->rhs);
+        }
+        case K::Ternary: {
+            auto te = std::static_pointer_cast<TernaryExpr>(e);
+            return dependsOnUnresolvedSizeof(te->cond)
+                || dependsOnUnresolvedSizeof(te->thenExpr)
+                || dependsOnUnresolvedSizeof(te->elseExpr);
+        }
+        default:
+            return false;
+    }
 }
 
 } // namespace wvmcc::parser
