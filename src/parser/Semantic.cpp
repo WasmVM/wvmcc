@@ -846,6 +846,133 @@ static bool isFunctionDeclarator(const DeclaratorPtr &d) {
     return false;
 }
 
+// 6.7.2.1p3: a struct/union shall not contain a member of incomplete type — in
+// particular not a (non-pointer) instance of itself, whose type is incomplete
+// until the closing brace. Scans the struct/union bodies in `specs` and reports
+// each self-containing member. Runs independent of any declarator so a bare
+// `struct node { struct node next; };` is diagnosed.
+static void checkStructSelfContainment(const DeclarationSpecifiers &specs,
+                                       const wvmcc::SourceSpan &span,
+                                       std::vector<wvmcc::Diagnostic> &diagnostics) {
+    for (const auto &ts : specs.typeSpecifiers) {
+        if (ts.kind != DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion)
+            continue;
+        if (!ts.su || !ts.su->hasBody || !ts.su->name.has_value()) continue;
+        const std::string &tag = *ts.su->name;
+        for (const auto &mem : ts.su->members) {
+            // A member referencing the enclosing tag is a self-reference. (The
+            // parser reuses the same specifier object for the member, so its
+            // `hasBody` flag is not a reliable "incomplete" signal — match by
+            // tag name and let the pointer check below allow `struct node*`.)
+            bool selfRef = false;
+            for (const auto &mts : mem.specifiers.typeSpecifiers) {
+                if (mts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                    && mts.su && mts.su->name.has_value() && *mts.su->name == tag) {
+                    selfRef = true; break;
+                }
+            }
+            if (!selfRef) continue;
+            for (const auto &sd : mem.declarators) {
+                if (!sd.declarator) continue;
+                // A pointer anywhere in the declarator (`struct node *next`,
+                // `struct node *a[3]`) puts the struct behind an indirection and
+                // is fine; a direct object or array of the (still-incomplete)
+                // struct is not.
+                bool hasPointer = false;
+                for (DeclaratorPtr cur = sd.declarator; cur;
+                     cur = cur->inner.has_value() ? *cur->inner : nullptr) {
+                    if (cur->kind == Declarator::Kind::Pointer) { hasPointer = true; break; }
+                }
+                if (!hasPointer) {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "struct/union member has incomplete type (contains an instance of itself)";
+                    diag.span = span;
+                    diagnostics.push_back(std::move(diag));
+                }
+            }
+        }
+    }
+}
+
+// 6.7.6.2p1 / 6.7.6.3p1: a function declarator shall not specify a return type
+// that is a function or array type, and an array element type shall not be a
+// function type. Detect the direct Function/Array adjacency in a declarator
+// chain (a pointer in between — `int (*f(void))[3]` — breaks it and is legal).
+// Returns an error message or empty string.
+static std::string illegalFuncArrayCombo(const DeclaratorPtr &d) {
+    DeclaratorPtr cur = d;
+    while (cur && cur->inner.has_value() && *cur->inner) {
+        auto inner = *cur->inner;
+        if (cur->kind == Declarator::Kind::Function) {
+            if (inner->kind == Declarator::Kind::Array)
+                return "function return type may not be an array type";
+            if (inner->kind == Declarator::Kind::Function)
+                return "function return type may not be a function type";
+        }
+        if (cur->kind == Declarator::Kind::Array
+            && inner->kind == Declarator::Kind::Function)
+            return "array element type may not be a function type";
+        cur = inner;
+    }
+    return "";
+}
+
+// 6.7.2p2: the multiset of simple type-specifiers in a declaration shall be one
+// of a fixed list of valid combinations. Returns a non-empty error message for
+// a positively-invalid multiset (e.g. `signed unsigned`, `char int`,
+// `float int`), or an empty string when the combination is valid or contains a
+// struct/union/enum/typedef/atomic specifier (which this check ignores).
+static std::string invalidSimpleTypeMultiset(const DeclarationSpecifiers &specs) {
+    using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+    int nVoid=0,nChar=0,nBool=0,nFloat=0,nDouble=0,nInt=0,nShort=0,nLong=0,
+        nSigned=0,nUnsigned=0;
+    bool sawSimple=false;
+    for (const auto &ts : specs.typeSpecifiers) {
+        if (ts.kind != DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+            // A non-simple specifier (struct/union/enum/typedef/atomic): leave
+            // multiset validation to the type builder — don't risk a false flag.
+            return "";
+        }
+        for (auto s : ts.simple) {
+            sawSimple = true;
+            switch (s) {
+                case S::Void: nVoid++; break;
+                case S::Char: nChar++; break;
+                case S::Bool: nBool++; break;
+                case S::Float: nFloat++; break;
+                case S::Double: nDouble++; break;
+                case S::Int: nInt++; break;
+                case S::Short: nShort++; break;
+                case S::Long: nLong++; break;
+                case S::Signed: nSigned++; break;
+                case S::Unsigned: nUnsigned++; break;
+                default: return ""; // _Complex/_Imaginary — out of scope, don't flag
+            }
+        }
+    }
+    if (!sawSimple) return "";
+    const char *dup = "duplicate type specifier in declaration";
+    if (nVoid>1||nChar>1||nBool>1||nFloat>1||nDouble>1||nInt>1||nShort>1) return dup;
+    if (nSigned>1||nUnsigned>1) return dup;
+    if (nLong>2) return "too many 'long' specifiers";
+    if (nSigned>0 && nUnsigned>0) return "both 'signed' and 'unsigned' in declaration";
+    bool hasSign = (nSigned>0 || nUnsigned>0);
+    if (nVoid>0 && (nChar||nBool||nFloat||nDouble||nInt||nShort||nLong||hasSign))
+        return "'void' combined with another type specifier";
+    if (nBool>0 && (nChar||nFloat||nDouble||nInt||nShort||nLong||hasSign))
+        return "'_Bool' combined with another type specifier";
+    if (nChar>0 && (nFloat||nDouble||nInt||nShort||nLong))
+        return "'char' combined with an incompatible type specifier";
+    if (nFloat>0 && (nDouble||nInt||nShort||nLong||hasSign||nChar))
+        return "'float' combined with another type specifier";
+    if (nDouble>0 && (nInt||nShort||hasSign||nChar)) // `long double` permitted
+        return "'double' combined with an incompatible type specifier";
+    if (nDouble>0 && nLong>1) return "too many 'long' specifiers";
+    if (nShort>0 && nLong>0) return "both 'short' and 'long' in declaration";
+    return "";
+}
+
 // Check whether a struct/union specifier contains at least one named member,
 // directly or via anonymous nested structs/unions.
 static bool structOrUnionHasNamedMember(const std::shared_ptr<StructOrUnionSpecifier> &su) {
@@ -2030,6 +2157,10 @@ void Semantic::checkBitfields(const DeclarationSpecifiers &specs, std::vector<wv
 
 void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!d) return;
+    // Struct/union body constraints apply even to a bare type definition with no
+    // declarator (`struct node { struct node next; };`), so check before the
+    // no-declarator early return.
+    checkStructSelfContainment(d->specifiers, d->span, diagnostics);
     if (!d->declarator) {
         if (verbose_) {
             Diagnostic diag;
@@ -2056,6 +2187,23 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         Diagnostic diag;
         diag.severity = Diagnostic::Severity::Error;
         diag.message = "unnamed declarator";
+        diag.span = d->declarator->span;
+        diagnostics.push_back(std::move(diag));
+    }
+    // 6.7.2p2: the type-specifier multiset must be a valid combination.
+    if (std::string msg = invalidSimpleTypeMultiset(d->specifiers); !msg.empty()) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = msg;
+        diag.span = d->span;
+        diagnostics.push_back(std::move(diag));
+    }
+    // 6.7.6.2p1 / 6.7.6.3p1: no function returning array/function, no array of
+    // functions.
+    if (std::string msg = illegalFuncArrayCombo(d->declarator); !msg.empty()) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = msg;
         diag.span = d->declarator->span;
         diagnostics.push_back(std::move(diag));
     }
@@ -2111,6 +2259,27 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         diag.message = "_Alignas may not be applied to a typedef, function, or register object";
         diag.span = d->span;
         diagnostics.push_back(std::move(diag));
+    }
+
+    // 6.7.9p3: the type of an initialized object shall be a complete object
+    // type (or an array of unknown size). Reject an initializer for an object
+    // whose struct/union type has no definition visible at this point.
+    if (d->initializer.has_value()) {
+        auto objTy = canonicalTypeRepr(d->specifiers, d->declarator);
+        if (!objTy) objTy = buildTypeFromDeclaration(d->specifiers, d->declarator, false, nullptr);
+        if (objTy && (objTy->kind == TypeNode::Kind::Struct
+                      || objTy->kind == TypeNode::Kind::Union)) {
+            bool complete = objTy->su && objTy->su->hasBody;
+            if (!complete && objTy->su && objTy->su->name.has_value())
+                complete = structUnionTagDefs.count(*objTy->su->name) != 0;
+            if (!complete) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "initializer for object of incomplete type";
+                diag.span = d->span;
+                diagnostics.push_back(std::move(diag));
+            }
+        }
     }
 
     // designator indexes must be integer constant expressions regardless of storage class
