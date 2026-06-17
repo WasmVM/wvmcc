@@ -92,6 +92,10 @@ public:
     // needLValue=true: leave the address (i64) on the stack rather than the value.
     void emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLValue = false);
 
+    // Whether evaluating `expr` for its value leaves exactly one result on the
+    // stack (false for void/struct-returning calls and void va_* builtins).
+    bool exprLeavesValue(const wvmcc::parser::ExprPtr& expr);
+
     void emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr);
     void emitCharLiteral(const wvmcc::parser::CharLiteral& expr);
     void emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr);
@@ -196,6 +200,9 @@ private:
     // by-assignment to the return value (narrowing to char/short width, _Bool
     // normalization). Null for struct/void returns.
     wvmcc::parser::TypeNodePtr returnScalarType_;
+    // Name of the function currently being generated, for the __func__
+    // predefined identifier (C 6.4.2.2).
+    std::string currentFunctionName_;
 
     std::unordered_set<std::string> addressTakenNames_;
 

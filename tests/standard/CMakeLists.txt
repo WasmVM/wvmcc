@@ -76,6 +76,29 @@ function(add_standard_run_test name source)
         LABELS "standard;run;status-${status}" TIMEOUT 15)
 endfunction()
 
+# add_standard_run_abort_test(<name> <source> [status]) — like add_standard_run
+# _test but the program is expected to ABORT: it passes iff compilation succeeds
+# and the module exits NON-ZERO (e.g. a failed `assert` raising SIGABRT). Used
+# for rows whose conforming behavior is termination, which a plain exit-0 run
+# test cannot express.
+function(add_standard_run_abort_test name source)
+    if(NOT WASMVM_EXECUTABLE)
+        return()
+    endif()
+    set(status supported)
+    if(ARGC GREATER 2)
+        set(status "${ARGV2}")
+    endif()
+    set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
+    add_test(
+        NAME std-${name}
+        COMMAND ${CMAKE_COMMAND} -E env sh -c
+            "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${out}' && ! '${WASMVM_EXECUTABLE}' '${out}'"
+    )
+    set_tests_properties(std-${name} PROPERTIES
+        LABELS "standard;run;status-${status}" TIMEOUT 15)
+endfunction()
+
 # add_standard_run_test2(<name> <src1> <src2> [status]) — two-TU link+run (for
 # cross-translation-unit linkage/compatibility rows).
 function(add_standard_run_test2 name src1 src2)

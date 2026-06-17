@@ -2162,8 +2162,11 @@ ExprPtr Parser::parsePrimary() {
             return inner;
         }
 
-        // not a type-name: parse a parenthesized expression
-        ExprPtr inner = parseAssignmentExpression();
+        // not a type-name: parse a parenthesized expression. A primary
+        // `( expression )` admits a full (comma) expression, so use
+        // parseExpression — otherwise `(1, 2)` would silently drop the comma
+        // operand and the trailing tokens.
+        ExprPtr inner = parseExpression();
         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
         return inner;
     }
@@ -2826,8 +2829,10 @@ ExprPtr Parser::parseCastExpression() {
             return ce;
         }
 
-        // not a type-name: treat as parenthesized expression
-        ExprPtr inner = parseAssignmentExpression();
+        // not a type-name: treat as a parenthesized expression. `( expression )`
+        // admits a full (comma) expression, so use parseExpression — otherwise
+        // `(1, 2)` silently drops the comma operand and leaves trailing tokens.
+        ExprPtr inner = parseExpression();
         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
         return inner;
     }

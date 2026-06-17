@@ -5,6 +5,10 @@
 #ifndef _WVMCC_ASSERT_H
 #define _WVMCC_ASSERT_H
 
+// C11 7.2p3: <assert.h> defines `static_assert` as an alias for the
+// `_Static_assert` keyword. (Unlike `assert`, this is not affected by NDEBUG.)
+#define static_assert _Static_assert
+
 #ifdef NDEBUG
 #define assert(expr) ((void)0)
 #else

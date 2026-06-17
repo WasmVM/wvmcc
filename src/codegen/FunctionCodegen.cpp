@@ -58,6 +58,13 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
                                              const wvmcc::parser::Semantic& semantic) {
     WasmVM::WasmFunc func;
 
+    // Capture the function's name for the __func__ predefined identifier.
+    currentFunctionName_.clear();
+    for (auto cur = funcDef->declarator; cur;
+         cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
+        if (!cur->id.name.empty()) { currentFunctionName_ = cur->id.name; break; }
+    }
+
     AddressTakenAnalyzer analyzer;
     addressTakenNames_ = analyzer.analyze(funcDef);
     // The analyzer also flags `&funcname`. Function names don't need a frame
@@ -588,6 +595,14 @@ void FunctionCodegen::emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr) 
 void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& expr, bool needLValue) {
     auto symbolInfo = symbolTable_.lookup(expr.name);
     if (!symbolInfo) {
+        // C 6.4.2.2: __func__ behaves as a static char array holding the
+        // enclosing function's name. Emit a pointer to an interned string.
+        if (!needLValue && expr.name == "__func__" && dataAllocator_) {
+            size_t addr = dataAllocator_->internString(currentFunctionName_);
+            dataPtrSites_.push_back({instrBuffer_.size(), addr});
+            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)addr});
+            return;
+        }
         // #79: a bare function name in value context decays to a
         // function-pointer value (tagged i64 funcref-table slot).
         if (!needLValue) {
@@ -689,6 +704,15 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
             emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*assign));
             return;
         }
+    }
+
+    // --- Comma operator (6.5.17): evaluate the left operand as a void
+    // expression (discarding its value), then yield the right operand. ---
+    if (expr.op == ",") {
+        emitExpr(expr.lhs, false);
+        if (exprLeavesValue(expr.lhs)) emit(WasmVM::Instr::Drop{});
+        emitExpr(expr.rhs, false);
+        return;
     }
 
     // --- Assignment ---
@@ -2302,50 +2326,43 @@ bool FunctionCodegen::indirectCallLeavesValue(const wvmcc::parser::ExprPtr& call
     return !isVoidRet;
 }
 
+// Whether evaluating `expr` for its value pushes exactly one result onto the
+// stack (so a discarding context must Drop it). Almost everything does; the
+// exceptions are void/struct-returning calls and the void va_* builtins.
+bool FunctionCodegen::exprLeavesValue(const wvmcc::parser::ExprPtr& expr) {
+    if (!expr) return false;
+    if (expr->kind != wvmcc::parser::Expr::Kind::Call) return true;
+    const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*expr);
+    if (call.callee && call.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
+        const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*call.callee);
+        if (id.name == "__builtin_va_start" || id.name == "__builtin_va_end"
+            || id.name == "__builtin_va_copy")
+            return false;
+        if (id.name == "__builtin_va_arg") return true;
+        auto funcSym = symbolTable_.lookupFunction(id.name);
+        if (funcSym) {
+            bool isVoidRet = !funcSym->type
+                || (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Builtin
+                    && !funcSym->type->simple.empty()
+                    && funcSym->type->simple[0]
+                       == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
+            bool isStructRet = funcSym->type
+                && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union);
+            return !isVoidRet && !isStructRet;
+        }
+        // #79: not a direct call — the identifier names a function-pointer
+        // variable. Decide from its pointee type.
+        return indirectCallLeavesValue(call.callee);
+    }
+    // #79: indirect call through an arbitrary function-pointer expression.
+    return indirectCallLeavesValue(call.callee);
+}
+
 void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
     if (!stmt.expr) return;
-
-    // Determine whether the expression leaves a value on the stack.
-    // For direct calls to known functions, check the callee's return type.
-    bool leavesValue = true;
-    if (stmt.expr->kind == wvmcc::parser::Expr::Kind::Call) {
-        const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*stmt.expr);
-        if (call.callee && call.callee->kind == wvmcc::parser::Expr::Kind::Ident) {
-            const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*call.callee);
-            // __builtin_va_start/end/copy emit no value; __builtin_va_arg does.
-            if (id.name == "__builtin_va_start"
-                || id.name == "__builtin_va_end"
-                || id.name == "__builtin_va_copy") {
-                leavesValue = false;
-            } else if (id.name == "__builtin_va_arg") {
-                leavesValue = true;
-            } else {
-                auto funcSym = symbolTable_.lookupFunction(id.name);
-                if (funcSym) {
-                    bool isVoidRet = !funcSym->type
-                        || (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Builtin
-                            && !funcSym->type->simple.empty()
-                            && funcSym->type->simple[0]
-                               == wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Void);
-                    bool isStructRet = funcSym->type
-                        && (funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Struct
-                            || funcSym->type->kind == wvmcc::parser::TypeNode::Kind::Union);
-                    leavesValue = !isVoidRet && !isStructRet;
-                } else {
-                    // #79: not a direct call — the identifier names a
-                    // function-pointer variable. Decide from its pointee type.
-                    leavesValue = indirectCallLeavesValue(call.callee);
-                }
-            }
-        } else {
-            // #79: indirect call through an arbitrary function-pointer
-            // expression (e.g. `tbl[i]()`, `(*p)()`).
-            leavesValue = indirectCallLeavesValue(call.callee);
-        }
-    }
-
     emitExpr(stmt.expr);
-    if (leavesValue) {
+    if (exprLeavesValue(stmt.expr)) {
         emit(WasmVM::Instr::Drop{});
     }
 }
@@ -2832,6 +2849,9 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     }
     case K::Binary: {
         const auto& b = static_cast<const wvmcc::parser::BinaryExpr&>(*expr);
+        // Comma operator (6.5.17): the result has the type/value of the right
+        // operand.
+        if (b.op == ",") return getExprTypeNode(b.rhs);
         // Comparison and logical ops yield int.
         static const std::unordered_set<std::string> compareOps = {
             "==", "!=", "<", ">", "<=", ">=", "&&", "||"
@@ -2891,6 +2911,18 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     }
     case K::Ident: {
         const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr);
+        // C 6.4.2.2: __func__ has type `const char[]`, decaying to `char *`
+        // (an i64 pointer) — matching emitIdentifierExpr's string-pointer emit.
+        if (id.name == "__func__" && !symbolTable_.lookup(id.name).has_value()) {
+            auto charTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            charTn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+            charTn->simple.push_back(
+                wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Char);
+            auto ptrTn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            ptrTn->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+            ptrTn->pointee = charTn;
+            return ptrTn;
+        }
         auto sym = symbolTable_.lookup(id.name);
         if (sym) {
             return std::visit([](const auto& info) -> wvmcc::parser::TypeNodePtr {

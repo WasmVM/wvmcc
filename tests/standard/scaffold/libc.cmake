@@ -1,7 +1,9 @@
 # Generated — libc (clause 7). Tests assert ISO C17; partial/deferred rows
 # EXPECTED TO FAIL (conformance signal). Do not hand-edit.
 
-add_standard_run_test(libc-assert-assert-abort ${CMAKE_CURRENT_SOURCE_DIR}/libc/assert/assert_abort.c supported)
+# A failed assertion must diagnose and abort (non-zero exit), which a plain
+# exit-0 run test cannot express — use the abort-expecting harness.
+add_standard_run_abort_test(libc-assert-assert-abort ${CMAKE_CURRENT_SOURCE_DIR}/libc/assert/assert_abort.c supported)
 add_standard_stdout_test(libc-assert-assert-diag ${CMAKE_CURRENT_SOURCE_DIR}/libc/assert/assert_diag.c ${CMAKE_CURRENT_SOURCE_DIR}/libc/assert/assert_diag.expected partial)
 add_standard_run_test(libc-assert-assert-nonzero ${CMAKE_CURRENT_SOURCE_DIR}/libc/assert/assert_nonzero.c supported)
 add_standard_run_test(libc-assert-ndebug ${CMAKE_CURRENT_SOURCE_DIR}/libc/assert/ndebug.c supported)
