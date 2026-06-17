@@ -127,8 +127,6 @@ private:
     int functionDepth{0};
     // Compute alignment information from DeclarationSpecifiers (exprs and strings) with access to TU
     std::pair<std::optional<long long>, std::string> computeAlignFromSpecsTU(const DeclarationSpecifiers &specs) const;
-    // structural comparison of TypeNode
-    static bool typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::shared_ptr<TypeNode> &b);
     // Result of expression type analysis
     struct ExprTypeResult {
         std::shared_ptr<TypeNode> type;
@@ -138,6 +136,8 @@ private:
         bool isConst{false}; // lvalue designates a const-qualified object
     };
 public:
+    // structural comparison of TypeNode
+    static bool typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::shared_ptr<TypeNode> &b);
     // Compute the type and value category of an expression for semantic checks.
     ExprTypeResult typeOfExpr(const ExprPtr &e) const;
     // Whether an expression / initializer is a valid constant for an object with

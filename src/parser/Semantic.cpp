@@ -2351,6 +2351,61 @@ bool tcIsFunction(const std::shared_ptr<TypeNode> &t) {
 bool tcIsScalar(const std::shared_ptr<TypeNode> &t) {
     return tcIsArithmetic(t) || tcIsPointer(t);
 }
+// A stable code identifying an arithmetic *builtin* up to type compatibility
+// (signedness and rank distinguished; redundant `signed`/`int` spelling
+// collapsed so `int` and `signed int` share a code). Returns -1 for anything
+// not a classifiable arithmetic builtin, so callers reject only clear
+// mismatches and never well-formed code.
+int tcArithKind(const std::shared_ptr<TypeNode> &t) {
+    if (!t || t->kind != TypeNode::Kind::Builtin) return -1;
+    if (t->simple.empty()) return -1;
+    using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+    bool isUnsigned=false, isSigned=false, isFloat=false, isDouble=false,
+         isBool=false, isChar=false, isVoid=false;
+    int shortCount=0, longCount=0;
+    for (auto s : t->simple) {
+        switch (s) {
+            case S::Unsigned: isUnsigned=true; break;
+            case S::Signed:   isSigned=true; break;
+            case S::Float:    isFloat=true; break;
+            case S::Double:   isDouble=true; break;
+            case S::Bool:     isBool=true; break;
+            case S::Char:     isChar=true; break;
+            case S::Short:    shortCount++; break;
+            case S::Long:     longCount++; break;
+            default: break; // Int, etc.
+        }
+    }
+    if (isVoid) return -1;
+    if (isBool)   return 1;
+    if (isDouble) return 2;          // long double aliases double in wvmcc
+    if (isFloat)  return 3;
+    if (isChar)   return isUnsigned ? 4 : (isSigned ? 5 : 6); // plain char is its own type
+    int rank;
+    if (shortCount > 0)      rank = 1;
+    else if (longCount >= 2) rank = 4;
+    else if (longCount == 1) rank = 3;
+    else                     rank = 2; // plain int
+    return 10 + rank * 2 + (isUnsigned ? 1 : 0);
+}
+// True when two pointer types point to *positively* incompatible types — used
+// to diagnose ill-formed pointer subtraction / comparison / assignment without
+// false positives. Conservative: a `void*` side, an unknown pointee, or any
+// non-arithmetic/non-aggregate pointee yields false. Arithmetic pointees are
+// incompatible when their tcArithKind differs (int* vs double*); struct/union
+// pointees are incompatible when their tags differ.
+bool tcPointeesIncompatible(const std::shared_ptr<TypeNode> &a,
+                            const std::shared_ptr<TypeNode> &b) {
+    if (!tcIsPointer(a) || !tcIsPointer(b)) return false;
+    auto pa = a->pointee, pb = b->pointee;
+    if (!pa || !pb) return false;
+    if (tcIsVoid(pa) || tcIsVoid(pb)) return false;
+    int ka = tcArithKind(pa), kb = tcArithKind(pb);
+    if (ka >= 0 && kb >= 0) return ka != kb;
+    if (tcIsStructOrUnion(pa) && tcIsStructOrUnion(pb))
+        return !Semantic::typeNodesEqual(pa, pb);
+    return false;
+}
 } // namespace
 
 Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
@@ -2676,7 +2731,23 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
         case Expr::Kind::Cast: {
             auto cx = std::dynamic_pointer_cast<CastExpr>(e);
             if (!cx) break;
-            (void)typeOfExpr(cx->expr); // drive diagnostics on the operand
+            ExprTypeResult opRes = typeOfExpr(cx->expr); // drive diagnostics on the operand
+            // 6.5.4p2-4: a pointer may not be cast to a floating type, nor a
+            // floating value to a pointer (only the 6.3.2.3 integer<->pointer
+            // conversions are permitted). Reject the pointer<->floating cast.
+            if (curDiagnostics && cx->type) {
+                bool targetFloat = tcIsArithmetic(cx->type)
+                    && (tcArithKind(cx->type) == 2 || tcArithKind(cx->type) == 3);
+                bool opFloat = tcIsArithmetic(opRes.type)
+                    && (tcArithKind(opRes.type) == 2 || tcArithKind(opRes.type) == 3);
+                if ((tcIsPointer(cx->type) && opFloat)
+                    || (targetFloat && tcIsPointer(opRes.type))) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "pointer cannot be cast to or from a floating type";
+                    d.span = e->span;
+                    curDiagnostics->push_back(std::move(d));
+                }
+            }
             res.type = cx->type;        // value of the cast has the target type
             res.isLvalue = false;
             break;
@@ -2707,6 +2778,23 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                 tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Int);
                 res.type = tn;
             } else if (ue->op == "++" || ue->op == "--") {
+                // 6.5.3.1p1: the operand of prefix ++/-- shall be a modifiable
+                // lvalue of arithmetic or pointer type. Mirror the postfix check.
+                if (curDiagnostics && sub.type) {
+                    bool okType = tcIsArithmetic(sub.type) || tcIsPointer(sub.type);
+                    if (!okType && (tcIsStructOrUnion(sub.type) || tcIsArray(sub.type)
+                                    || tcIsVoid(sub.type) || tcIsFunction(sub.type))) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "operand of prefix ++/-- must have arithmetic or pointer type";
+                        d.span = ue->rhs ? ue->rhs->span : e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    } else if (okType && sub.isConst) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "cannot modify a const-qualified object";
+                        d.span = ue->rhs ? ue->rhs->span : e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
+                }
                 res.type = sub.type;
                 res.isLvalue = false;
             } else {
@@ -2765,6 +2853,37 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                         d.message = "cannot assign to a const-qualified object";
                         d.span = be->lhs ? be->lhs->span : e->span;
                         curDiagnostics->push_back(std::move(d));
+                    } else if (op == "=" && tcPointeesIncompatible(lhs.type, rhs.type)) {
+                        // 6.5.16.1p1: assigning between pointers to incompatible
+                        // object types (no void* side, no null constant) needs a
+                        // cast.
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "assignment to incompatible pointer type";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    } else if (op != "=" && op != "+=" && op != "-=") {
+                        // 6.5.16.2p1: every compound operator other than += / -=
+                        // requires both operands to have arithmetic type. Reject
+                        // a positively non-arithmetic (pointer/struct/array) left
+                        // operand.
+                        if (tcIsPointer(lhs.type) || tcIsStructOrUnion(lhs.type)
+                            || tcIsArray(lhs.type)) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                            d.message = "operand of '" + op + "' must have arithmetic type";
+                            d.span = be->lhs ? be->lhs->span : e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
+                    } else if ((op == "+=" || op == "-=") && tcIsPointer(lhs.type)
+                               && rhs.type && !tcIsArithmetic(rhs.type)) {
+                        // 6.5.16.2p1: pointer += / -= requires an integer right
+                        // operand. (Only flag a positively non-arithmetic rhs.)
+                        if (tcIsPointer(rhs.type) || tcIsStructOrUnion(rhs.type)
+                            || tcIsArray(rhs.type)) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                            d.message = "operand of '" + op + "' must have integer type";
+                            d.span = be->rhs ? be->rhs->span : e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
                     }
                 }
                 // result type/value category: the type of the left operand
@@ -2793,6 +2912,15 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
             // result type without new diagnostics.
             if (op == "-") {
                 if (tcIsPointer(lhs.type) && tcIsPointer(rhs.type)) {
+                    // 6.5.6p3: both operands must point to compatible object
+                    // types; subtracting int* and double* is a constraint
+                    // violation.
+                    if (curDiagnostics && tcPointeesIncompatible(lhs.type, rhs.type)) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "subtraction of pointers to incompatible types";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
                     // pointer difference -> integer (ptrdiff_t); leave as int-ish
                     auto tn = std::make_shared<TypeNode>();
                     tn->kind = TypeNode::Kind::Builtin;
@@ -2808,6 +2936,30 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
             // Relational/equality/logical -> int result.
             if (op == "<" || op == ">" || op == "<=" || op == ">=" || op == "=="
                 || op == "!=" || op == "&&" || op == "||") {
+                if (curDiagnostics) {
+                    if (op == "&&" || op == "||") {
+                        // 6.5.13p2 / 6.5.14p2: both operands shall be scalar.
+                        // Reject a positively non-scalar (struct/union/array/void)
+                        // operand.
+                        auto nonScalar = [](const std::shared_ptr<TypeNode> &t) {
+                            return tcIsStructOrUnion(t) || tcIsArray(t) || tcIsVoid(t);
+                        };
+                        if (nonScalar(lhs.type) || nonScalar(rhs.type)) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                            d.message = "operand of '" + op + "' must have scalar type";
+                            d.span = e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
+                    } else if (tcPointeesIncompatible(lhs.type, rhs.type)) {
+                        // 6.5.8p2 (relational) / 6.5.9p2 (equality): comparing
+                        // pointers to incompatible object types (no void* side,
+                        // no null constant) is a constraint violation.
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "comparison of pointers to incompatible types";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
+                }
                 auto tn = std::make_shared<TypeNode>();
                 tn->kind = TypeNode::Kind::Builtin;
                 tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Int);
