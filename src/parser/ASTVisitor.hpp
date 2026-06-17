@@ -45,6 +45,11 @@ protected:
     // single recursive type/constraint analysis per full expression without
     // duplicating diagnostics. Default: no-op.
     virtual void onExpr(const ExprPtr &/*e*/) {}
+    // Called once for each statement as traverseStmt visits it (before its
+    // sub-statements/expressions), so a consumer can apply statement-level
+    // constraints (controlling-expression type, for-clause storage class).
+    // Default: no-op.
+    virtual void onStmt(const StmtPtr &/*s*/) {}
     // Called when entering/exiting a block (compound-statement) scope. Lets a
     // consumer track block-scope symbol tables for redefinition diagnostics.
     virtual void onEnterBlock() {}

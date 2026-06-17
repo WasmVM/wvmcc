@@ -83,6 +83,7 @@ void ASTVisitor::traverseInit(const InitializerPtr &in) {
 
 void ASTVisitor::traverseStmt(const StmtPtr &s) {
     if (!s) return;
+    onStmt(s);
     switch (s->kind) {
         case Stmt::Kind::Expr: {
             auto es = std::dynamic_pointer_cast<ExprStmt>(s);

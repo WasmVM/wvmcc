@@ -58,6 +58,7 @@ private:
     void onExitFunction(const FunctionDefPtr &f) override;
     // full-expression and block-scope hooks (constraint diagnostics)
     void onExpr(const ExprPtr &e) override;
+    void onStmt(const StmtPtr &s) override;
     void onEnterBlock() override;
     void onExitBlock() override;
 
@@ -67,6 +68,7 @@ private:
     struct LocalSym {
         std::shared_ptr<TypeNode> type; // canonical type of the object
         bool isConst{false};            // top-level const-qualified object
+        bool isRegister{false};         // declared with `register` (6.7.1p6)
         wvmcc::SourceSpan span{};       // declaration span (for redefinition diag)
     };
     // Stack of block scopes (innermost last). Each maps name -> LocalSym.
@@ -133,7 +135,9 @@ private:
         bool isLvalue{false};
         bool isFunctionDesignator{false};
         bool isVoid{false};
-        bool isConst{false}; // lvalue designates a const-qualified object
+        bool isConst{false};     // lvalue designates a const-qualified object
+        bool isBitfield{false};  // lvalue designates a bit-field member (6.5.3.2p1)
+        bool isRegister{false};  // lvalue designates a register-declared object
     };
 public:
     // structural comparison of TypeNode

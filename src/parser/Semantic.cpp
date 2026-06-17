@@ -1211,6 +1211,7 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
                 sym.type = canonicalTypeRepr(d->specifiers, d->declarator);
                 if (!sym.type) sym.type = buildTypeFromDeclaration(d->specifiers, d->declarator, false, &vm2);
                 sym.isConst = declarationObjectIsConst(d);
+                sym.isRegister = d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register);
                 sym.span = d->declarator->span;
                 if (!declareLocal(nm, sym) && curDiagnostics) {
                     Diagnostic diag;
@@ -1580,12 +1581,72 @@ void Semantic::onExitBlock() {
     if (!localScopes.empty()) localScopes.pop_back();
 }
 
+// Forward declarations of the type-classification helpers (defined in the
+// anonymous namespace lower in this TU) so the statement/expression hooks above
+// their definition can use them. All unnamed namespaces in a TU are the same
+// namespace, so these resolve to the same internal-linkage functions.
+namespace {
+bool tcIsVoid(const std::shared_ptr<TypeNode> &t);
+bool tcIsStructOrUnion(const std::shared_ptr<TypeNode> &t);
+bool tcIsArray(const std::shared_ptr<TypeNode> &t);
+}
+
 void Semantic::onExpr(const ExprPtr &e) {
     if (!e || !curDiagnostics) return;
     // Drive expression-level constraint diagnostics by computing the type of
     // the full expression (typeOfExpr recurses and emits diagnostics for any
     // ill-formed subexpression it encounters).
     (void)typeOfExpr(e);
+}
+
+void Semantic::onStmt(const StmtPtr &s) {
+    if (!s || !curDiagnostics) return;
+    // The controlling expression of a selection/iteration statement shall have
+    // scalar type (6.8.4.1p1, 6.8.5p2). Reject only a positively non-scalar
+    // (struct/union/array/void) controlling expression.
+    auto checkScalarCtrl = [&](const ExprPtr &cond, const char *what) {
+        if (!cond) return;
+        auto t = typeOfExpr(cond).type;
+        if (tcIsStructOrUnion(t) || tcIsArray(t) || tcIsVoid(t)) {
+            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+            d.message = std::string("controlling expression of '") + what
+                      + "' must have scalar type";
+            d.span = cond->span;
+            curDiagnostics->push_back(std::move(d));
+        }
+    };
+    switch (s->kind) {
+        case Stmt::Kind::If:
+            checkScalarCtrl(std::static_pointer_cast<IfStmt>(s)->cond, "if");
+            break;
+        case Stmt::Kind::While:
+            checkScalarCtrl(std::static_pointer_cast<WhileStmt>(s)->cond, "while");
+            break;
+        case Stmt::Kind::DoWhile:
+            checkScalarCtrl(std::static_pointer_cast<DoWhileStmt>(s)->cond, "do");
+            break;
+        case Stmt::Kind::For: {
+            auto fs = std::static_pointer_cast<ForStmt>(s);
+            if (fs->cond) checkScalarCtrl(*fs->cond, "for");
+            // 6.8.5p3: a declaration in the for clause-1 shall declare only
+            // identifiers with storage class auto or register.
+            if (fs->init && std::holds_alternative<DeclarationPtr>((*fs->init)->item)) {
+                auto d = std::get<DeclarationPtr>((*fs->init)->item);
+                if (d && (d->specifiers.hasStorage(StorageClass::Static)
+                          || d->specifiers.hasStorage(StorageClass::Extern)
+                          || d->specifiers.hasStorage(StorageClass::ThreadLocal)
+                          || d->specifiers.hasStorage(StorageClass::Typedef))) {
+                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "declaration in 'for' loop clause-1 may only "
+                                   "declare auto or register objects";
+                    diag.span = d->span;
+                    curDiagnostics->push_back(std::move(diag));
+                }
+            }
+            break;
+        }
+        default: break;
+    }
 }
 
 bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
@@ -2010,10 +2071,14 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         diagnostics.push_back(std::move(diag));
     }
 
-    // Static / thread storage duration initializers must be constant (6.7.9p4).
+    // 6.7.9p4: every expression in the initializer of an object with static or
+    // thread storage duration shall be a constant expression or string literal.
+    // checkDeclaration only sees file-scope declarations, where every object has
+    // static storage duration regardless of the `static` keyword — so the rule
+    // applies to any initialized object that is not a typedef or function.
     if (d->initializer.has_value()
-        && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
-            || d->specifiers.hasStorage(wvmcc::parser::StorageClass::ThreadLocal))) {
+        && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)
+        && !isFunctionDeclarator(d->declarator)) {
         if (!initializerIsConstant(d->initializer.value(), diagnostics)) {
             Diagnostic diag;
             diag.severity = Diagnostic::Severity::Error;
@@ -2021,6 +2086,31 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
             diag.span = d->span;
             diagnostics.push_back(std::move(diag));
         }
+    }
+
+    // 6.7.4p2: function specifiers (inline, _Noreturn) shall appear only in a
+    // function declaration. Applying one to an object is a constraint violation.
+    if (d->specifiers.funcSpecFlags != FunctionSpecifier::None
+        && !isFunctionDeclarator(d->declarator)
+        && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = "function specifier may not appear on a non-function declaration";
+        diag.span = d->span;
+        diagnostics.push_back(std::move(diag));
+    }
+
+    // 6.7.5p2: an alignment specifier (_Alignas) shall not be applied to a
+    // typedef (nor a bit-field, function, parameter, or register object).
+    if ((!d->specifiers.alignExprs.empty() || !d->specifiers.alignSpec.empty())
+        && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)
+            || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register)
+            || isFunctionDeclarator(d->declarator))) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = "_Alignas may not be applied to a typedef, function, or register object";
+        diag.span = d->span;
+        diagnostics.push_back(std::move(diag));
     }
 
     // designator indexes must be integer constant expressions regardless of storage class
@@ -2424,6 +2514,7 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                     } else {
                         res.isLvalue = true;
                         res.isConst = ls->isConst;
+                        res.isRegister = ls->isRegister;
                     }
                 }
                 break;
@@ -2634,6 +2725,8 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                             if (mt) {
                                 res.type = mt;
                                 res.isLvalue = baseIsLvalue;
+                                // 6.5.3.2p1: a bit-field member has no address.
+                                res.isBitfield = sd.bitfieldWidth.has_value();
                             }
                             found = true;
                             break;
@@ -2765,6 +2858,19 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                 // (a non-pointer operand is already reported by codegen; avoid a
                 //  duplicate diagnostic here to keep behavior stable.)
             } else if (ue->op == "&") {
+                // 6.5.3.2p1: the operand of unary & shall not designate a
+                // bit-field nor a register-declared object.
+                if (curDiagnostics && sub.isBitfield) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "cannot take the address of a bit-field";
+                    d.span = ue->rhs ? ue->rhs->span : e->span;
+                    curDiagnostics->push_back(std::move(d));
+                } else if (curDiagnostics && sub.isRegister) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "cannot take the address of a register-declared object";
+                    d.span = ue->rhs ? ue->rhs->span : e->span;
+                    curDiagnostics->push_back(std::move(d));
+                }
                 // result is a pointer to the operand's type
                 auto p = std::make_shared<TypeNode>();
                 p->kind = TypeNode::Kind::Pointer;
