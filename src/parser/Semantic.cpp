@@ -2551,7 +2551,12 @@ void Semantic::onStaticAssert(const ExternalDecl::StaticAssertPtr &sa) {
     (void)sa;
     if (!sa) return;
     if (!curDiagnostics) return;
-    // Evaluate the controlling constant-expression
+    // Evaluate the controlling constant-expression. #81: install a type resolver
+    // (backed by typeOfExpr) so `sizeof`/`_Alignof` of a declared object,
+    // member, or array element resolves — the standalone evaluator has no symbol
+    // table, so these forms are deferred here from the parser.
+    ConstExprEvaluator::ResolverScope resolver(
+        [this](const ExprPtr &e) -> TypeNodePtr { return typeOfExpr(e).type; });
     auto val = ConstExprEvaluator::evalIntegerConstantExpr(sa->expr);
     if (!val.has_value()) {
         Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";

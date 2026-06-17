@@ -1008,11 +1008,18 @@ ExternalDeclPtr Parser::parseExternalDecl() {
         // Parser-level evaluation to preserve existing parser tests: evaluate constant-expression
         auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
         if (!val.has_value()) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "_Static_assert requires an integer constant expression";
-            if (expr) d.span = expr->span;
-            diagnostics.push_back(std::move(d));
+            // #81: defer a `sizeof`/`_Alignof` of a *declared object* (e.g.
+            // `sizeof arr`, `sizeof(a)/sizeof(a[0])`) — the parser-time evaluator
+            // has no symbol table, but the semantic pass re-checks with one. Only
+            // reject here when no such operand is present (a genuinely non-constant
+            // expression like a bare variable).
+            if (!ConstExprEvaluator::dependsOnUnresolvedSizeof(expr)) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "_Static_assert requires an integer constant expression";
+                if (expr) d.span = expr->span;
+                diagnostics.push_back(std::move(d));
+            }
         } else if (*val == 0) {
             wvmcc::Diagnostic d;
             d.severity = wvmcc::Diagnostic::Severity::Error;
@@ -1533,8 +1540,13 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             sa->message = msgExpr;
             auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
             if (!val.has_value()) {
-                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";
-                if (expr) d.span = expr->span; diagnostics.push_back(std::move(d));
+                // #81: defer a sizeof/_Alignof of a declared object to semantic
+                // analysis (which has the symbol table); only reject a genuinely
+                // non-constant expression here.
+                if (!ConstExprEvaluator::dependsOnUnresolvedSizeof(expr)) {
+                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";
+                    if (expr) d.span = expr->span; diagnostics.push_back(std::move(d));
+                }
             } else if (*val == 0) {
                 wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
                 std::string tmsg = "static assertion failed";
