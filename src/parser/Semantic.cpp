@@ -846,6 +846,133 @@ static bool isFunctionDeclarator(const DeclaratorPtr &d) {
     return false;
 }
 
+// 6.7.2.1p3: a struct/union shall not contain a member of incomplete type — in
+// particular not a (non-pointer) instance of itself, whose type is incomplete
+// until the closing brace. Scans the struct/union bodies in `specs` and reports
+// each self-containing member. Runs independent of any declarator so a bare
+// `struct node { struct node next; };` is diagnosed.
+static void checkStructSelfContainment(const DeclarationSpecifiers &specs,
+                                       const wvmcc::SourceSpan &span,
+                                       std::vector<wvmcc::Diagnostic> &diagnostics) {
+    for (const auto &ts : specs.typeSpecifiers) {
+        if (ts.kind != DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion)
+            continue;
+        if (!ts.su || !ts.su->hasBody || !ts.su->name.has_value()) continue;
+        const std::string &tag = *ts.su->name;
+        for (const auto &mem : ts.su->members) {
+            // A member referencing the enclosing tag is a self-reference. (The
+            // parser reuses the same specifier object for the member, so its
+            // `hasBody` flag is not a reliable "incomplete" signal — match by
+            // tag name and let the pointer check below allow `struct node*`.)
+            bool selfRef = false;
+            for (const auto &mts : mem.specifiers.typeSpecifiers) {
+                if (mts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                    && mts.su && mts.su->name.has_value() && *mts.su->name == tag) {
+                    selfRef = true; break;
+                }
+            }
+            if (!selfRef) continue;
+            for (const auto &sd : mem.declarators) {
+                if (!sd.declarator) continue;
+                // A pointer anywhere in the declarator (`struct node *next`,
+                // `struct node *a[3]`) puts the struct behind an indirection and
+                // is fine; a direct object or array of the (still-incomplete)
+                // struct is not.
+                bool hasPointer = false;
+                for (DeclaratorPtr cur = sd.declarator; cur;
+                     cur = cur->inner.has_value() ? *cur->inner : nullptr) {
+                    if (cur->kind == Declarator::Kind::Pointer) { hasPointer = true; break; }
+                }
+                if (!hasPointer) {
+                    Diagnostic diag;
+                    diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "struct/union member has incomplete type (contains an instance of itself)";
+                    diag.span = span;
+                    diagnostics.push_back(std::move(diag));
+                }
+            }
+        }
+    }
+}
+
+// 6.7.6.2p1 / 6.7.6.3p1: a function declarator shall not specify a return type
+// that is a function or array type, and an array element type shall not be a
+// function type. Detect the direct Function/Array adjacency in a declarator
+// chain (a pointer in between — `int (*f(void))[3]` — breaks it and is legal).
+// Returns an error message or empty string.
+static std::string illegalFuncArrayCombo(const DeclaratorPtr &d) {
+    DeclaratorPtr cur = d;
+    while (cur && cur->inner.has_value() && *cur->inner) {
+        auto inner = *cur->inner;
+        if (cur->kind == Declarator::Kind::Function) {
+            if (inner->kind == Declarator::Kind::Array)
+                return "function return type may not be an array type";
+            if (inner->kind == Declarator::Kind::Function)
+                return "function return type may not be a function type";
+        }
+        if (cur->kind == Declarator::Kind::Array
+            && inner->kind == Declarator::Kind::Function)
+            return "array element type may not be a function type";
+        cur = inner;
+    }
+    return "";
+}
+
+// 6.7.2p2: the multiset of simple type-specifiers in a declaration shall be one
+// of a fixed list of valid combinations. Returns a non-empty error message for
+// a positively-invalid multiset (e.g. `signed unsigned`, `char int`,
+// `float int`), or an empty string when the combination is valid or contains a
+// struct/union/enum/typedef/atomic specifier (which this check ignores).
+static std::string invalidSimpleTypeMultiset(const DeclarationSpecifiers &specs) {
+    using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+    int nVoid=0,nChar=0,nBool=0,nFloat=0,nDouble=0,nInt=0,nShort=0,nLong=0,
+        nSigned=0,nUnsigned=0;
+    bool sawSimple=false;
+    for (const auto &ts : specs.typeSpecifiers) {
+        if (ts.kind != DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+            // A non-simple specifier (struct/union/enum/typedef/atomic): leave
+            // multiset validation to the type builder — don't risk a false flag.
+            return "";
+        }
+        for (auto s : ts.simple) {
+            sawSimple = true;
+            switch (s) {
+                case S::Void: nVoid++; break;
+                case S::Char: nChar++; break;
+                case S::Bool: nBool++; break;
+                case S::Float: nFloat++; break;
+                case S::Double: nDouble++; break;
+                case S::Int: nInt++; break;
+                case S::Short: nShort++; break;
+                case S::Long: nLong++; break;
+                case S::Signed: nSigned++; break;
+                case S::Unsigned: nUnsigned++; break;
+                default: return ""; // _Complex/_Imaginary — out of scope, don't flag
+            }
+        }
+    }
+    if (!sawSimple) return "";
+    const char *dup = "duplicate type specifier in declaration";
+    if (nVoid>1||nChar>1||nBool>1||nFloat>1||nDouble>1||nInt>1||nShort>1) return dup;
+    if (nSigned>1||nUnsigned>1) return dup;
+    if (nLong>2) return "too many 'long' specifiers";
+    if (nSigned>0 && nUnsigned>0) return "both 'signed' and 'unsigned' in declaration";
+    bool hasSign = (nSigned>0 || nUnsigned>0);
+    if (nVoid>0 && (nChar||nBool||nFloat||nDouble||nInt||nShort||nLong||hasSign))
+        return "'void' combined with another type specifier";
+    if (nBool>0 && (nChar||nFloat||nDouble||nInt||nShort||nLong||hasSign))
+        return "'_Bool' combined with another type specifier";
+    if (nChar>0 && (nFloat||nDouble||nInt||nShort||nLong))
+        return "'char' combined with an incompatible type specifier";
+    if (nFloat>0 && (nDouble||nInt||nShort||nLong||hasSign||nChar))
+        return "'float' combined with another type specifier";
+    if (nDouble>0 && (nInt||nShort||hasSign||nChar)) // `long double` permitted
+        return "'double' combined with an incompatible type specifier";
+    if (nDouble>0 && nLong>1) return "too many 'long' specifiers";
+    if (nShort>0 && nLong>0) return "both 'short' and 'long' in declaration";
+    return "";
+}
+
 // Check whether a struct/union specifier contains at least one named member,
 // directly or via anonymous nested structs/unions.
 static bool structOrUnionHasNamedMember(const std::shared_ptr<StructOrUnionSpecifier> &su) {
@@ -1211,6 +1338,7 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
                 sym.type = canonicalTypeRepr(d->specifiers, d->declarator);
                 if (!sym.type) sym.type = buildTypeFromDeclaration(d->specifiers, d->declarator, false, &vm2);
                 sym.isConst = declarationObjectIsConst(d);
+                sym.isRegister = d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register);
                 sym.span = d->declarator->span;
                 if (!declareLocal(nm, sym) && curDiagnostics) {
                     Diagnostic diag;
@@ -1580,12 +1708,72 @@ void Semantic::onExitBlock() {
     if (!localScopes.empty()) localScopes.pop_back();
 }
 
+// Forward declarations of the type-classification helpers (defined in the
+// anonymous namespace lower in this TU) so the statement/expression hooks above
+// their definition can use them. All unnamed namespaces in a TU are the same
+// namespace, so these resolve to the same internal-linkage functions.
+namespace {
+bool tcIsVoid(const std::shared_ptr<TypeNode> &t);
+bool tcIsStructOrUnion(const std::shared_ptr<TypeNode> &t);
+bool tcIsArray(const std::shared_ptr<TypeNode> &t);
+}
+
 void Semantic::onExpr(const ExprPtr &e) {
     if (!e || !curDiagnostics) return;
     // Drive expression-level constraint diagnostics by computing the type of
     // the full expression (typeOfExpr recurses and emits diagnostics for any
     // ill-formed subexpression it encounters).
     (void)typeOfExpr(e);
+}
+
+void Semantic::onStmt(const StmtPtr &s) {
+    if (!s || !curDiagnostics) return;
+    // The controlling expression of a selection/iteration statement shall have
+    // scalar type (6.8.4.1p1, 6.8.5p2). Reject only a positively non-scalar
+    // (struct/union/array/void) controlling expression.
+    auto checkScalarCtrl = [&](const ExprPtr &cond, const char *what) {
+        if (!cond) return;
+        auto t = typeOfExpr(cond).type;
+        if (tcIsStructOrUnion(t) || tcIsArray(t) || tcIsVoid(t)) {
+            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+            d.message = std::string("controlling expression of '") + what
+                      + "' must have scalar type";
+            d.span = cond->span;
+            curDiagnostics->push_back(std::move(d));
+        }
+    };
+    switch (s->kind) {
+        case Stmt::Kind::If:
+            checkScalarCtrl(std::static_pointer_cast<IfStmt>(s)->cond, "if");
+            break;
+        case Stmt::Kind::While:
+            checkScalarCtrl(std::static_pointer_cast<WhileStmt>(s)->cond, "while");
+            break;
+        case Stmt::Kind::DoWhile:
+            checkScalarCtrl(std::static_pointer_cast<DoWhileStmt>(s)->cond, "do");
+            break;
+        case Stmt::Kind::For: {
+            auto fs = std::static_pointer_cast<ForStmt>(s);
+            if (fs->cond) checkScalarCtrl(*fs->cond, "for");
+            // 6.8.5p3: a declaration in the for clause-1 shall declare only
+            // identifiers with storage class auto or register.
+            if (fs->init && std::holds_alternative<DeclarationPtr>((*fs->init)->item)) {
+                auto d = std::get<DeclarationPtr>((*fs->init)->item);
+                if (d && (d->specifiers.hasStorage(StorageClass::Static)
+                          || d->specifiers.hasStorage(StorageClass::Extern)
+                          || d->specifiers.hasStorage(StorageClass::ThreadLocal)
+                          || d->specifiers.hasStorage(StorageClass::Typedef))) {
+                    Diagnostic diag; diag.severity = Diagnostic::Severity::Error;
+                    diag.message = "declaration in 'for' loop clause-1 may only "
+                                   "declare auto or register objects";
+                    diag.span = d->span;
+                    curDiagnostics->push_back(std::move(diag));
+                }
+            }
+            break;
+        }
+        default: break;
+    }
 }
 
 bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
@@ -1969,6 +2157,10 @@ void Semantic::checkBitfields(const DeclarationSpecifiers &specs, std::vector<wv
 
 void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!d) return;
+    // Struct/union body constraints apply even to a bare type definition with no
+    // declarator (`struct node { struct node next; };`), so check before the
+    // no-declarator early return.
+    checkStructSelfContainment(d->specifiers, d->span, diagnostics);
     if (!d->declarator) {
         if (verbose_) {
             Diagnostic diag;
@@ -1998,6 +2190,23 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         diag.span = d->declarator->span;
         diagnostics.push_back(std::move(diag));
     }
+    // 6.7.2p2: the type-specifier multiset must be a valid combination.
+    if (std::string msg = invalidSimpleTypeMultiset(d->specifiers); !msg.empty()) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = msg;
+        diag.span = d->span;
+        diagnostics.push_back(std::move(diag));
+    }
+    // 6.7.6.2p1 / 6.7.6.3p1: no function returning array/function, no array of
+    // functions.
+    if (std::string msg = illegalFuncArrayCombo(d->declarator); !msg.empty()) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = msg;
+        diag.span = d->declarator->span;
+        diagnostics.push_back(std::move(diag));
+    }
     // C 6.7.6.2p1: array size must be > 0 when it is a constant expression.
     checkArraySizes(d->declarator, diagnostics);
     // External-level semantic checks: storage-class constraints
@@ -2010,16 +2219,66 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         diagnostics.push_back(std::move(diag));
     }
 
-    // Static / thread storage duration initializers must be constant (6.7.9p4).
+    // 6.7.9p4: every expression in the initializer of an object with static or
+    // thread storage duration shall be a constant expression or string literal.
+    // checkDeclaration only sees file-scope declarations, where every object has
+    // static storage duration regardless of the `static` keyword — so the rule
+    // applies to any initialized object that is not a typedef or function.
     if (d->initializer.has_value()
-        && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
-            || d->specifiers.hasStorage(wvmcc::parser::StorageClass::ThreadLocal))) {
+        && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)
+        && !isFunctionDeclarator(d->declarator)) {
         if (!initializerIsConstant(d->initializer.value(), diagnostics)) {
             Diagnostic diag;
             diag.severity = Diagnostic::Severity::Error;
             diag.message = "initializer for object with static storage duration must be constant expression or string literal";
             diag.span = d->span;
             diagnostics.push_back(std::move(diag));
+        }
+    }
+
+    // 6.7.4p2: function specifiers (inline, _Noreturn) shall appear only in a
+    // function declaration. Applying one to an object is a constraint violation.
+    if (d->specifiers.funcSpecFlags != FunctionSpecifier::None
+        && !isFunctionDeclarator(d->declarator)
+        && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = "function specifier may not appear on a non-function declaration";
+        diag.span = d->span;
+        diagnostics.push_back(std::move(diag));
+    }
+
+    // 6.7.5p2: an alignment specifier (_Alignas) shall not be applied to a
+    // typedef (nor a bit-field, function, parameter, or register object).
+    if ((!d->specifiers.alignExprs.empty() || !d->specifiers.alignSpec.empty())
+        && (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)
+            || d->specifiers.hasStorage(wvmcc::parser::StorageClass::Register)
+            || isFunctionDeclarator(d->declarator))) {
+        Diagnostic diag;
+        diag.severity = Diagnostic::Severity::Error;
+        diag.message = "_Alignas may not be applied to a typedef, function, or register object";
+        diag.span = d->span;
+        diagnostics.push_back(std::move(diag));
+    }
+
+    // 6.7.9p3: the type of an initialized object shall be a complete object
+    // type (or an array of unknown size). Reject an initializer for an object
+    // whose struct/union type has no definition visible at this point.
+    if (d->initializer.has_value()) {
+        auto objTy = canonicalTypeRepr(d->specifiers, d->declarator);
+        if (!objTy) objTy = buildTypeFromDeclaration(d->specifiers, d->declarator, false, nullptr);
+        if (objTy && (objTy->kind == TypeNode::Kind::Struct
+                      || objTy->kind == TypeNode::Kind::Union)) {
+            bool complete = objTy->su && objTy->su->hasBody;
+            if (!complete && objTy->su && objTy->su->name.has_value())
+                complete = structUnionTagDefs.count(*objTy->su->name) != 0;
+            if (!complete) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "initializer for object of incomplete type";
+                diag.span = d->span;
+                diagnostics.push_back(std::move(diag));
+            }
         }
     }
 
@@ -2351,6 +2610,61 @@ bool tcIsFunction(const std::shared_ptr<TypeNode> &t) {
 bool tcIsScalar(const std::shared_ptr<TypeNode> &t) {
     return tcIsArithmetic(t) || tcIsPointer(t);
 }
+// A stable code identifying an arithmetic *builtin* up to type compatibility
+// (signedness and rank distinguished; redundant `signed`/`int` spelling
+// collapsed so `int` and `signed int` share a code). Returns -1 for anything
+// not a classifiable arithmetic builtin, so callers reject only clear
+// mismatches and never well-formed code.
+int tcArithKind(const std::shared_ptr<TypeNode> &t) {
+    if (!t || t->kind != TypeNode::Kind::Builtin) return -1;
+    if (t->simple.empty()) return -1;
+    using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+    bool isUnsigned=false, isSigned=false, isFloat=false, isDouble=false,
+         isBool=false, isChar=false, isVoid=false;
+    int shortCount=0, longCount=0;
+    for (auto s : t->simple) {
+        switch (s) {
+            case S::Unsigned: isUnsigned=true; break;
+            case S::Signed:   isSigned=true; break;
+            case S::Float:    isFloat=true; break;
+            case S::Double:   isDouble=true; break;
+            case S::Bool:     isBool=true; break;
+            case S::Char:     isChar=true; break;
+            case S::Short:    shortCount++; break;
+            case S::Long:     longCount++; break;
+            default: break; // Int, etc.
+        }
+    }
+    if (isVoid) return -1;
+    if (isBool)   return 1;
+    if (isDouble) return 2;          // long double aliases double in wvmcc
+    if (isFloat)  return 3;
+    if (isChar)   return isUnsigned ? 4 : (isSigned ? 5 : 6); // plain char is its own type
+    int rank;
+    if (shortCount > 0)      rank = 1;
+    else if (longCount >= 2) rank = 4;
+    else if (longCount == 1) rank = 3;
+    else                     rank = 2; // plain int
+    return 10 + rank * 2 + (isUnsigned ? 1 : 0);
+}
+// True when two pointer types point to *positively* incompatible types — used
+// to diagnose ill-formed pointer subtraction / comparison / assignment without
+// false positives. Conservative: a `void*` side, an unknown pointee, or any
+// non-arithmetic/non-aggregate pointee yields false. Arithmetic pointees are
+// incompatible when their tcArithKind differs (int* vs double*); struct/union
+// pointees are incompatible when their tags differ.
+bool tcPointeesIncompatible(const std::shared_ptr<TypeNode> &a,
+                            const std::shared_ptr<TypeNode> &b) {
+    if (!tcIsPointer(a) || !tcIsPointer(b)) return false;
+    auto pa = a->pointee, pb = b->pointee;
+    if (!pa || !pb) return false;
+    if (tcIsVoid(pa) || tcIsVoid(pb)) return false;
+    int ka = tcArithKind(pa), kb = tcArithKind(pb);
+    if (ka >= 0 && kb >= 0) return ka != kb;
+    if (tcIsStructOrUnion(pa) && tcIsStructOrUnion(pb))
+        return !Semantic::typeNodesEqual(pa, pb);
+    return false;
+}
 } // namespace
 
 Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
@@ -2369,6 +2683,7 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                     } else {
                         res.isLvalue = true;
                         res.isConst = ls->isConst;
+                        res.isRegister = ls->isRegister;
                     }
                 }
                 break;
@@ -2579,6 +2894,8 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                             if (mt) {
                                 res.type = mt;
                                 res.isLvalue = baseIsLvalue;
+                                // 6.5.3.2p1: a bit-field member has no address.
+                                res.isBitfield = sd.bitfieldWidth.has_value();
                             }
                             found = true;
                             break;
@@ -2676,7 +2993,23 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
         case Expr::Kind::Cast: {
             auto cx = std::dynamic_pointer_cast<CastExpr>(e);
             if (!cx) break;
-            (void)typeOfExpr(cx->expr); // drive diagnostics on the operand
+            ExprTypeResult opRes = typeOfExpr(cx->expr); // drive diagnostics on the operand
+            // 6.5.4p2-4: a pointer may not be cast to a floating type, nor a
+            // floating value to a pointer (only the 6.3.2.3 integer<->pointer
+            // conversions are permitted). Reject the pointer<->floating cast.
+            if (curDiagnostics && cx->type) {
+                bool targetFloat = tcIsArithmetic(cx->type)
+                    && (tcArithKind(cx->type) == 2 || tcArithKind(cx->type) == 3);
+                bool opFloat = tcIsArithmetic(opRes.type)
+                    && (tcArithKind(opRes.type) == 2 || tcArithKind(opRes.type) == 3);
+                if ((tcIsPointer(cx->type) && opFloat)
+                    || (targetFloat && tcIsPointer(opRes.type))) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "pointer cannot be cast to or from a floating type";
+                    d.span = e->span;
+                    curDiagnostics->push_back(std::move(d));
+                }
+            }
             res.type = cx->type;        // value of the cast has the target type
             res.isLvalue = false;
             break;
@@ -2694,6 +3027,19 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                 // (a non-pointer operand is already reported by codegen; avoid a
                 //  duplicate diagnostic here to keep behavior stable.)
             } else if (ue->op == "&") {
+                // 6.5.3.2p1: the operand of unary & shall not designate a
+                // bit-field nor a register-declared object.
+                if (curDiagnostics && sub.isBitfield) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "cannot take the address of a bit-field";
+                    d.span = ue->rhs ? ue->rhs->span : e->span;
+                    curDiagnostics->push_back(std::move(d));
+                } else if (curDiagnostics && sub.isRegister) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "cannot take the address of a register-declared object";
+                    d.span = ue->rhs ? ue->rhs->span : e->span;
+                    curDiagnostics->push_back(std::move(d));
+                }
                 // result is a pointer to the operand's type
                 auto p = std::make_shared<TypeNode>();
                 p->kind = TypeNode::Kind::Pointer;
@@ -2707,6 +3053,23 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                 tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Int);
                 res.type = tn;
             } else if (ue->op == "++" || ue->op == "--") {
+                // 6.5.3.1p1: the operand of prefix ++/-- shall be a modifiable
+                // lvalue of arithmetic or pointer type. Mirror the postfix check.
+                if (curDiagnostics && sub.type) {
+                    bool okType = tcIsArithmetic(sub.type) || tcIsPointer(sub.type);
+                    if (!okType && (tcIsStructOrUnion(sub.type) || tcIsArray(sub.type)
+                                    || tcIsVoid(sub.type) || tcIsFunction(sub.type))) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "operand of prefix ++/-- must have arithmetic or pointer type";
+                        d.span = ue->rhs ? ue->rhs->span : e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    } else if (okType && sub.isConst) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "cannot modify a const-qualified object";
+                        d.span = ue->rhs ? ue->rhs->span : e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
+                }
                 res.type = sub.type;
                 res.isLvalue = false;
             } else {
@@ -2765,6 +3128,37 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                         d.message = "cannot assign to a const-qualified object";
                         d.span = be->lhs ? be->lhs->span : e->span;
                         curDiagnostics->push_back(std::move(d));
+                    } else if (op == "=" && tcPointeesIncompatible(lhs.type, rhs.type)) {
+                        // 6.5.16.1p1: assigning between pointers to incompatible
+                        // object types (no void* side, no null constant) needs a
+                        // cast.
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "assignment to incompatible pointer type";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    } else if (op != "=" && op != "+=" && op != "-=") {
+                        // 6.5.16.2p1: every compound operator other than += / -=
+                        // requires both operands to have arithmetic type. Reject
+                        // a positively non-arithmetic (pointer/struct/array) left
+                        // operand.
+                        if (tcIsPointer(lhs.type) || tcIsStructOrUnion(lhs.type)
+                            || tcIsArray(lhs.type)) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                            d.message = "operand of '" + op + "' must have arithmetic type";
+                            d.span = be->lhs ? be->lhs->span : e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
+                    } else if ((op == "+=" || op == "-=") && tcIsPointer(lhs.type)
+                               && rhs.type && !tcIsArithmetic(rhs.type)) {
+                        // 6.5.16.2p1: pointer += / -= requires an integer right
+                        // operand. (Only flag a positively non-arithmetic rhs.)
+                        if (tcIsPointer(rhs.type) || tcIsStructOrUnion(rhs.type)
+                            || tcIsArray(rhs.type)) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                            d.message = "operand of '" + op + "' must have integer type";
+                            d.span = be->rhs ? be->rhs->span : e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
                     }
                 }
                 // result type/value category: the type of the left operand
@@ -2793,6 +3187,15 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
             // result type without new diagnostics.
             if (op == "-") {
                 if (tcIsPointer(lhs.type) && tcIsPointer(rhs.type)) {
+                    // 6.5.6p3: both operands must point to compatible object
+                    // types; subtracting int* and double* is a constraint
+                    // violation.
+                    if (curDiagnostics && tcPointeesIncompatible(lhs.type, rhs.type)) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "subtraction of pointers to incompatible types";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
                     // pointer difference -> integer (ptrdiff_t); leave as int-ish
                     auto tn = std::make_shared<TypeNode>();
                     tn->kind = TypeNode::Kind::Builtin;
@@ -2808,6 +3211,30 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
             // Relational/equality/logical -> int result.
             if (op == "<" || op == ">" || op == "<=" || op == ">=" || op == "=="
                 || op == "!=" || op == "&&" || op == "||") {
+                if (curDiagnostics) {
+                    if (op == "&&" || op == "||") {
+                        // 6.5.13p2 / 6.5.14p2: both operands shall be scalar.
+                        // Reject a positively non-scalar (struct/union/array/void)
+                        // operand.
+                        auto nonScalar = [](const std::shared_ptr<TypeNode> &t) {
+                            return tcIsStructOrUnion(t) || tcIsArray(t) || tcIsVoid(t);
+                        };
+                        if (nonScalar(lhs.type) || nonScalar(rhs.type)) {
+                            Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                            d.message = "operand of '" + op + "' must have scalar type";
+                            d.span = e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
+                    } else if (tcPointeesIncompatible(lhs.type, rhs.type)) {
+                        // 6.5.8p2 (relational) / 6.5.9p2 (equality): comparing
+                        // pointers to incompatible object types (no void* side,
+                        // no null constant) is a constraint violation.
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "comparison of pointers to incompatible types";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
+                }
                 auto tn = std::make_shared<TypeNode>();
                 tn->kind = TypeNode::Kind::Builtin;
                 tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Int);
