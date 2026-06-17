@@ -12,6 +12,8 @@
 #include <vector>
 #include <unordered_map>
 #include <unordered_set>
+#include <optional>
+#include <utility>
 
 namespace wvmcc::codegen {
 
@@ -83,6 +85,21 @@ public:
     const std::vector<FuncPtrReloc>& getFuncPtrRelocs() const { return funcPtrRelocs_; }
     // Number of funcref-table slots this TU allocated (table size).
     size_t funcTableSlotCount() const { return funcTableSlots_.size(); }
+
+    // LANG-6.6-06: an address-constant pointer baked into a *data segment*'s
+    // bytes (e.g. `static int *p = &obj;`). Unlike code-located i64.const data
+    // pointers (Relocation/FuncPtrReloc), these live inside `module.datas`
+    // payloads, so the linker rebases them by reading the segment bytes at
+    // `byteOffset` rather than rewriting an instruction. `dataIndex` indexes
+    // `module.datas`; `byteOffset` is the little-endian i64's offset within
+    // that segment's `init`. Data pointers shift by the TU's data-rebase delta;
+    // funcptr slots shift by the TU's table-slot delta.
+    struct DataSegReloc {
+        size_t dataIndex;
+        size_t byteOffset;
+    };
+    const std::vector<DataSegReloc>& getDataSegDataRelocs() const { return dataSegDataRelocs_; }
+    const std::vector<DataSegReloc>& getDataSegFuncPtrRelocs() const { return dataSegFuncPtrRelocs_; }
 
     // Codegen diagnostics accumulated across all functions (errors here mean
     // the emitted module is unsound — the driver should report and not ship it).
@@ -182,6 +199,35 @@ private:
     bool encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
                          const wvmcc::parser::InitializerPtr& init,
                          size_t base, std::vector<std::byte>& out);
+
+    // LANG-6.6-06: an address constant (6.6p9) — a pointer-valued expression
+    // whose value is known at link time: `&obj`, array/function decay,
+    // `&arr[k]`, `arr + k`, `&s.m`. `value` is the i64 to embed; `isFuncPtr`
+    // distinguishes a tagged funcref-table slot (rebased by the table-slot
+    // delta) from a mem[0] data address (rebased by the data delta). `pointee`
+    // carries the element type so further pointer arithmetic can scale by it.
+    struct AddrConst {
+        std::int64_t value{0};
+        bool isFuncPtr{false};
+        wvmcc::parser::TypeNodePtr pointee;
+    };
+    // A designated object/element (the operand of `&`, or an array/struct
+    // sub-object): its mem[0] address and type, or a function designator.
+    struct Designator {
+        std::int64_t addr{0};
+        wvmcc::parser::TypeNodePtr type;
+        bool isFunc{false};
+        size_t funcSlot{0};
+    };
+    std::optional<AddrConst> evalAddressConstInit(const wvmcc::parser::ExprPtr& e);
+    std::optional<Designator> evalDesignator(const wvmcc::parser::ExprPtr& e);
+    // Address-constant sites collected by encodeConstInit for the segment
+    // currently being built: (byteOffset within the object's buffer, isFuncPtr).
+    // Drained by registerGlobalVar into dataSegDataRelocs_/dataSegFuncPtrRelocs_
+    // once the data segment (and thus its module.datas index) exists.
+    std::vector<std::pair<size_t, bool>> pendingAddrSites_;
+    std::vector<DataSegReloc> dataSegDataRelocs_;
+    std::vector<DataSegReloc> dataSegFuncPtrRelocs_;
 
     // Wasm global indices for the two runtime globals (stable across modes):
     // __stack_pointer = 0, __heap_base = 1. Captured in setupGlobals().

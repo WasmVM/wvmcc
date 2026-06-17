@@ -286,7 +286,9 @@ void remapInstr(WasmVM::WasmInstr& instr, const Remap& r) {
 void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
               const std::string& origin,
               const std::vector<DataPtrSite>& dataRelocs,
-              const std::vector<DataPtrSite>& funcPtrRelocs) {
+              const std::vector<DataPtrSite>& funcPtrRelocs,
+              const std::vector<DataSegPtrSite>& dataSegDataRelocs,
+              const std::vector<DataSegPtrSite>& dataSegFuncPtrRelocs) {
     auto& out = ctx.output;
     DedupState& ds = dedupFor(ctx);
 
@@ -562,8 +564,27 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
 
     // ---- Data segments: append; rebase offsets by the TU's data delta
     // (M2-L8) so multi-TU data doesn't collide. Remap memidx in the mode. ----
-    for (const auto& d : in.datas) {
-        WasmVM::WasmData copy = d;
+    // LANG-6.6-06: also patch any address-constant pointers baked *into* a
+    // segment's bytes — data-address sites shift by the data delta, funcptr
+    // slots by the table-slot delta. Group the sites by input-local segment.
+    std::unordered_map<uint32_t, std::vector<uint32_t>> dataPtrInSeg, funcPtrInSeg;
+    if (dataDelta != 0)
+        for (const auto& s : dataSegDataRelocs) dataPtrInSeg[s.dataIdx].push_back(s.byteOffset);
+    if (slotDelta != 0)
+        for (const auto& s : dataSegFuncPtrRelocs) funcPtrInSeg[s.dataIdx].push_back(s.byteOffset);
+    auto readI64 = [](const std::vector<std::byte>& b, size_t off) -> int64_t {
+        uint64_t v = 0;
+        for (size_t i = 0; i < 8 && off + i < b.size(); ++i)
+            v |= (uint64_t)(uint8_t)b[off + i] << (8 * i);
+        return (int64_t)v;
+    };
+    auto writeI64 = [](std::vector<std::byte>& b, size_t off, int64_t val) {
+        uint64_t v = (uint64_t)val;
+        for (size_t i = 0; i < 8 && off + i < b.size(); ++i)
+            b[off + i] = std::byte((v >> (8 * i)) & 0xFF);
+    };
+    for (size_t di = 0; di < in.datas.size(); ++di) {
+        WasmVM::WasmData copy = in.datas[di];
         if (copy.mode.memidx.has_value()) {
             auto idx = *copy.mode.memidx;
             if (idx < r.mem.size()) copy.mode.memidx = r.mem[idx];
@@ -575,6 +596,15 @@ void mergeOne(LinkContext& ctx, const WasmVM::WasmModule& in,
                 copy.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)(off + dataDelta)};
             }
         }
+        if (auto it = dataPtrInSeg.find((uint32_t)di); it != dataPtrInSeg.end())
+            for (uint32_t boff : it->second)
+                writeI64(copy.init, boff, readI64(copy.init, boff) + (int64_t)dataDelta);
+        if (auto it = funcPtrInSeg.find((uint32_t)di); it != funcPtrInSeg.end())
+            for (uint32_t boff : it->second) {
+                int64_t v = readI64(copy.init, boff);
+                int64_t slot = v & kFuncPtrSlotMask;
+                writeI64(copy.init, boff, kFuncPtrTag | (slot + (int64_t)slotDelta));
+            }
         out.datas.push_back(std::move(copy));
     }
 

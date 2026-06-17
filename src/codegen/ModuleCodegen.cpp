@@ -21,6 +21,9 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     funcTypeIdx_.clear();
     funcTableSlots_.clear();
     funcPtrRelocs_.clear();
+    dataSegDataRelocs_.clear();
+    dataSegFuncPtrRelocs_.clear();
+    pendingAddrSites_.clear();
     hasMain_ = false;
     mainHasArgv_ = false;
     mainFuncIndex_ = -1;
@@ -697,6 +700,208 @@ void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& 
     module_.funcs.push_back(wasmFunc);
 }
 
+// LANG-6.6-06: function-pointer tag, mirroring FunctionCodegen::kFuncPtrTag
+// (high nibble 0xF marks a tagged funcref-table slot). Kept in sync by value.
+static constexpr std::int64_t kModFuncPtrTag = (std::int64_t)0xF << 60;
+
+// Strip top-level cv-qualifier wrappers to reach the real type shape.
+static wvmcc::parser::TypeNodePtr unwrapQual(wvmcc::parser::TypeNodePtr t) {
+    using TK = wvmcc::parser::TypeNode::Kind;
+    while (t && t->kind == TK::Qualified && t->pointee) t = t->pointee;
+    return t;
+}
+
+// LANG-6.6-06: evaluate the address of a designator (the operand of `&`, or an
+// array/struct sub-object reached via [], ., *). Returns the mem[0] address and
+// the designated type, or a function designator. Nullopt if not a link-time
+// constant designator.
+std::optional<ModuleCodegen::Designator>
+ModuleCodegen::evalDesignator(const wvmcc::parser::ExprPtr& e) {
+    using K = wvmcc::parser::Expr::Kind;
+    using TK = wvmcc::parser::TypeNode::Kind;
+    if (!e) return std::nullopt;
+
+    if (e->kind == K::Ident) {
+        const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*e);
+        if (auto fs = symbolTable_.lookupFunction(id.name)) {
+            Designator d;
+            d.isFunc = true;
+            d.funcSlot = internFuncTableSlot(id.name);
+            return d;
+        }
+        if (auto sym = symbolTable_.lookup(id.name)) {
+            if (auto* gm = std::get_if<GlobalMem>(&*sym)) {
+                if (gm->isImport) return std::nullopt; // address resolved at link
+                Designator d;
+                d.addr = (std::int64_t)gm->address;
+                d.type = unwrapQual(gm->type);
+                return d;
+            }
+        }
+        return std::nullopt;
+    }
+
+    if (e->kind == K::Member) {
+        const auto& m = static_cast<const wvmcc::parser::MemberExpr&>(*e);
+        if (m.isArrow) return std::nullopt; // p->m needs a load — not constant
+        auto base = evalDesignator(m.base);
+        if (!base || base->isFunc || !base->type) return std::nullopt;
+        auto st = unwrapQual(base->type);
+        if (!st || (st->kind != TK::Struct && st->kind != TK::Union))
+            return std::nullopt;
+        auto fieldType = typeMap_.getFieldType(st, m.member);
+        if (!fieldType) return std::nullopt;
+        Designator d;
+        d.addr = base->addr + (std::int64_t)typeMap_.getFieldOffset(st, m.member);
+        d.type = unwrapQual(fieldType);
+        return d;
+    }
+
+    if (e->kind == K::Index) {
+        const auto& ix = static_cast<const wvmcc::parser::IndexExpr&>(*e);
+        // One operand designates an array (or address-constant pointer), the
+        // other is an integer constant.
+        const wvmcc::parser::ExprPtr* arrE = nullptr;
+        const wvmcc::parser::ExprPtr* idxE = nullptr;
+        auto baseDes = evalDesignator(ix.base);
+        if (baseDes && baseDes->type && unwrapQual(baseDes->type)->kind == TK::Array) {
+            arrE = &ix.base; idxE = &ix.index;
+        } else {
+            auto idxDes = evalDesignator(ix.index);
+            if (idxDes && idxDes->type && unwrapQual(idxDes->type)->kind == TK::Array) {
+                arrE = &ix.index; idxE = &ix.base;     // commuted: k[arr]
+            }
+        }
+        if (arrE) {
+            auto arr = evalDesignator(*arrE);
+            if (!arr || !arr->type) return std::nullopt;
+            auto at = unwrapQual(arr->type);
+            auto elem = at->element ? unwrapQual(at->element) : nullptr;
+            if (!elem) return std::nullopt;
+            auto k = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(*idxE);
+            if (!k) return std::nullopt;
+            Designator d;
+            d.addr = arr->addr + (std::int64_t)(*k) * (std::int64_t)typeMap_.byteSize(elem);
+            d.type = elem;
+            return d;
+        }
+        // Indexing an address-constant pointer value: `(arr + 1)[2]`, `p[2]`
+        // where p decays from an address constant.
+        if (auto ac = evalAddressConstInit(ix.base);
+            ac && !ac->isFuncPtr && ac->pointee) {
+            auto k = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(ix.index);
+            if (!k) return std::nullopt;
+            Designator d;
+            d.addr = ac->value + (std::int64_t)(*k) * (std::int64_t)typeMap_.byteSize(ac->pointee);
+            d.type = ac->pointee;
+            return d;
+        }
+        return std::nullopt;
+    }
+
+    if (e->kind == K::Unary) {
+        const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
+        if (u.op == "*") {
+            // *P designates the object P points at.
+            if (auto ac = evalAddressConstInit(u.rhs);
+                ac && !ac->isFuncPtr && ac->pointee) {
+                Designator d;
+                d.addr = ac->value;
+                d.type = ac->pointee;
+                return d;
+            }
+        }
+        return std::nullopt;
+    }
+
+    return std::nullopt;
+}
+
+// LANG-6.6-06: evaluate a pointer-valued address constant (6.6p9).
+std::optional<ModuleCodegen::AddrConst>
+ModuleCodegen::evalAddressConstInit(const wvmcc::parser::ExprPtr& e) {
+    using K = wvmcc::parser::Expr::Kind;
+    using TK = wvmcc::parser::TypeNode::Kind;
+    if (!e) return std::nullopt;
+
+    // A pointer cast preserves the address value (LP64: all pointers are i64).
+    if (e->kind == K::Cast) {
+        const auto& c = static_cast<const wvmcc::parser::CastExpr&>(*e);
+        return evalAddressConstInit(c.expr);
+    }
+
+    if (e->kind == K::Unary) {
+        const auto& u = static_cast<const wvmcc::parser::UnaryExpr&>(*e);
+        if (u.op == "&") {
+            auto d = evalDesignator(u.rhs);
+            if (!d) return std::nullopt;
+            AddrConst ac;
+            if (d->isFunc) {
+                ac.value = kModFuncPtrTag | (std::int64_t)d->funcSlot;
+                ac.isFuncPtr = true;
+            } else {
+                ac.value = d->addr;
+                ac.pointee = d->type;
+            }
+            return ac;
+        }
+        if (u.op == "+") return evalAddressConstInit(u.rhs);
+        return std::nullopt;
+    }
+
+    if (e->kind == K::Ident) {
+        const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*e);
+        if (auto fs = symbolTable_.lookupFunction(id.name)) {
+            AddrConst ac;
+            ac.value = kModFuncPtrTag | (std::int64_t)internFuncTableSlot(id.name);
+            ac.isFuncPtr = true;
+            return ac;
+        }
+        if (auto sym = symbolTable_.lookup(id.name)) {
+            if (auto* gm = std::get_if<GlobalMem>(&*sym)) {
+                if (gm->isImport) return std::nullopt;
+                auto t = unwrapQual(gm->type);
+                if (t && t->kind == TK::Array) {       // array-to-pointer decay
+                    AddrConst ac;
+                    ac.value = (std::int64_t)gm->address;
+                    ac.pointee = t->element ? unwrapQual(t->element) : nullptr;
+                    return ac;
+                }
+            }
+        }
+        return std::nullopt;
+    }
+
+    // Pointer ± integer constant (array decay base or another address const).
+    if (e->kind == K::Binary) {
+        const auto& b = static_cast<const wvmcc::parser::BinaryExpr&>(*e);
+        if (b.op != "+" && b.op != "-") return std::nullopt;
+        // Identify the pointer operand and the integer operand.
+        auto lp = evalAddressConstInit(b.lhs);
+        if (lp && !lp->isFuncPtr && lp->pointee) {
+            auto k = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(b.rhs);
+            if (!k) return std::nullopt;
+            std::int64_t scaled = (std::int64_t)(*k) * (std::int64_t)typeMap_.byteSize(lp->pointee);
+            AddrConst ac = *lp;
+            ac.value = lp->value + (b.op == "+" ? scaled : -scaled);
+            return ac;
+        }
+        if (b.op == "+") { // n + ptr
+            auto rp = evalAddressConstInit(b.rhs);
+            if (rp && !rp->isFuncPtr && rp->pointee) {
+                auto k = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(b.lhs);
+                if (!k) return std::nullopt;
+                AddrConst ac = *rp;
+                ac.value = rp->value + (std::int64_t)(*k) * (std::int64_t)typeMap_.byteSize(rp->pointee);
+                return ac;
+            }
+        }
+        return std::nullopt;
+    }
+
+    return std::nullopt;
+}
+
 // #77: encode a constant scalar initializer expression into `out` (little-
 // endian, `size` bytes). Returns false if the initializer is not a simple
 // compile-time constant we can encode (caller then leaves storage zeroed).
@@ -759,11 +964,23 @@ bool ModuleCodegen::encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
             for (auto s : t->simple)
                 if (s == STS::Float || s == STS::Double) isFloat = true;
         }
-        std::vector<std::byte> tmp(sz, std::byte{0});
-        if (!encodeScalarConstInit(init->expr, sz, isFloat, tmp)) return false;
         if (base + sz > out.size()) return false;
-        for (size_t i = 0; i < sz; ++i) out[base + i] = tmp[i];
-        return true;
+        std::vector<std::byte> tmp(sz, std::byte{0});
+        if (encodeScalarConstInit(init->expr, sz, isFloat, tmp)) {
+            for (size_t i = 0; i < sz; ++i) out[base + i] = tmp[i];
+            return true;
+        }
+        // LANG-6.6-06: address constant (&obj, array/function decay, &arr[k],
+        // arr + k, &s.m). Bake the link-time i64 value and record the site so
+        // the linker rebases it when this TU's data / funcref table is merged.
+        if (auto ac = evalAddressConstInit(init->expr)) {
+            auto uv = (std::uint64_t)ac->value;
+            for (size_t i = 0; i < sz && i < 8; ++i)
+                out[base + i] = std::byte((uv >> (8 * i)) & 0xFF);
+            pendingAddrSites_.emplace_back(base, ac->isFuncPtr);
+            return true;
+        }
+        return false;
     }
 
     // Braced list initializer.
@@ -939,18 +1156,29 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
     const auto& init = *decl->initializer;
 
     std::vector<std::byte> bytes(size, std::byte{0});
-    if (!encodeConstInit(typeNode, init, 0, bytes)) return;
+    pendingAddrSites_.clear();
+    if (!encodeConstInit(typeNode, init, 0, bytes)) { pendingAddrSites_.clear(); return; }
     // Skip an all-zero segment (memory is already zeroed).
     bool allZero = true;
     for (auto b : bytes) if (b != std::byte{0}) { allZero = false; break; }
-    if (allZero) return;
+    if (allZero) { pendingAddrSites_.clear(); return; }
 
     WasmVM::WasmData seg;
     seg.mode.type = WasmVM::WasmData::DataMode::Mode::active;
     seg.mode.memidx = 0;
     seg.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
     seg.init = std::move(bytes);
+    size_t dataIdx = module_.datas.size();
     module_.datas.push_back(std::move(seg));
+
+    // LANG-6.6-06: register the address-constant sites encoded into this
+    // segment so the linker rebases them. byteOffset is relative to base=0,
+    // which is the segment's start (seg.init == the object's bytes).
+    for (const auto& [boff, isFunc] : pendingAddrSites_) {
+        if (isFunc) dataSegFuncPtrRelocs_.push_back({dataIdx, boff});
+        else        dataSegDataRelocs_.push_back({dataIdx, boff});
+    }
+    pendingAddrSites_.clear();
 }
 
 void ModuleCodegen::emitStringLiterals() {

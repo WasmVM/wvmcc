@@ -61,6 +61,14 @@ void emitCustomSection(std::ostream& os, const std::string& name,
 
 } // namespace
 
+// NOTE (LANG-6.6-06): address-constant pointers baked into data segments
+// (ModuleCodegen::getDataSegDataRelocs / getDataSegFuncPtrRelocs) are NOT yet
+// serialized here. The single-invocation driver path carries them straight to
+// the linker via LinkInput::InMemoryModule, so `wvmcc a.c b.c -lc -o out` and
+// the standard suite work. Separately-compiled objects (`-c` then link from
+// disk/archive) would need reloc.DATAPTR / reloc.DATAFP custom sections plus
+// matching ArchiveReader parsing; deferred until a `-c` workflow exercises
+// file-scope address-constant initializers (libc currently uses none).
 void appendRelocSections(std::ostream& os, const ModuleCodegen& cg) {
     const auto& syms  = cg.getDataSymbols();
     const auto& relocs = cg.getRelocations();
