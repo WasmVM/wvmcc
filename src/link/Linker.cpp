@@ -143,7 +143,8 @@ void phaseMerge(LinkContext& ctx) {
     for (const auto& in : ctx.inputs) {
         if (auto* mm = std::get_if<LinkInput::InMemoryModule>(&in.source)) {
             merge::mergeOne(ctx, mm->module, mm->origin, mm->dataRelocs,
-                            mm->funcPtrRelocs);
+                            mm->funcPtrRelocs, mm->dataSegDataRelocs,
+                            mm->dataSegFuncPtrRelocs);
             if (ctx.hasErrors()) return;
             std::ostringstream ss;
             ss << "  merged " << mm->origin

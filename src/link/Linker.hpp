@@ -21,6 +21,18 @@ struct DataPtrSite {
     uint32_t instrIdx;
 };
 
+// LANG-6.6-06: an absolute pointer baked into a *data segment*'s bytes (an
+// address-constant initializer, e.g. `static int *p = &obj;`). Unlike
+// DataPtrSite (a code-located i64.const), this is a little-endian i64 inside a
+// `module.datas` payload: `dataIdx` indexes the input's data segments,
+// `byteOffset` is the i64's offset within that segment's `init`. Data-address
+// sites are rebased by the TU's data delta; funcptr-slot sites by its
+// table-slot delta.
+struct DataSegPtrSite {
+    uint32_t dataIdx;
+    uint32_t byteOffset;
+};
+
 // One input to the linker. Either an in-memory module (a freshly compiled
 // user TU) or an on-disk path to a wasmvm-ar archive ("libX.a").
 struct LinkInput {
@@ -31,6 +43,11 @@ struct LinkInput {
         // #79: function-pointer sites — `i64.const (tag | slot)` constants whose
         // embedded funcref-table slot is rebased when per-TU tables are merged.
         std::vector<DataPtrSite> funcPtrRelocs;
+        // LANG-6.6-06: address-constant pointers baked into data segments.
+        // `dataSegDataRelocs` shift by the data delta; `dataSegFuncPtrRelocs`
+        // (funcptr-slot bytes) shift by the table-slot delta.
+        std::vector<DataSegPtrSite> dataSegDataRelocs;
+        std::vector<DataSegPtrSite> dataSegFuncPtrRelocs;
     };
     struct ArchivePath {
         std::string path; // resolved filesystem path

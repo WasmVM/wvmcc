@@ -271,6 +271,9 @@ struct CompileResult {
     WasmVM::WasmModule module;
     std::vector<wvmcc::link::DataPtrSite> dataRelocs;
     std::vector<wvmcc::link::DataPtrSite> funcPtrRelocs;
+    // LANG-6.6-06: address-constant pointers baked into data segments.
+    std::vector<wvmcc::link::DataSegPtrSite> dataSegDataRelocs;
+    std::vector<wvmcc::link::DataSegPtrSite> dataSegFuncPtrRelocs;
 };
 
 // Compile a single source TU (preprocess → parse → semantic → codegen) into a
@@ -336,6 +339,15 @@ static CompileResult compileSource(const std::string& path,
     for (const auto& rel : codegen.getFuncPtrRelocs()) {
         result.funcPtrRelocs.push_back(
             {(uint32_t)rel.codeFuncIdx, (uint32_t)rel.instrIdx});
+    }
+    // LANG-6.6-06: address-constant pointers baked into data segments.
+    for (const auto& rel : codegen.getDataSegDataRelocs()) {
+        result.dataSegDataRelocs.push_back(
+            {(uint32_t)rel.dataIndex, (uint32_t)rel.byteOffset});
+    }
+    for (const auto& rel : codegen.getDataSegFuncPtrRelocs()) {
+        result.dataSegFuncPtrRelocs.push_back(
+            {(uint32_t)rel.dataIndex, (uint32_t)rel.byteOffset});
     }
     result.ok = true;
     return result;
@@ -521,7 +533,8 @@ int main(int argc, char** argv) {
         if (!cr.ok) return 1;
         wvmcc::link::LinkInput::InMemoryModule mod{
             std::move(cr.module), input, std::move(cr.dataRelocs),
-            std::move(cr.funcPtrRelocs)};
+            std::move(cr.funcPtrRelocs), std::move(cr.dataSegDataRelocs),
+            std::move(cr.dataSegFuncPtrRelocs)};
         wvmcc::link::LinkInput in;
         in.source = std::move(mod);
         linkInputs.push_back(std::move(in));
