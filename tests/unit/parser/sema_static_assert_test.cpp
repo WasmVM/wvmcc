@@ -91,6 +91,20 @@ int main() {
         { "_Static_assert(18446744073709551615ULL > 0, \"u max\");\n", "" },
         { "_Static_assert((unsigned)-1 > 0, \"cast unsigned\");\n", "" },
         { "_Static_assert(-1 < 0, \"signed still works\");\n", "" },
+        // issue #81 residuals: cast operands under multiplicative operators.
+        { "_Static_assert((int)6 / (int)2 == 3, \"mult cast div\");\n", "" },
+        { "_Static_assert((int)7 % (int)3 == 1, \"mult cast mod\");\n", "" },
+        // issue #81 residual: sizeof of an *expression* (object), resolved via
+        // the semantic type resolver.
+        { "int v81; _Static_assert(sizeof(v81) == 4, \"sizeof expr\");\n", "" },
+        // issue #81 residual: _Generic selection in a constant expression.
+        { "_Static_assert(_Generic(0, int: 1, default: 0) == 1, \"generic int\");\n", "" },
+        // issue #81: a literal's resolved rank drives _Generic selection, so
+        // `0L` is long and `0LL` is long long (not int).
+        { "_Static_assert(_Generic(0L, long: 1, int: 2, default: 0) == 1, \"generic long\");\n", "" },
+        { "_Static_assert(_Generic(0LL, long long: 1, int: 2, default: 0) == 1, \"generic long long\");\n", "" },
+        { "_Static_assert(_Generic(0U, unsigned: 1, int: 2, default: 0) == 1, \"generic unsigned\");\n", "" },
+        { "_Static_assert(_Generic(0UL, unsigned long: 1, default: 0) == 1, \"generic ulong\");\n", "" },
     };
 
     for (auto &c : cases) {

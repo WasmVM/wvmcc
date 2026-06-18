@@ -277,6 +277,12 @@ struct IntegerLiteral : Expr {
     // through to the constant-expression evaluator so comparisons / division /
     // shifts of full-width unsigned constants use unsigned semantics.
     bool isUnsigned{false};
+    // Integer-conversion rank of the literal's resolved type (l/L → long,
+    // ll/LL → long long, or a value too large for a narrower candidate). Carried
+    // so type-sensitive constant contexts — notably `_Generic` selection — see
+    // the literal's real type (`0L` is `long`, not `int`). 6.4.4.1p5.
+    bool isLong{false};
+    bool isLongLong{false};
 };
 struct StringLiteral : Expr { std::string value; };
 struct CharLiteral : Expr { char value; };

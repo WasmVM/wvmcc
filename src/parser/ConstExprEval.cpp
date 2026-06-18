@@ -401,7 +401,17 @@ static TypeNodePtr inferExprType(const ExprPtr &e) {
     switch (e->kind) {
         case Expr::Kind::Integer: {
             auto il = std::static_pointer_cast<IntegerLiteral>(e);
-            return il->isUnsigned ? mkBuiltin({STS::Unsigned}) : mkBuiltin({STS::Int});
+            // Reflect the literal's resolved rank (suffix or magnitude) so e.g.
+            // `_Generic(0L, long: …)` selects the `long` association.
+            std::vector<STS> specs;
+            if (il->isUnsigned) specs.push_back(STS::Unsigned);
+            if (il->isLongLong) { specs.push_back(STS::Long); specs.push_back(STS::Long); }
+            else if (il->isLong) specs.push_back(STS::Long);
+            if (!il->isUnsigned && specs.empty()) specs.push_back(STS::Int);
+            auto tn = std::make_shared<TypeNode>();
+            tn->kind = TypeNode::Kind::Builtin;
+            tn->simple = std::move(specs);
+            return tn;
         }
         case Expr::Kind::Char:
             return mkBuiltin({STS::Int}); // a character constant has type int (6.4.4.4p10)

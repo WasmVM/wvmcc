@@ -1947,6 +1947,20 @@ ExprPtr Parser::parsePrimary() {
                         (itok->info.flags & IntegerInfo::FLAG_UNSIGNED) != 0;
                     break;
             }
+            // Carry the resolved integer-conversion rank so type-sensitive
+            // constant contexts (e.g. `_Generic` selection) see `0L` as long.
+            switch (itok->info.resolved) {
+                case RT::Long:
+                case RT::UnsignedLong:
+                    il->isLong = true;
+                    break;
+                case RT::LongLong:
+                case RT::UnsignedLongLong:
+                    il->isLongLong = true;
+                    break;
+                default:
+                    break;
+            }
         } else {
             try { il->value = std::stoll(il->raw, nullptr, 0); } catch (...) { il->value = 0; }
         }
