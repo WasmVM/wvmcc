@@ -20,6 +20,11 @@ public:
     // Consume and return next Token
     std::optional<Token> next();
 
+    // Monotonic count of tokens consumed via next(). A reliable progress
+    // measure for parser loops (source offsets are not unique across macro
+    // expansion / includes, so they cannot be used to detect a stalled loop).
+    std::size_t consumed() const { return consumed_; }
+
     // Skip contiguous whitespace and newline tokens
     void skipWhitespaceAndNewlines();
 
@@ -39,6 +44,7 @@ public:
 private:
     wvmcc::Preprocessor* pp{nullptr};
     std::optional<wvmcc::PPToken> la;
+    std::size_t consumed_{0};
 
     void refillLA();
 };

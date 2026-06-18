@@ -229,6 +229,7 @@ std::optional<Token> Lexer::next() {
     if (!ppTok) return std::nullopt;
     auto tk = classify_local(*ppTok);
     if (tk.kind() == TokenKind::EndOfFile) return std::nullopt;
+    ++consumed_;
     return tk;
 }
 

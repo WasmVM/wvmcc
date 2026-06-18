@@ -1404,8 +1404,31 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
     ++blockDepth;
     struct DepthGuard { int &d; ~DepthGuard() { --d; } } _depthGuard{blockDepth};
     std::vector<BlockItemPtr> body;
+    // Forward-progress guard (#92): some malformed or not-yet-supported
+    // constructs cause a statement-parsing path to return without consuming any
+    // token (e.g. a stray operator left after a partially-parsed expression).
+    // The loop would then re-attempt the same token forever and hang the
+    // compiler. Track the lexer's consumed-token count across iterations; if an
+    // iteration made no progress, emit a single diagnostic and skip a token so
+    // parsing always terminates. (Source offsets can't be used here — they are
+    // not unique across macro expansion / includes.)
+    std::size_t prevConsumed = lex.consumed();
+    bool sawPrev = false;
     while (auto p = lex.peek()) {
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
+
+        if (sawPrev && lex.consumed() == prevConsumed) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "unexpected token '" + p->lexeme() + "'";
+            d.span = p->span;
+            diagnostics.push_back(std::move(d));
+            lex.next();
+            sawPrev = false;
+            continue;
+        }
+        prevConsumed = lex.consumed();
+        sawPrev = true;
 
         // Nested compound statement (block, 6.8.2). Without this the leading '{'
         // falls through to the expression-statement path below, which cannot
@@ -1620,6 +1643,19 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                         be->kind = Expr::Kind::Binary; be->span = lhs->span;
                         lhs = be;
                     }
+                }
+                // Comma operator (6.5.17): the identifier-started expression may
+                // be the first operand of a comma expression, e.g.
+                // `n = 0, f(), n += 3;`. Without this the trailing
+                // `, assignment-expression` items are left unconsumed.
+                while (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",") {
+                    lex.next();
+                    ExprPtr rhs = parseAssignmentExpression();
+                    auto be = make_ast<BinaryExpr>();
+                    be->op = ","; be->lhs = lhs; be->rhs = rhs;
+                    be->kind = Expr::Kind::Binary; be->span = lhs->span;
+                    if (rhs) be->span.end = rhs->span.end;
+                    lhs = be;
                 }
                 ExprPtr finalExpr = lhs;
                 if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
