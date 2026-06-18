@@ -319,6 +319,46 @@ static int test_token_pasting_numbers() {
     return 0;
 }
 
+// Argument prescan (C 6.10.3.1p1): a parameter not preceded by # / ## and not
+// followed by ## is replaced by its argument *after* the argument's own macros
+// are expanded. The classic case is two-level stringization: STR(V) stringizes
+// V verbatim (V is a # operand → no prescan), while XSTR(V) expands V to 42
+// first and then stringizes → "42". A ## operand must still use the raw
+// argument: CAT(X, 2) pastes to X2, not 12.
+static int test_argument_prescan() {
+    using namespace wvmcc;
+    const std::string srcName = "temp_macro_prescan.c";
+
+    {
+        std::ofstream ofs(srcName);
+        ofs << "#define STR(x) #x\n";
+        ofs << "#define XSTR(x) STR(x)\n";
+        ofs << "#define V 42\n";
+        ofs << "#define CAT(a, b) a ## b\n";
+        ofs << "#define X 1\n";
+        ofs << "const char* direct = STR(V);\n";   // # operand: raw -> "V"
+        ofs << "const char* nested = XSTR(V);\n";   // prescan: V -> 42 -> "42"
+        ofs << "int pasted = CAT(X, 2);\n";         // ## operand: raw -> X2
+    }
+
+    std::vector<wvmcc::PPToken> tokens;
+    if (!preprocess_collect_tokens(srcName, tokens, "test_argument_prescan")) return 1;
+    bool foundDirectV = false, foundNested42 = false, foundPastedX2 = false;
+    for (const auto& t : tokens) {
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme == "\"V\"") foundDirectV = true;
+        if (t.kind == wvmcc::PPTokenKind::StringLiteral && t.lexeme == "\"42\"") foundNested42 = true;
+        if (t.kind == wvmcc::PPTokenKind::Identifier && t.lexeme == "X2") foundPastedX2 = true;
+    }
+    if (!foundDirectV || !foundNested42 || !foundPastedX2) {
+        std::cerr << "test_argument_prescan: directV=" << foundDirectV
+                  << " nested42=" << foundNested42 << " pastedX2=" << foundPastedX2 << "\n";
+        std::cerr << "tokens:\n";
+        for (const auto& t : tokens) std::cerr << "  " << t.lexeme << "\n";
+        return 2;
+    }
+    return 0;
+}
+
 // Test 11: Predefined macros
 static int test_predefined_macros() {
     using namespace wvmcc;
@@ -591,6 +631,12 @@ int main() {
     result = test_token_pasting_numbers();
     if (result != 0) {
         std::cerr << "test_token_pasting_numbers failed with code " << result << "\n";
+        return result;
+    }
+
+    result = test_argument_prescan();
+    if (result != 0) {
+        std::cerr << "test_argument_prescan failed with code " << result << "\n";
         return result;
     }
 

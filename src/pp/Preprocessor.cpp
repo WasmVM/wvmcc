@@ -1103,33 +1103,64 @@ bool Preprocessor::tryProcessStringification(const Macro* m, size_t& rIdx,
     return true;
 }
 
-bool Preprocessor::tryProcessVarArgs(const Macro* m, const PPToken& repl,
+// True if the replacement-list token at `rIdx` is an operand of a `##` paste
+// (its nearest significant neighbour on either side is `##`). C 6.10.3.1p1: a
+// parameter that is such an operand is substituted by its *unexpanded* argument;
+// otherwise the argument is macro-expanded first.
+static bool isPasteAdjacent(const Macro* m, size_t rIdx) {
+    const auto& repl = m->replacement;
+    long p = static_cast<long>(rIdx) - 1;
+    while (p >= 0 && repl[p].kind == PPTokenKind::Whitespace) --p;
+    if (p >= 0 && repl[p].kind == PPTokenKind::Punctuator && repl[p].lexeme == "##") return true;
+    size_t n = rIdx + 1;
+    while (n < repl.size() && repl[n].kind == PPTokenKind::Whitespace) ++n;
+    if (n < repl.size() && repl[n].kind == PPTokenKind::Punctuator && repl[n].lexeme == "##") return true;
+    return false;
+}
+
+// Append `argTokens` to `substituted`, macro-expanding them first unless this
+// parameter is a `##` operand (which uses the raw argument), then painting the
+// result with `m` so the outer macro is not re-entered during the later rescan.
+void Preprocessor::appendSubstitutedArgument(const Macro* m, bool pasteAdjacent,
+                                             const std::vector<PPToken>& argTokens,
+                                             std::vector<PPToken>& substituted) {
+    if (pasteAdjacent) {
+        for (auto arg : argTokens) {
+            arg.paint(m->name);
+            substituted.push_back(arg);
+        }
+        return;
+    }
+    // C 6.10.3.1p1: replace the parameter with its argument "after all macros
+    // contained therein have been expanded" (argument prescan).
+    auto expanded = expandMacros(argTokens);
+    for (auto arg : expanded) {
+        arg.paint(m->name);
+        substituted.push_back(arg);
+    }
+}
+
+bool Preprocessor::tryProcessVarArgs(const Macro* m, const PPToken& repl, bool pasteAdjacent,
                                      const std::vector<std::vector<PPToken>>& args,
                                      std::vector<PPToken>& substituted) {
-    if (!m->variadic || repl.kind != PPTokenKind::Identifier || 
+    if (!m->variadic || repl.kind != PPTokenKind::Identifier ||
         repl.lexeme != "__VA_ARGS__") {
         return false;
     }
-    
+
     if (args.size() > m->params.size()) {
-        for (auto vaToken : args[m->params.size()]) {
-            vaToken.paint(m->name);
-            substituted.push_back(vaToken);
-        }
+        appendSubstitutedArgument(m, pasteAdjacent, args[m->params.size()], substituted);
     }
     return true;
 }
 
-bool Preprocessor::tryProcessRegularParam(const Macro* m, const PPToken& repl,
+bool Preprocessor::tryProcessRegularParam(const Macro* m, const PPToken& repl, bool pasteAdjacent,
                                           const std::vector<std::vector<PPToken>>& args,
                                           std::vector<PPToken>& substituted) {
     for (size_t pIdx = 0; pIdx < m->params.size(); ++pIdx) {
         if (repl.kind == PPTokenKind::Identifier && repl.lexeme == m->params[pIdx]) {
             if (pIdx < args.size()) {
-                for (auto arg : args[pIdx]) {
-                    arg.paint(m->name);
-                    substituted.push_back(arg);
-                }
+                appendSubstitutedArgument(m, pasteAdjacent, args[pIdx], substituted);
             }
             return true;
         }
@@ -1146,8 +1177,9 @@ std::vector<PPToken> Preprocessor::substituteParameters(
         const auto& repl = m->replacement[rIdx];
         
         if (tryProcessStringification(m, rIdx, args, substituted)) continue;
-        if (tryProcessVarArgs(m, repl, args, substituted)) continue;
-        if (tryProcessRegularParam(m, repl, args, substituted)) continue;
+        bool pasteAdjacent = isPasteAdjacent(m, rIdx);
+        if (tryProcessVarArgs(m, repl, pasteAdjacent, args, substituted)) continue;
+        if (tryProcessRegularParam(m, repl, pasteAdjacent, args, substituted)) continue;
         
         // Not a parameter - copy token and paint it
         auto replToken = repl;
