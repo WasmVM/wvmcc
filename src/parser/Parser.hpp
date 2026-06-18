@@ -116,9 +116,17 @@ private:
     // Lets such typedef-names resolve to their builtin type in constant
     // expressions (sizeof/_Alignof/casts/_Generic) parsed before semantics.
     std::unordered_map<std::string, std::vector<DeclarationSpecifiers::SimpleTypeSpecifier>> typedef_simple{};
+    // typedef-name -> the struct/union specifier it aliases (for a bare
+    // `typedef struct {...} T;`). Lets `sizeof(T)` / `_Alignof(T)` resolve the
+    // aggregate's layout inside a constant expression. Only consulted while
+    // parsing a required constant expression (constExprDepth > 0), so the
+    // general declaration path keeps the TypedefName form that codegen /
+    // semantic analysis expect.
+    std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> typedef_struct{};
     // Record `name` as a typedef; if its declarator is a plain identifier and
     // its specifiers name a scalar type (directly or via another simple
-    // typedef), remember the underlying simple specifiers in typedef_simple.
+    // typedef), remember the underlying simple specifiers in typedef_simple;
+    // if it aliases a struct/union, remember that in typedef_struct.
     void recordTypedef(const std::string &name, const DeclarationSpecifiers &specs, const DeclaratorPtr &declr);
     // Build a TypeNode for a type-name's base specifiers (Simple/struct/union/
     // enum/typedef-name) wrapped in `pointerDepth` pointer layers. Used by the
@@ -135,6 +143,18 @@ private:
     // Block nesting depth (0 = file scope). Enum-constant folding is limited to
     // file scope, where the name cannot be shadowed by a local variable.
     int blockDepth{0};
+    // Nonzero while parsing a required constant-expression (case label,
+    // _Static_assert controlling expression, array bound, bit-field width).
+    // In such a context an identifier naming an enumeration constant must be
+    // that constant — a local variable cannot appear in a constant expression —
+    // so folding it is safe even inside a function body. RAII via
+    // ConstExprContext below.
+    int constExprDepth{0};
+    struct ConstExprContext {
+        Parser &p;
+        explicit ConstExprContext(Parser &parser) : p(parser) { ++p.constExprDepth; }
+        ~ConstExprContext() { --p.constExprDepth; }
+    };
     // labels seen in the current function (to enforce uniqueness)
     std::unordered_set<std::string> labels_in_current_function{};
     // gotos recorded in the current function (label name + span)

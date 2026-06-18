@@ -20,17 +20,8 @@
 #define _F_UNBUF    32
 #define _F_INITED   64
 
-struct FILE {
-    int fd;
-    int flags;
-    char *wbuf;
-    int wbuf_size;
-    int wbuf_pos;
-    char *rbuf;
-    int rbuf_size;
-    int rbuf_pos;
-    int rbuf_end;
-};
+// `struct FILE` is now defined in <stdio.h> (a complete, sizeable object type);
+// it is included above. The `_F_*` flag bits remain private to this file.
 
 // The backing FILE objects for the stdin/stdout/stderr macros (see stdio.h).
 // External linkage so other TUs (printf, …) reach them via the macro's

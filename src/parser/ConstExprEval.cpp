@@ -27,6 +27,13 @@ static ConstExprEvaluator::TypeResolver *g_typeResolver = nullptr;
 static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, bool wantAlign);
 static long long typeNodeSize(const TypeNodePtr &t, bool wantAlign);
 
+// Forward declarations for the mutually-recursive constant evaluators.
+static std::optional<ICEValue> evalICE(const ExprPtr &e);
+// Fold a floating-point constant expression to a double, or nullopt if it is
+// not a constant arithmetic expression. Used for the relational/equality
+// folding relaxation (see evalICE's Binary case).
+static std::optional<double> foldDouble(const ExprPtr &e);
+
 // LP64 scalar sizing, mirroring codegen/TypeMap (kept self-contained so the
 // parser layer does not depend on codegen). `wantAlign` selects alignment
 // (which equals the size for these scalar types) over byte size.
@@ -493,6 +500,63 @@ static TypeNodePtr inferExprType(const ExprPtr &e) {
     }
 }
 
+// Fold an arithmetic constant expression to a double. Handles floating and
+// integer constants and the arithmetic operators; returns nullopt for anything
+// non-constant. This supports comparing floating constants in an ICE (see the
+// relational branch of evalICE) — a wvmcc relaxation of the strict 6.6p6 rule
+// (which only permits floating constants as the immediate operand of a cast),
+// matching what the standard test suite expects.
+static std::optional<double> foldDouble(const ExprPtr &e) {
+    if (!e) return std::nullopt;
+    switch (e->kind) {
+        case Expr::Kind::Float:
+            return std::static_pointer_cast<FloatLiteral>(e)->value;
+        case Expr::Kind::Integer: {
+            auto il = std::static_pointer_cast<IntegerLiteral>(e);
+            return il->isUnsigned ? (double)(unsigned long long)il->value
+                                  : (double)il->value;
+        }
+        case Expr::Kind::Char:
+            return (double)std::static_pointer_cast<CharLiteral>(e)->value;
+        case Expr::Kind::Unary: {
+            auto ue = std::static_pointer_cast<UnaryExpr>(e);
+            auto v = foldDouble(ue->rhs);
+            if (!v) return std::nullopt;
+            if (ue->op == "+") return *v;
+            if (ue->op == "-") return -*v;
+            return std::nullopt;
+        }
+        case Expr::Kind::Cast: {
+            auto ce = std::static_pointer_cast<CastExpr>(e);
+            Scalar s = canonScalarOf(ce->type);
+            // Only a cast to a floating type stays in the floating domain; a
+            // cast to an integer type is handled by the integer evaluator.
+            if (s == Scalar::Float || s == Scalar::Double || s == Scalar::LongDouble)
+                return foldDouble(ce->expr);
+            return std::nullopt;
+        }
+        case Expr::Kind::Binary: {
+            auto be = std::static_pointer_cast<BinaryExpr>(e);
+            auto l = foldDouble(be->lhs);
+            auto r = foldDouble(be->rhs);
+            if (!l || !r) return std::nullopt;
+            if (be->op == "+") return *l + *r;
+            if (be->op == "-") return *l - *r;
+            if (be->op == "*") return *l * *r;
+            if (be->op == "/") { if (*r == 0.0) return std::nullopt; return *l / *r; }
+            return std::nullopt;
+        }
+        case Expr::Kind::Ternary: {
+            auto te = std::static_pointer_cast<TernaryExpr>(e);
+            auto c = evalICE(te->cond);
+            if (!c) return std::nullopt;
+            return c->v ? foldDouble(te->thenExpr) : foldDouble(te->elseExpr);
+        }
+        default:
+            return std::nullopt;
+    }
+}
+
 // Core recursive evaluator returning the signed/unsigned-tagged value.
 static std::optional<ICEValue> evalICE(const ExprPtr &e) {
     if (!e) return std::nullopt;
@@ -591,9 +655,46 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
             static const char *assignOps[] = {"=","*=","/=","%=","+=","-=","<<=",">>=","&=","^=","|="};
             for (auto aop : assignOps) if (be->op == aop) return std::nullopt;
 
-            // Short-circuit operators: only the left operand need be a constant
-            // when it already decides the result, but for ICE purposes both
-            // operands must be ICEs (6.6), so evaluate both.
+            // Short-circuit operators (6.6p3 / footnote): a subexpression that is
+            // not evaluated need not be a constant expression, so the right
+            // operand of `||`/`&&` is only required to be an ICE when the left
+            // operand does not already decide the result. This makes e.g.
+            // `2 || 1/0` a valid ICE with value 1 (the `1/0` is never evaluated).
+            if (be->op == "||" || be->op == "&&") {
+                auto L = evalICE(be->lhs);
+                if (!L.has_value()) return std::nullopt;
+                const bool lTrue = (L->v != 0);
+                if (be->op == "||" && lTrue)  return ICEValue{ 1, false };
+                if (be->op == "&&" && !lTrue) return ICEValue{ 0, false };
+                auto R = evalICE(be->rhs);
+                if (!R.has_value()) return std::nullopt;
+                return ICEValue{ (long long)(R->v != 0), false };
+            }
+
+            // Relational / equality on floating constants: when the operands are
+            // not integer-evaluable, fall back to a double fold so e.g.
+            // `FLT_EPSILON > 0` and `1.0 + DBL_EPSILON > 1.0` are constant. The
+            // result of a comparison is always int, so it is a valid ICE value.
+            {
+                static const char *relOps[] = {"<",">","<=",">=","==","!="};
+                bool isRel = false;
+                for (auto o : relOps) if (be->op == o) { isRel = true; break; }
+                if (isRel && !(evalICE(be->lhs) && evalICE(be->rhs))) {
+                    auto lf = foldDouble(be->lhs);
+                    auto rf = foldDouble(be->rhs);
+                    if (!lf || !rf) return std::nullopt;
+                    double a = *lf, b = *rf;
+                    bool res;
+                    if (be->op == "<") res = a < b;
+                    else if (be->op == ">") res = a > b;
+                    else if (be->op == "<=") res = a <= b;
+                    else if (be->op == ">=") res = a >= b;
+                    else if (be->op == "==") res = a == b;
+                    else res = a != b;
+                    return ICEValue{ (long long)res, false };
+                }
+            }
+
             auto L = evalICE(be->lhs);
             auto R = evalICE(be->rhs);
             if (!L.has_value() || !R.has_value()) return std::nullopt;
@@ -638,8 +739,7 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
                 return ICEValue{ (long long)(resU ? (unsigned long long)l >= (unsigned long long)r : l >= r), false };
             if (be->op == "==") return ICEValue{ (long long)(l == r), false };
             if (be->op == "!=") return ICEValue{ (long long)(l != r), false };
-            if (be->op == "&&") return ICEValue{ (long long)(l && r), false };
-            if (be->op == "||") return ICEValue{ (long long)(l || r), false };
+            // `&&` / `||` handled above with short-circuit semantics.
             return std::nullopt;
         }
         case Expr::Kind::Ternary: {
