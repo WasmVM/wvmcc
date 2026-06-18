@@ -154,10 +154,13 @@ private:
     int findParamIndex(const Macro* m, const PPToken& tok, bool& isVarargs);
     std::vector<PPToken> getArgumentToStringify(const Macro* m, int paramIdx, bool isVarargs,
                                                const std::vector<std::vector<PPToken>>& args);
-    bool tryProcessVarArgs(const Macro* m, const PPToken& repl,
+    void appendSubstitutedArgument(const Macro* m, bool pasteAdjacent,
+                                   const std::vector<PPToken>& argTokens,
+                                   std::vector<PPToken>& substituted);
+    bool tryProcessVarArgs(const Macro* m, const PPToken& repl, bool pasteAdjacent,
                           const std::vector<std::vector<PPToken>>& args,
                           std::vector<PPToken>& substituted);
-    bool tryProcessRegularParam(const Macro* m, const PPToken& repl,
+    bool tryProcessRegularParam(const Macro* m, const PPToken& repl, bool pasteAdjacent,
                                const std::vector<std::vector<PPToken>>& args,
                                std::vector<PPToken>& substituted);
     std::vector<PPToken> handleTokenPasting(const std::vector<PPToken>& tokens);
