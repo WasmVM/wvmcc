@@ -160,7 +160,7 @@ public:
     // stack (false for a void-returning function pointer).
     bool indirectCallLeavesValue(const wvmcc::parser::ExprPtr& callee);
 
-    void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);
+    void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr, bool needLValue = false);
 
     // Copy `size` bytes from the address in `srcAddrLocal` (memory `srcMemidx`)
     // to the address in `dstAddrLocal` (memory `dstMemidx`), in 8/4/2/1-byte
