@@ -44,31 +44,41 @@ std::optional<PPToken> Preprocessor::next() {
     if (outBuffer.empty()) return std::nullopt;
     auto t = outBuffer.front(); outBuffer.pop_front();
 
-    // If this is a string literal, perform Phase 6 adjacent literal concatenation
+    // If this is a string literal, perform Phase 6 adjacent literal concatenation.
     if (t.kind == PPTokenKind::StringLiteral) {
-        // Normalize left component
         normalizeLiteralToken(t);
-        // Ensure we have buffered following tokens (read-ahead) before attempting to merge
-        ensureBuffer();
-        // Consume and merge following whitespace/newline + string-literal sequences
-        while (!outBuffer.empty()) {
-            // Skip whitespace/newline between adjacent literals
-            while (!outBuffer.empty() && (outBuffer.front().kind == PPTokenKind::Whitespace || outBuffer.front().kind == PPTokenKind::Newline)) {
-                outBuffer.pop_front();
+        // Pull following tokens on demand and concatenate adjacent string
+        // literals. Crucially this expands macros that follow a string literal
+        // (`"%" PRIx8` → `"%" "8"` → `"%8"`) before deciding whether they
+        // concatenate, because ensureBuffer performs macro expansion. White
+        // space and new-lines between adjacent literals are not significant
+        // (C 6.4.5) and are discarded.
+        while (true) {
+            // Advance to the next significant (non-whitespace) buffered token,
+            // pulling and macro-expanding more input as needed.
+            bool haveFront = false;
+            while (true) {
+                ensureBuffer();
+                if (outBuffer.empty()) break;          // EOF
+                auto k = outBuffer.front().kind;
+                if (k == PPTokenKind::Whitespace || k == PPTokenKind::Newline) {
+                    outBuffer.pop_front();
+                    continue;
+                }
+                haveFront = true;
+                break;
             }
-            if (outBuffer.empty()) break;
+            if (!haveFront) break;                       // nothing more to concat
             if (outBuffer.front().kind != PPTokenKind::StringLiteral) break;
 
-            PPToken right = outBuffer.front(); outBuffer.pop_front();
+            PPToken right = outBuffer.front();
             normalizeLiteralToken(right);
 
-            // Extract inners and prefixes
-            std::string lpre, rpre, lin, rin; char lq=0, rq=0;
-            lpre = extractLiteralPrefix(t.lexeme);
-            rpre = extractLiteralPrefix(right.lexeme);
+            std::string lpre = extractLiteralPrefix(t.lexeme);
+            std::string rpre = extractLiteralPrefix(right.lexeme);
+            std::string lin, rin; char lq=0, rq=0;
             if (!extractLiteralInnerAndQuote(t.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq)) {
-                // malformed: stop merging
-                break;
+                break; // malformed: stop merging
             }
             if (lq != rq) {
                 diagnostics.push_back(Diagnostic{.message = "incompatible string literal quote types during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
@@ -82,15 +92,19 @@ std::optional<PPToken> Preprocessor::next() {
             else if (lpre == rpre) combinedPrefix = lpre;
             else {
                 diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
-                // Do not merge; put right back at front and stop
-                outBuffer.push_front(right);
+                // Leave `right` buffered; it is returned by the next call.
                 break;
             }
 
-            // Merge inners
+            // Commit: consume `right` and merge its inner into `t`. `lin`/`rin`
+            // are already-decoded inners (both operands were normalized), so the
+            // rebuilt lexeme and decodedString are kept consistent — otherwise a
+            // stale decodedString from the left operand would be returned
+            // verbatim, dropping the concatenation.
+            outBuffer.pop_front();
             std::string newInner = lin + rin;
-            std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
-            t.lexeme = rebuilt;
+            t.lexeme = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
+            t.decodedString = newInner;
             t.span.end = right.span.end;
             t.copyPaint(right);
         }
@@ -201,7 +215,14 @@ void Preprocessor::ensureBuffer() {
     // Additionally, if the last token we produced is a string literal,
     // continue reading to allow adjacent string-literal concatenation
     // to occur before we return any token.
-    while (outBuffer.empty() || (!outBuffer.empty() && outBuffer.back().kind == PPTokenKind::StringLiteral)) {
+    // Produce exactly one logical token (one ensureBuffer call may read several
+    // raw tokens — directives, whitespace, empty macro expansions — before one
+    // surfaces). We deliberately do NOT buffer ahead past a string literal here:
+    // adjacent-literal concatenation (Phase 6) is driven by next(), which pulls
+    // and macro-expands following tokens on demand. Buffering ahead while the
+    // tail is a string literal collided with macro expansion's front-push and
+    // left a macro after a string literal unexpanded (issue #90 gap 1).
+    while (outBuffer.empty()) {
         auto opt = readRawToken();
         if (!opt) return;
         auto tok = *opt;
@@ -289,14 +310,11 @@ bool Preprocessor::tryHandleFunctionLikeMacroInvocation(const Macro* m, const PP
     for (auto &pt : rest) invocation.push_back(pt);
     size_t idx = 0;
     std::vector<PPToken> expandedResult;
-    bool saved = batchPushNoLookahead;
-    batchPushNoLookahead = true;
     if (tryExpandFunctionLikeMacro(invocation, idx, m, tok, expandedResult)) {
         for (const auto &et : expandedResult) pushTokenBackWithConcat(et);
     } else {
         for (const auto &itok : invocation) pushTokenBackWithConcat(itok);
     }
-    batchPushNoLookahead = saved;
     return true;
 }
 
@@ -469,15 +487,10 @@ void Preprocessor::handleInclude() {
     std::vector<PPToken> temp;
     std::string currentDir = fileStack.back().dir;
     (void)handleIncludeDirective(tz, temp, currentDir);
-    // Suppress tokenizer lookahead inside pushTokenBackWithConcat: the
-    // tokenizer points at source AFTER the include directive, so any
-    // lookahead would splice post-include tokens into the included header's
-    // string literals (regression caught by pp-sysroot-include's adjacent
-    // literal cases until this guard was added).
-    bool saved = batchPushNoLookahead;
-    batchPushNoLookahead = true;
+    // pushTokenBackWithConcat no longer reads from the tokenizer, so the
+    // included tokens are appended as-is; adjacent-literal concatenation across
+    // the include boundary is handled later by next()'s on-demand pull.
     for (const auto &tk : temp) pushTokenBackWithConcat(tk);
-    batchPushNoLookahead = saved;
 }
 
 void Preprocessor::handleIfdef(bool wantDefined) {
@@ -1880,76 +1893,16 @@ void Preprocessor::pushTokenBackWithConcat(const PPToken& tok) {
         // fallthrough to lookahead
     }
 
-    // No previous merge occurred. If we're in the middle of a batch push
-    // (handleInclude / macro expansion), DO NOT read from the parent
-    // tokenizer — the next raw token belongs to source that follows the
-    // batch and would get spliced into the batch's literal. Just append.
+    // No previous in-buffer literal to merge with. Append the (normalized)
+    // literal. Phase-6 concatenation with *following* tokens is handled by
+    // next(), which pulls and macro-expands subsequent tokens on demand — so a
+    // macro after a string literal (`"%" PRIx8`) is expanded before the
+    // concatenation decision. Doing tokenizer look-ahead here instead consumed
+    // that macro identifier raw (unexpanded) and collided with the front-push
+    // path used by macro expansion (issue #90 gap 1).
     PPToken merged = tok;
     normalizeLiteralToken(merged);
-    if (batchPushNoLookahead) {
-        outBuffer.push_back(merged);
-        return;
-    }
-
-    // Otherwise perform tokenizer lookahead to merge following adjacent
-    // literals (Phase 6: `"foo" "bar"` → `"foobar"`).
-    std::vector<PPToken> saved; // whitespace/newline tokens between literals
-
-    while (true) {
-        auto ntOpt = readRawToken();
-        if (!ntOpt) break;
-        PPToken nt = *ntOpt;
-
-        if (nt.kind == PPTokenKind::Whitespace || nt.kind == PPTokenKind::Newline) {
-            saved.push_back(nt);
-            continue;
-        }
-
-        if (nt.kind != PPTokenKind::StringLiteral) {
-            outBuffer.push_back(merged);
-            for (const auto &s : saved) outBuffer.push_back(s);
-            outBuffer.push_back(nt);
-            return;
-        }
-
-        PPToken right = nt;
-        normalizeLiteralToken(right);
-
-        std::string lpre = extractLiteralPrefix(merged.lexeme);
-        std::string rpre = extractLiteralPrefix(right.lexeme);
-        std::string lin, rin; char lq=0, rq=0;
-        if (!extractLiteralInnerAndQuote(merged.lexeme, lin, lq) || !extractLiteralInnerAndQuote(right.lexeme, rin, rq) || lq != rq) {
-            outBuffer.push_back(merged);
-            for (const auto &s : saved) outBuffer.push_back(s);
-            outBuffer.push_back(right);
-            return;
-        }
-
-        std::string combinedPrefix;
-        if (lpre.empty() && rpre.empty()) combinedPrefix = std::string();
-        else if (lpre.empty()) combinedPrefix = rpre;
-        else if (rpre.empty()) combinedPrefix = lpre;
-        else if (lpre == rpre) combinedPrefix = lpre;
-        else {
-            diagnostics.push_back(Diagnostic{.message = "incompatible string literal prefixes during concatenation", .severity = Diagnostic::Severity::Error, .span = std::nullopt});
-            outBuffer.push_back(merged);
-            for (const auto &s : saved) outBuffer.push_back(s);
-            outBuffer.push_back(right);
-            return;
-        }
-
-        std::string newInner = lin + rin;
-        std::string rebuilt = combinedPrefix + std::string(1, lq) + newInner + std::string(1, lq);
-        merged.lexeme = rebuilt;
-        merged.span.end = right.span.end;
-        merged.copyPaint(right);
-        saved.clear();
-        // continue to merge more literals
-    }
-
-    // EOF reached: push merged token and any saved whitespace
     outBuffer.push_back(merged);
-    for (const auto &s : saved) outBuffer.push_back(s);
 }
 
 void Preprocessor::pushTokenFrontWithConcat(const PPToken& tok) {
