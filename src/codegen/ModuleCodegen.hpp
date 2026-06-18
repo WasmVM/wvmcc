@@ -36,10 +36,23 @@ public:
     void setCompileMode(CompileMode mode) { compileMode_ = mode; }
     CompileMode getCompileMode() const { return compileMode_; }
 
+    // Supply the parser's resolved enum-constant values so FunctionCodegen can
+    // resolve an enum constant used in a runtime expression (the parser folds
+    // them only at file scope / in constant expressions, leaving in-body uses
+    // for scope-aware resolution here — after symbol lookup fails, a local can
+    // no longer be shadowing the name). See Parser::getEnumConstants.
+    void setEnumConstants(const std::unordered_map<std::string, long long>& m) { enumConstants_ = m; }
+
     // Generate a Wasm module from a translation unit
     WasmVM::WasmModule generate(const wvmcc::parser::TranslationUnitPtr& tu);
 
     // Public hooks used by FunctionCodegen during body emission.
+    // Resolve an enumeration constant by name to its int value, or nullopt.
+    std::optional<long long> lookupEnumConstant(const std::string& name) const {
+        auto it = enumConstants_.find(name);
+        if (it == enumConstants_.end()) return std::nullopt;
+        return it->second;
+    }
     // Returns table-slot index for an address-taken function, or std::nullopt.
     std::optional<size_t> getFuncTableSlot(const std::string& name) const;
     // #79: assign (or fetch) the funcref-table slot for `name`, called lazily
@@ -109,6 +122,8 @@ private:
     std::vector<wvmcc::Diagnostic> diagnostics_;
     const wvmcc::parser::Semantic& semantic_;
     CompileMode compileMode_ = CompileMode::Linkable; // M2-D: default flipped from Freestanding
+    // Resolved enum-constant values from the parser (see setEnumConstants).
+    std::unordered_map<std::string, long long> enumConstants_{};
 
     // Code generation components
     TypeMap typeMap_;

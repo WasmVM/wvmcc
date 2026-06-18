@@ -312,6 +312,7 @@ static CompileResult compileSource(const std::string& path,
     }
 
     wvmcc::codegen::ModuleCodegen codegen(sem);
+    codegen.setEnumConstants(parser.getEnumConstants());
     if (freestanding) {
         codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
     }
@@ -470,6 +471,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
             wvmcc::codegen::ModuleCodegen codegen(sem);
+            codegen.setEnumConstants(parser.getEnumConstants());
             if (args.freestanding) {
                 codegen.setCompileMode(wvmcc::codegen::CompileMode::Freestanding);
             }

@@ -264,9 +264,16 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
     };
 
     while (auto t = lex.peek()) {
-        // If identifier and it's a known typedef-name, treat as type-specifier.
+        // If identifier and it's a known typedef-name, treat as type-specifier —
+        // but only when no type specifier has been collected yet. A typedef-name
+        // cannot combine with another type specifier (6.7.2p2), so once a type is
+        // present the identifier is the *declared name*, not a second specifier:
+        //   typedef int T; typedef int T;   // 2nd `T` is the declarator (redef)
+        //   int T = 3;                       // `T` shadows the typedef (an object)
+        // Without this, `T` is wrongly consumed as a type-specifier, leaving the
+        // declaration with no declarator ("must declare ... a declarator").
         if (t->kind() == TokenKind::Identifier) {
-            if (typedef_names.count(t->lexeme())) {
+            if (typedef_names.count(t->lexeme()) && specs.typeSpecifiers.empty()) {
                 // Special-case the builtin va_list typedef: represent as `long`
                 // so the rest of the type system handles it as an i64 scalar.
                 if (t->lexeme() == "__builtin_va_list") {
@@ -1425,6 +1432,25 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
     // resolution in semantic analysis / codegen.
     ++blockDepth;
     struct DepthGuard { int &d; ~DepthGuard() { --d; } } _depthGuard{blockDepth};
+    // Scoped typedef shadowing (6.2.3p1 / 6.7.8p3): a name declared in this block
+    // — a local typedef, or an object shadowing an outer typedef-name — changes
+    // typedef-name recognition only within the block. Snapshot the typedef
+    // registries on entry and restore them on exit so the outer meaning of any
+    // shadowed/added name is recovered. Without this, `{ int T = 3; }` declared
+    // where `typedef int T;` is in scope would leave `T` un-shadowed (so a later
+    // `T = T + 1;` misparses as a declaration), and a block-local typedef would
+    // leak out of its scope.
+    struct TypedefScopeGuard {
+        Parser &p;
+        std::unordered_set<std::string> names;
+        std::unordered_map<std::string, std::vector<DeclarationSpecifiers::SimpleTypeSpecifier>> simple;
+        std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> structs;
+        ~TypedefScopeGuard() {
+            p.typedef_names = std::move(names);
+            p.typedef_simple = std::move(simple);
+            p.typedef_struct = std::move(structs);
+        }
+    } _tdGuard{*this, typedef_names, typedef_simple, typedef_struct};
     std::vector<BlockItemPtr> body;
     // Forward-progress guard (#92): some malformed or not-yet-supported
     // constructs cause a statement-parsing path to return without consuming any
@@ -1585,6 +1611,20 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 for (auto& decl : parseInitDeclaratorList(specs, maybeDeclr)) {
                     auto bi = make_ast<BlockItem>();
                     bi->item = decl;
+                    // An object/function declaration whose name matches an
+                    // outer typedef-name shadows it for the rest of this block
+                    // (6.2.3p1). Drop it from the typedef registries so later
+                    // uses parse as ordinary identifiers; the TypedefScopeGuard
+                    // restores it on block exit. (Local typedefs are added by
+                    // parseInitDeclaratorList and are likewise scoped by the
+                    // guard.)
+                    if (!specs.hasStorage(StorageClass::Typedef) && decl && decl->declarator
+                        && !decl->declarator->id.name.empty()) {
+                        const std::string &nm = decl->declarator->id.name;
+                        typedef_names.erase(nm);
+                        typedef_simple.erase(nm);
+                        typedef_struct.erase(nm);
+                    }
                     // C 6.7.9 constraint 5: if declaration has block scope and the identifier has
                     // external linkage, the declaration shall have no initializer. Block-scope
                     // `static` gives the identifier no linkage (C 6.2.2p6), so initializers are
