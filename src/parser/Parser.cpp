@@ -1982,6 +1982,61 @@ ExprPtr Parser::parsePrimary() {
         fl->kind = Expr::Kind::Float;
         return fl;
     }
+    // __builtin_offsetof(type-name, member): the byte offset of `member` within
+    // the type, a size_t integer constant (C 7.19). Computed here at parse time
+    // so it is a true integer constant expression — usable in _Static_assert /
+    // case labels / array bounds — unlike the `&((T*)0)->m` fallback, which is
+    // not an ICE (6.6p6). stddef.h's `offsetof` expands to this.
+    if (t->kind() == TokenKind::Identifier && t->lexeme() == "__builtin_offsetof") {
+        lex.next(); // consume __builtin_offsetof
+        SourceSpan ofSpan = t->span;
+        if (!acceptPunct("(")) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected '(' after __builtin_offsetof"; d.span = ofSpan;
+            diagnostics.push_back(std::move(d));
+            return nullptr;
+        }
+        auto specs = parseDeclarationSpecifiers();
+        int ptrDepth = parseAbstractPointerDepth();
+        std::vector<ExprPtr> dims; parseAbstractArrayDims(dims);
+        auto structType = buildTypeNameNode(specs, ptrDepth, dims);
+        if (!acceptPunct(",")) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected ',' in __builtin_offsetof";
+            if (lex.peek()) d.span = lex.peek()->span;
+            diagnostics.push_back(std::move(d));
+        }
+        std::string member;
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+            member = lex.peek()->lexeme(); lex.next();
+        } else {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "expected member name in __builtin_offsetof";
+            if (lex.peek()) d.span = lex.peek()->span;
+            diagnostics.push_back(std::move(d));
+        }
+        // Consume any trailing member-designator suffix (`.sub`, `[idx]`) and the
+        // closing ')'. (Nested designators beyond the first member are not
+        // modelled; the common single-member form is exact.)
+        while (lex.peek() && !(lex.peek()->kind() == TokenKind::Punctuator
+                               && lex.peek()->lexeme() == ")"))
+            lex.next();
+        acceptPunct(")");
+        auto off = ConstExprEvaluator::structMemberOffset(structType, member);
+        auto il = make_ast<IntegerLiteral>();
+        il->kind = Expr::Kind::Integer;
+        il->isUnsigned = true; // size_t
+        il->value = off.value_or(0);
+        il->raw = std::to_string(il->value);
+        il->span = ofSpan;
+        if (!off.has_value()) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "__builtin_offsetof of an incomplete type or unknown member";
+            d.span = ofSpan;
+            diagnostics.push_back(std::move(d));
+        }
+        return il;
+    }
     if (t->kind() == TokenKind::Identifier) {
         auto tok = *lex.next();
         // An enumeration constant has type int and is itself an integer
@@ -2813,6 +2868,7 @@ ExprPtr Parser::parseCastExpression() {
                 // try to stringify first specifier
                 auto &ts = specs.typeSpecifiers.front();
                 if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
+                else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su) { tn->kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? TypeNode::Kind::Struct : TypeNode::Kind::Union; tn->su = ts.su; }
                 else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) { tn->kind = TypeNode::Kind::Enum; }
                 else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
                 else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
@@ -2834,7 +2890,12 @@ ExprPtr Parser::parseCastExpression() {
         // `(1, 2)` silently drops the comma operand and leaves trailing tokens.
         ExprPtr inner = parseExpression();
         if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
-        return inner;
+        // A parenthesized expression is a primary-expression, so trailing
+        // postfix operators apply to it: `(p)->m`, `(p)[i]`, `(e).m`, `(f)(x)`,
+        // `(x)++`. Because this paren is consumed here (in the cast parser, which
+        // intercepts `(` before parsePostfixExpression), apply the postfix suffix
+        // ourselves — otherwise the trailing `->`/`[]`/… would be dropped.
+        return applyPostfixSuffix(inner);
     }
     // otherwise unary-expression
     return parseUnaryExpression();

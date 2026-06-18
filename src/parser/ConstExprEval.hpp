@@ -33,6 +33,14 @@ public:
     // so the static-assert check should defer it to semantic analysis rather
     // than reject it as a non-constant expression.
     static bool dependsOnUnresolvedSizeof(const ExprPtr &e);
+
+    // #90 gap 6: byte offset of `member` within struct/union type `structType`
+    // (a complete Struct/Union TypeNode), using the same sequential natural-
+    // alignment layout as the size computation. Returns nullopt if the type is
+    // incomplete, the member is absent, or a bit-field/typedef-named member
+    // makes the layout non-self-computable here. Backs `__builtin_offsetof`.
+    static std::optional<long long> structMemberOffset(const TypeNodePtr &structType,
+                                                       const std::string &member);
 };
 
 } // namespace wvmcc::parser

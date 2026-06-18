@@ -696,6 +696,93 @@ ConstExprEvaluator::ResolverScope::~ResolverScope() {
     g_typeResolver = nullptr;
 }
 
+std::optional<long long> ConstExprEvaluator::structMemberOffset(
+    const TypeNodePtr &structType, const std::string &member) {
+    if (!structType) return std::nullopt;
+    auto su = structType->su;
+    if (!su || !su->hasBody) return std::nullopt;
+    const bool isUnion = (su->kind == StructOrUnionSpecifier::Kind::Union);
+    // Name of a (possibly pointer/array-adorned) declarator.
+    auto declName = [](DeclaratorPtr d) -> std::string {
+        for (; d; d = (d->inner.has_value() ? *d->inner : nullptr))
+            if (!d->id.name.empty()) return d->id.name;
+        return "";
+    };
+    long long offset = 0;
+    for (const auto &m : su->members) {
+        // Bit-fields are not modelled — bail (the offset would be unreliable).
+        for (const auto &sd : m.declarators)
+            if (sd.bitfieldWidth.has_value()) return std::nullopt;
+        // Member base type from the first type specifier (mirrors suByteSize).
+        TypeNodePtr baseType;
+        for (const auto &ts : m.specifiers.typeSpecifiers) {
+            if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
+                baseType = std::make_shared<TypeNode>();
+                baseType->kind = TypeNode::Kind::Builtin; baseType->simple = ts.simple;
+            } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su) {
+                baseType = std::make_shared<TypeNode>();
+                baseType->kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct)
+                                     ? TypeNode::Kind::Struct : TypeNode::Kind::Union;
+                baseType->su = ts.su;
+            } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Enum) {
+                baseType = std::make_shared<TypeNode>();
+                baseType->kind = TypeNode::Kind::Enum;
+            } else {
+                return std::nullopt; // typedef-name / atomic: not self-computable
+            }
+            break;
+        }
+        if (!baseType) return std::nullopt;
+        auto wrapped = [&](const StructDeclarator &sd) -> TypeNodePtr {
+            TypeNodePtr ty = baseType;
+            for (DeclaratorPtr d = sd.declarator; d;
+                 d = (d->inner.has_value() ? *d->inner : nullptr)) {
+                if (d->kind == Declarator::Kind::Pointer) {
+                    auto p = std::make_shared<TypeNode>();
+                    p->kind = TypeNode::Kind::Pointer; p->pointee = ty; ty = p;
+                } else if (d->kind == Declarator::Kind::Array) {
+                    auto a = std::make_shared<TypeNode>();
+                    a->kind = TypeNode::Kind::Array; a->element = ty;
+                    if (d->array.size.has_value()) a->sizeExpr = d->array.size;
+                    else return nullptr; // flexible array member
+                    ty = a;
+                } else if (d->kind == Declarator::Kind::Function) {
+                    return nullptr;
+                }
+            }
+            return ty;
+        };
+        if (m.declarators.empty()) {
+            // Anonymous member: layout-relevant but unnamed; advance the offset.
+            long long sz = typeNodeSize(baseType, false);
+            long long al = typeNodeSize(baseType, true);
+            if (sz < 0 || al < 0) return std::nullopt;
+            if (!isUnion) {
+                if (al > 0 && offset % al != 0) offset += al - offset % al;
+                offset += sz;
+            }
+            continue;
+        }
+        for (const auto &sd : m.declarators) {
+            auto ty = wrapped(sd);
+            if (!ty) return std::nullopt;
+            long long sz = typeNodeSize(ty, false);
+            long long al = typeNodeSize(ty, true);
+            if (sz < 0 || al < 0) return std::nullopt;
+            long long memOff;
+            if (isUnion) {
+                memOff = 0;
+            } else {
+                if (al > 0 && offset % al != 0) offset += al - offset % al;
+                memOff = offset;
+            }
+            if (declName(sd.declarator) == member) return memOff;
+            if (!isUnion) offset = memOff + sz;
+        }
+    }
+    return std::nullopt; // member not found
+}
+
 bool ConstExprEvaluator::dependsOnUnresolvedSizeof(const ExprPtr &e) {
     if (!e) return false;
     using K = Expr::Kind;

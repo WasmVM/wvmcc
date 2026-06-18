@@ -12,9 +12,11 @@
 
 #define NULL ((void*)0)
 
-// `__builtin_offsetof` isn't implemented in wvmcc yet (M2-A series); fall
-// back to the pre-C11 trick of computing the offset from a null base.
-// Strict-aliasing UB in theory; works on every actual compiler.
-#define offsetof(T, m) ((size_t)&(((T*)0)->m))
+// `offsetof` yields a size_t integer *constant* (7.19), so it must be usable in
+// an ICE (_Static_assert, case labels, array bounds). wvmcc's `__builtin_offsetof`
+// computes the offset at translation time directly from the type's layout — the
+// old `((size_t)&(((T*)0)->m))` trick is not an ICE (6.6p6: a pointer cast /
+// address is not an integer-constant-expression operand).
+#define offsetof(T, m) __builtin_offsetof(T, m)
 
 #endif // _WVMCC_STDDEF_H
