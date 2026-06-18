@@ -65,6 +65,12 @@ add_test(NAME parser-statements COMMAND wvmcc-parser-statements-test)
 add_executable(wvmcc-parser-static-assert-test static_assert_test.cpp ${PARSER_SRCS})
 add_test(NAME parser-static-assert COMMAND wvmcc-parser-static-assert-test)
 
+# Regression: parser must not hang on the #92 constructs (timeout backstops a
+# reintroduced infinite loop).
+add_executable(wvmcc-parser-no-hang-test parser_no_hang_test.cpp ${PARSER_SRCS})
+add_test(NAME parser-no-hang COMMAND wvmcc-parser-no-hang-test)
+set_tests_properties(parser-no-hang PROPERTIES TIMEOUT 30)
+
 add_executable(wvmcc-parser-gnu-attribute-test gnu_attribute_test.cpp ${PARSER_SRCS})
 add_test(NAME parser-gnu-attribute COMMAND wvmcc-parser-gnu-attribute-test)
 
