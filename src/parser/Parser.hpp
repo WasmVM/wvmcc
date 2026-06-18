@@ -39,6 +39,14 @@ private:
     // parse a single struct-declarator (optional declarator and optional bit-field width)
     StructDeclarator parseStructDeclarator();
 
+    // Parse a `_Static_assert ( constant-expression , string-literal ) ;`
+    // declaration, assuming the `_Static_assert` keyword is the next token.
+    // Consumes through the trailing `;`, evaluates the controlling expression
+    // (emitting the appropriate diagnostic), and returns the built node — or
+    // nullptr if the opening `(` was missing (after error recovery to `;`).
+    // Shared by the external-declaration, block-item, and struct-member paths.
+    std::shared_ptr<ExternalDecl::StaticAssert> parseStaticAssertNode();
+
     // parse declarators (identifier, pointer, array, function)
     DeclaratorPtr parseDeclarator();
     // parse one or more `__attribute__((...))` specifiers and return a flat
