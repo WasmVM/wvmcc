@@ -105,6 +105,22 @@ int main() {
         { "_Static_assert(_Generic(0LL, long long: 1, int: 2, default: 0) == 1, \"generic long long\");\n", "" },
         { "_Static_assert(_Generic(0U, unsigned: 1, int: 2, default: 0) == 1, \"generic unsigned\");\n", "" },
         { "_Static_assert(_Generic(0UL, unsigned long: 1, default: 0) == 1, \"generic ulong\");\n", "" },
+        // #92-followup: short-circuit operators — the unevaluated operand need
+        // not be a constant (6.6p3), so `2 || 1/0` is a valid ICE worth 1.
+        { "_Static_assert((2 || 1 / 0) == 1, \"|| short-circuits\");\n", "" },
+        { "_Static_assert((0 && 1 / 0) == 0, \"&& short-circuits\");\n", "" },
+        { "_Static_assert((1 ? 5 : 1 / 0) == 5, \"?: chooses one arm\");\n", "" },
+        // A non-short-circuited division by zero is still not a constant.
+        { "_Static_assert((1 / 0) == 0, \"div-by-zero rejected\");\n", "_Static_assert requires an integer constant expression" },
+        // Floating-constant relational folding (wvmcc relaxation of 6.6p6).
+        { "_Static_assert(1.0 + 2.22e-16 > 1.0, \"float arithmetic + compare\");\n", "" },
+        { "_Static_assert(0.5F > 0, \"float vs int compare\");\n", "" },
+        { "_Static_assert(1.0 > 2.0, \"false float compare fails\");\n", "static assertion failed" },
+        // Enumeration constant inside a block-scope constant expression resolves
+        // (folding is allowed in a required constant-expression context).
+        { "enum { EA = 13 }; void f(void) { _Static_assert(EA == 13, \"enum in block ICE\"); }\n", "" },
+        // sizeof a struct/union typedef resolves inside a constant expression.
+        { "typedef struct { long a; long b; } Pair; _Static_assert(sizeof(Pair) == 16, \"struct typedef size\");\n", "" },
         // static_assert-declaration as a struct/union member (C17 6.7.2.1).
         // These previously sent the struct-member parser into an infinite loop
         // (the keyword was neither a specifier nor a declarator, so the loop

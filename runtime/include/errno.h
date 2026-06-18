@@ -27,9 +27,11 @@ extern int errno;
 #define ENOSPC         28
 #define EROFS          30
 #define EPIPE          32
+#define EDOM           33
 #define ERANGE         34
 #define ENAMETOOLONG   36
 #define ENOSYS         38
 #define ENOTEMPTY      39
+#define EILSEQ         84
 
 #endif // _WVMCC_ERRNO_H

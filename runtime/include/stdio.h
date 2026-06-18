@@ -8,13 +8,32 @@
 #include <stddef.h>
 #include <stdarg.h>
 
-typedef struct FILE FILE;
+// FILE (C17 7.21.1p2): a complete object type recording all stream control
+// information. The layout is exposed here (rather than left opaque) so it is a
+// sizeable object type — `sizeof(FILE)` is valid — while the backing objects
+// for stdin/stdout/stderr still live in stdio_core.c. The `_F_*` flag bits used
+// in `flags` are an implementation detail private to stdio_core.c.
+typedef struct FILE {
+    int fd;
+    int flags;
+    char *wbuf;
+    int wbuf_size;
+    int wbuf_pos;
+    char *rbuf;
+    int rbuf_size;
+    int rbuf_pos;
+    int rbuf_end;
+} FILE;
+
+// fpos_t (C17 7.21.1p2): a complete object type able to record every position
+// within a file. A byte offset (i64) suffices for wvmcc's stream model.
+typedef long fpos_t;
 
 // stdin/stdout/stderr are the standard FILE* macros (C11 7.21.1). The backing
-// FILE objects live in stdio_core.c; here they're extern declarations of
-// incomplete type, and the macros take their address in *code* — so the
-// pointer is materialized at each use site (a relocatable address) rather than
-// stored as a data-to-data pointer that would need data-segment relocation.
+// FILE objects live in stdio_core.c; the macros take their address in *code* —
+// so the pointer is materialized at each use site (a relocatable address)
+// rather than stored as a data-to-data pointer that would need data-segment
+// relocation.
 extern FILE __wvmcc_stdin;
 extern FILE __wvmcc_stdout;
 extern FILE __wvmcc_stderr;

@@ -222,9 +222,15 @@ void Parser::recordTypedef(const std::string &name, const DeclarationSpecifiers 
     using K = DeclarationSpecifiers::TypeSpecifier::Kind;
     if (ts.kind == K::Simple) {
         typedef_simple[name] = ts.simple;
+    } else if (ts.kind == K::StructOrUnion && ts.su) {
+        // `typedef struct {...} T;` — remember the aggregate so sizeof(T) can
+        // resolve its layout in a constant expression.
+        typedef_struct[name] = ts.su;
     } else if (ts.kind == K::TypedefName) {
         auto it = typedef_simple.find(ts.text);
         if (it != typedef_simple.end()) typedef_simple[name] = it->second;
+        auto is = typedef_struct.find(ts.text);
+        if (is != typedef_struct.end()) typedef_struct[name] = is->second;
     }
 }
 
@@ -281,6 +287,19 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
                     DeclarationSpecifiers::TypeSpecifier ts;
                     ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
                     ts.simple = tsimple->second;
+                    specs.typeSpecifiers.push_back(ts);
+                    lex.next();
+                    continue;
+                }
+                // Inside a required constant expression, resolve a struct/union
+                // typedef to its underlying specifier so `sizeof(T)` can compute
+                // the layout. Outside that context we keep the TypedefName form
+                // (codegen / semantic analysis own aggregate-typedef handling).
+                auto tstruct = typedef_struct.find(t->lexeme());
+                if (constExprDepth > 0 && tstruct != typedef_struct.end()) {
+                    DeclarationSpecifiers::TypeSpecifier ts;
+                    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion;
+                    ts.su = tstruct->second;
                     specs.typeSpecifiers.push_back(ts);
                     lex.next();
                     continue;
@@ -873,7 +892,10 @@ std::shared_ptr<ExternalDecl::StaticAssert> Parser::parseStaticAssertNode() {
         return nullptr;
     }
 
-    auto expr = parseConditionalExpression();
+    // The controlling expression is a required constant expression: enum
+    // constants fold here even inside a function body (see ConstExprContext).
+    ExprPtr expr;
+    { ConstExprContext _cec(*this); expr = parseConditionalExpression(); }
     if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
         wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
         d.message = "expected ',' in _Static_assert";
@@ -1459,8 +1481,10 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
         if (p->kind() == TokenKind::Keyword && p->lexeme() == "case") {
             // consume 'case'
             lex.next();
-            // parse constant/conditional expression
-            ExprPtr val = parseConditionalExpression();
+            // parse constant/conditional expression (enum constants fold here
+            // even at block scope — see ConstExprContext).
+            ExprPtr val;
+            { ConstExprContext _cec(*this); val = parseConditionalExpression(); }
             // expect ':'
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
                 if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after case expression"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
@@ -2016,7 +2040,7 @@ ExprPtr Parser::parsePrimary() {
         // constant expressions (_Static_assert, case labels, array bounds)
         // that are evaluated before semantic analysis runs.
         auto ec = enum_constants.find(tok.lexeme());
-        if (blockDepth == 0 && ec != enum_constants.end()) {
+        if ((blockDepth == 0 || constExprDepth > 0) && ec != enum_constants.end()) {
             auto il = make_ast<IntegerLiteral>();
             il->span = tok.span;
             il->value = ec->second;
