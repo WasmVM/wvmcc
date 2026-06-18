@@ -551,6 +551,18 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)typeMap_.byteAlignment(opType)});
         break;
     }
+    case K::GenericSelection: {
+        // C 6.5.1.1: a generic selection lowers to its selected association; the
+        // controlling expression is NOT evaluated.
+        const auto& g = static_cast<const wvmcc::parser::GenericSelectionExpr&>(*expr);
+        auto chosen = selectGenericAssociation(g);
+        if (!chosen) {
+            emitUnimplemented("codegen: no _Generic association matches the controlling type", expr->span);
+            break;
+        }
+        emitExpr(chosen, needLValue);
+        break;
+    }
     default:
         emitUnimplemented("codegen not implemented: expression kind " + std::to_string((int)expr->kind), expr->span);
         break;
@@ -2367,6 +2379,25 @@ void FunctionCodegen::emitExprStmt(const wvmcc::parser::ExprStmt& stmt) {
     }
 }
 
+wvmcc::parser::ExprPtr FunctionCodegen::selectGenericAssociation(
+    const wvmcc::parser::GenericSelectionExpr& g) const {
+    auto canon = [](wvmcc::parser::TypeNodePtr r) {
+        // Lvalue conversion drops top-level cv-qualifiers (6.3.2.1p2).
+        while (r && r->kind == wvmcc::parser::TypeNode::Kind::Qualified && r->pointee)
+            r = r->pointee;
+        return r;
+    };
+    auto ctrlType = canon(getExprTypeNode(g.controlling));
+    for (const auto& assoc : g.assocs) {
+        if (!assoc.isDefault && assoc.type
+            && wvmcc::parser::Semantic::typeNodesEqual(canon(assoc.type), ctrlType))
+            return assoc.expr;
+    }
+    for (const auto& assoc : g.assocs)
+        if (assoc.isDefault) return assoc.expr;
+    return nullptr;
+}
+
 void FunctionCodegen::emitItemsWithGotoLift(const std::vector<wvmcc::parser::BlockItemPtr>& items) {
     using K = wvmcc::parser::Stmt::Kind;
 
@@ -2888,6 +2919,12 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     case K::Cast: {
         const auto& c = static_cast<const wvmcc::parser::CastExpr&>(*expr);
         return c.type;
+    }
+    case K::GenericSelection: {
+        // The result type is that of the selected association's expression.
+        const auto& g = static_cast<const wvmcc::parser::GenericSelectionExpr&>(*expr);
+        auto chosen = selectGenericAssociation(g);
+        return chosen ? getExprTypeNode(chosen) : nullptr;
     }
     case K::Ternary: {
         const auto& t = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);

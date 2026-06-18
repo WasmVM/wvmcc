@@ -96,6 +96,12 @@ public:
     // stack (false for void/struct-returning calls and void va_* builtins).
     bool exprLeavesValue(const wvmcc::parser::ExprPtr& expr);
 
+    // C 6.5.1.1: pick the generic association whose type name is compatible with
+    // the (lvalue-converted) controlling type, else the `default`. Returns the
+    // selected expression, or null if nothing matches.
+    wvmcc::parser::ExprPtr selectGenericAssociation(
+        const wvmcc::parser::GenericSelectionExpr& g) const;
+
     void emitIntegerLiteral(const wvmcc::parser::IntegerLiteral& expr);
     void emitCharLiteral(const wvmcc::parser::CharLiteral& expr);
     void emitFloatLiteral(const wvmcc::parser::FloatLiteral& expr);
