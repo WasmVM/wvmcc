@@ -105,6 +105,15 @@ int main() {
         { "_Static_assert(_Generic(0LL, long long: 1, int: 2, default: 0) == 1, \"generic long long\");\n", "" },
         { "_Static_assert(_Generic(0U, unsigned: 1, int: 2, default: 0) == 1, \"generic unsigned\");\n", "" },
         { "_Static_assert(_Generic(0UL, unsigned long: 1, default: 0) == 1, \"generic ulong\");\n", "" },
+        // static_assert-declaration as a struct/union member (C17 6.7.2.1).
+        // These previously sent the struct-member parser into an infinite loop
+        // (the keyword was neither a specifier nor a declarator, so the loop
+        // never advanced); ensure they parse and evaluate now.
+        { "struct S { int m; _Static_assert(1, \"member ok\"); };\n", "" },
+        { "struct S { int m; _Static_assert(sizeof(int) == 4, \"member sizeof\"); };\n", "" },
+        { "struct S { int m; _Static_assert(1 == 2, \"member boom\"); };\n", "member boom" },
+        { "union U { int m; _Static_assert(1, \"union member ok\"); };\n", "" },
+        { "struct S { _Static_assert(1, \"only assert\"); };\n", "" },
     };
 
     for (auto &c : cases) {

@@ -859,11 +859,99 @@ DeclaratorPtr Parser::parseDeclarator() {
     return d;
 }
 
+std::shared_ptr<ExternalDecl::StaticAssert> Parser::parseStaticAssertNode() {
+    // Caller has verified the next token is the `_Static_assert` keyword.
+    lex.next(); // consume keyword
+    if (!acceptPunct("(")) {
+        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "expected '(' after _Static_assert";
+        if (lex.peek()) d.span = lex.peek()->span;
+        diagnostics.push_back(std::move(d));
+        // recover: skip to next ';'
+        while (lex.peek() && !(lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";")) lex.next();
+        if (lex.peek()) lex.next();
+        return nullptr;
+    }
+
+    auto expr = parseConditionalExpression();
+    if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
+        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "expected ',' in _Static_assert";
+        if (lex.peek()) d.span = lex.peek()->span;
+        diagnostics.push_back(std::move(d));
+    } else {
+        lex.next();
+    }
+
+    ExprPtr msgExpr = nullptr;
+    if (lex.peek() && lex.peek()->kind() == TokenKind::StringLiteral) {
+        auto tok = *lex.next();
+        auto sl = make_ast<StringLiteral>();
+        sl->span = tok.span; sl->value = tok.lexeme(); sl->kind = Expr::Kind::String;
+        msgExpr = sl;
+    } else {
+        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "expected string literal in _Static_assert";
+        if (lex.peek()) d.span = lex.peek()->span;
+        diagnostics.push_back(std::move(d));
+    }
+
+    if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==")")) {
+        if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Static_assert"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+    } else {
+        lex.next();
+    }
+
+    if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
+
+    auto sa = make_ast<ExternalDecl::StaticAssert>();
+    sa->span = expr ? expr->span : SourceSpan{};
+    sa->expr = expr;
+    sa->message = msgExpr;
+    // Parser-level evaluation to preserve existing parser tests: evaluate the
+    // controlling constant-expression here and diagnose a failed/non-constant
+    // assertion. (The semantic pass re-checks with full symbol-table context.)
+    auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
+    if (!val.has_value()) {
+        // #81: defer a `sizeof`/`_Alignof` of a *declared object* (e.g.
+        // `sizeof arr`, `sizeof(a)/sizeof(a[0])`) — the parser-time evaluator
+        // has no symbol table, but the semantic pass re-checks with one. Only
+        // reject here when no such operand is present (a genuinely non-constant
+        // expression like a bare variable).
+        if (!ConstExprEvaluator::dependsOnUnresolvedSizeof(expr)) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "_Static_assert requires an integer constant expression";
+            if (expr) d.span = expr->span;
+            diagnostics.push_back(std::move(d));
+        }
+    } else if (*val == 0) {
+        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+        std::string tmsg = "static assertion failed";
+        if (msgExpr && msgExpr->kind == Expr::Kind::String) {
+            auto sl = std::dynamic_pointer_cast<StringLiteral>(msgExpr);
+            if (sl) tmsg = std::string("static assertion failed: ") + sl->value;
+        }
+        d.message = tmsg;
+        if (expr) d.span = expr->span;
+        diagnostics.push_back(std::move(d));
+    }
+    return std::static_pointer_cast<ExternalDecl::StaticAssert>(sa);
+}
+
 std::vector<StructMember> Parser::parseStructDeclarationList() {
     std::vector<StructMember> members;
     // expect that '{' has already been consumed by caller
     while (auto p = lex.peek()) {
         if (p->kind() == TokenKind::Punctuator && p->lexeme() == "}") { lex.next(); break; }
+
+        // A static_assert-declaration is a struct-declaration (C17 6.7.2.1).
+        // It declares no member; parse and evaluate it, then move on. (Handling
+        // it here is also what keeps the loop advancing — `_Static_assert` is
+        // not a specifier, so falling through would consume nothing and spin.)
+        if (p->kind() == TokenKind::Keyword && p->lexeme() == "_Static_assert") {
+            parseStaticAssertNode();
+            continue;
+        }
 
         // parse specifiers
         auto memberSpecs = parseDeclarationSpecifiers();
@@ -945,99 +1033,11 @@ ExternalDeclPtr Parser::parseExternalDecl() {
     // Handle _Static_assert (C 6.7.10): create a StaticAssert external node so
     // semantic checks can evaluate the constant-expression with TU context.
     if (lex.peek() && lex.peek()->kind() == TokenKind::Keyword && lex.peek()->lexeme() == "_Static_assert") {
-        // consume keyword
-        lex.next();
-        // expect '('
-        if (!acceptPunct("(")) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "expected '(' after _Static_assert";
-            if (lex.peek()) d.span = lex.peek()->span;
-            diagnostics.push_back(std::move(d));
-            // recover: skip to next ';'
-            while (lex.peek() && !(lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";")) lex.next();
-            if (lex.peek()) lex.next();
-            return nullptr;
-        }
-
-        // parse constant-expression
-        auto expr = parseConditionalExpression();
-        // expect comma
-        if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "expected ',' in _Static_assert";
-            if (lex.peek()) d.span = lex.peek()->span;
-            diagnostics.push_back(std::move(d));
-        } else {
-            lex.next();
-        }
-
-        // expect string-literal
-        ExprPtr msgExpr = nullptr;
-        if (lex.peek() && lex.peek()->kind() == TokenKind::StringLiteral) {
-            auto tok = *lex.next();
-            auto sl = make_ast<StringLiteral>();
-            sl->span = tok.span;
-            sl->value = tok.lexeme();
-            sl->kind = Expr::Kind::String;
-            msgExpr = sl;
-        } else {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "expected string literal in _Static_assert";
-            if (lex.peek()) d.span = lex.peek()->span;
-            diagnostics.push_back(std::move(d));
-        }
-
-        // expect ')'
-        if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==")")) {
-            if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Static_assert"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
-        } else {
-            lex.next();
-        }
-
-        // expect ';'
-        if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
-
-        // build AST node for static assert and return as external declaration
-        auto sa = make_ast<ExternalDecl::StaticAssert>();
-        sa->span = expr ? expr->span : SourceSpan{};
-        sa->expr = expr;
-        sa->message = msgExpr;
-        // Parser-level evaluation to preserve existing parser tests: evaluate constant-expression
-        auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
-        if (!val.has_value()) {
-            // #81: defer a `sizeof`/`_Alignof` of a *declared object* (e.g.
-            // `sizeof arr`, `sizeof(a)/sizeof(a[0])`) — the parser-time evaluator
-            // has no symbol table, but the semantic pass re-checks with one. Only
-            // reject here when no such operand is present (a genuinely non-constant
-            // expression like a bare variable).
-            if (!ConstExprEvaluator::dependsOnUnresolvedSizeof(expr)) {
-                wvmcc::Diagnostic d;
-                d.severity = wvmcc::Diagnostic::Severity::Error;
-                d.message = "_Static_assert requires an integer constant expression";
-                if (expr) d.span = expr->span;
-                diagnostics.push_back(std::move(d));
-            }
-        } else if (*val == 0) {
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            std::string tmsg = "static assertion failed";
-            if (msgExpr && msgExpr->kind == Expr::Kind::String) {
-                auto sl = std::dynamic_pointer_cast<StringLiteral>(msgExpr);
-                if (sl) tmsg = std::string("static assertion failed: ") + sl->value;
-            } else {
-                tmsg = std::string("static assertion failed");
-            }
-            d.message = tmsg;
-            if (expr) d.span = expr->span;
-            diagnostics.push_back(std::move(d));
-        }
-
+        auto sa = parseStaticAssertNode();
+        if (!sa) return nullptr; // malformed (missing '('); already recovered
         auto ext = make_ast<ExternalDecl>();
         ext->span = sa->span;
-        ext->decl = std::static_pointer_cast<ExternalDecl::StaticAssert>(sa);
+        ext->decl = sa;
         return ext;
     }
 
@@ -1508,54 +1508,12 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
 
         // _Static_assert as block item (C17 §6.8.2)
         if (p->kind() == TokenKind::Keyword && p->lexeme() == "_Static_assert") {
-            lex.next();
-            if (!acceptPunct("(")) {
-                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected '(' after _Static_assert";
-                if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
-                while (lex.peek() && !(lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";")) lex.next();
-                if (lex.peek()) lex.next();
-                continue;
+            auto sa = parseStaticAssertNode();
+            if (sa) {
+                auto bi = make_ast<BlockItem>();
+                bi->item = sa;
+                body.push_back(bi);
             }
-            auto expr = parseConditionalExpression();
-            if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==",")) {
-                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ',' in _Static_assert";
-                if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
-            } else { lex.next(); }
-            ExprPtr msgExpr = nullptr;
-            if (lex.peek() && lex.peek()->kind() == TokenKind::StringLiteral) {
-                auto tok = *lex.next();
-                auto sl = make_ast<StringLiteral>(); sl->span = tok.span; sl->value = tok.lexeme(); sl->kind = Expr::Kind::String;
-                msgExpr = sl;
-            } else {
-                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected string literal in _Static_assert";
-                if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
-            }
-            if (!(lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==")")) {
-                if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Static_assert"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
-            } else { lex.next(); }
-            if (lex.peek() && lex.peek()->kind()==TokenKind::Punctuator && lex.peek()->lexeme()==";") lex.next();
-            auto sa = make_ast<ExternalDecl::StaticAssert>();
-            sa->span = expr ? expr->span : SourceSpan{};
-            sa->expr = expr;
-            sa->message = msgExpr;
-            auto val = ConstExprEvaluator::evalIntegerConstantExpr(expr);
-            if (!val.has_value()) {
-                // #81: defer a sizeof/_Alignof of a declared object to semantic
-                // analysis (which has the symbol table); only reject a genuinely
-                // non-constant expression here.
-                if (!ConstExprEvaluator::dependsOnUnresolvedSizeof(expr)) {
-                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";
-                    if (expr) d.span = expr->span; diagnostics.push_back(std::move(d));
-                }
-            } else if (*val == 0) {
-                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
-                std::string tmsg = "static assertion failed";
-                if (msgExpr && msgExpr->kind == Expr::Kind::String) { auto sl = std::dynamic_pointer_cast<StringLiteral>(msgExpr); if (sl) tmsg = std::string("static assertion failed: ") + sl->value; }
-                d.message = tmsg; if (expr) d.span = expr->span; diagnostics.push_back(std::move(d));
-            }
-            auto bi = make_ast<BlockItem>();
-            bi->item = std::static_pointer_cast<ExternalDecl::StaticAssert>(sa);
-            body.push_back(bi);
             continue;
         }
 
