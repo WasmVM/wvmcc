@@ -511,9 +511,28 @@ static void validateInitializerAgainstType(const std::shared_ptr<TypeNode> &type
         bool anyDesignators = false;
         for (const auto &cl : init->clauses) if (!cl.designators.empty()) { anyDesignators = true; break; }
 
-        // If no size and no designators, size can be completed from count
-        if (!type->sizeExpr.has_value() && !anyDesignators) {
-            type->sizeExpr = makeIntegerLiteral(static_cast<long long>(nclauses));
+        // Complete an unknown-size array from its initializer (6.7.9p22): the
+        // size is the largest index initialized, plus one — counting both
+        // designated indices and the sequential positions between/after them.
+        // A designator `[k]` repositions the cursor to k; the next undesignated
+        // clause goes to k+1. Computing the full extent up front (rather than
+        // letting the first designator fix the size) is what lets a later, larger
+        // index like `{[0]=1, [7]=8, [3]=4}` size the array to 8 instead of being
+        // rejected as out of range.
+        if (!type->sizeExpr.has_value()) {
+            long long cursor = 0;  // index the next clause initializes
+            long long maxLen = 0;  // highest (index + 1) reached
+            for (const auto &cl : init->clauses) {
+                if (!cl.designators.empty()
+                    && cl.designators.front().kind == Designator::Kind::Index
+                    && cl.designators.front().index) {
+                    auto vi = ConstExprEvaluator::evalIntegerConstantExpr(cl.designators.front().index.value());
+                    if (vi.has_value()) cursor = *vi;
+                }
+                cursor += 1;
+                if (cursor > maxLen) maxLen = cursor;
+            }
+            type->sizeExpr = makeIntegerLiteral(maxLen);
         }
 
         // Helper to map a clause with designators to a subobject type
@@ -2388,13 +2407,26 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
                     }
                 }
             } else if (d->initializer.value()->kind == Initializer::Kind::List) {
-                bool anyDesignators = false;
-                for (const auto &cl : d->initializer.value()->clauses) { if (!cl.designators.empty()) { anyDesignators = true; break; } }
-                if (!anyDesignators) {
-                    long long sz = static_cast<long long>(nclauses);
-                    arrayDeclWithoutSize->array.size = makeIntegerLiteral(sz);
-                    if (typeNode && typeNode->kind == TypeNode::Kind::Array) typeNode->sizeExpr = arrayDeclWithoutSize->array.size.value();
+                // Complete the size from the initializer (6.7.9p22): the largest
+                // index reached + 1, counting both designated indices and the
+                // sequential positions between/after them. A designator `[k]`
+                // repositions the cursor to k; the next undesignated clause goes
+                // to k+1. This sets the *declarator's* array.size, which is what
+                // sizeof/_Static_assert reads — so it must handle designators,
+                // not just a plain clause count.
+                long long cursor = 0, maxLen = 0;
+                for (const auto &cl : d->initializer.value()->clauses) {
+                    if (!cl.designators.empty()
+                        && cl.designators.front().kind == Designator::Kind::Index
+                        && cl.designators.front().index) {
+                        auto vi = ConstExprEvaluator::evalIntegerConstantExpr(cl.designators.front().index.value());
+                        if (vi.has_value()) cursor = *vi;
+                    }
+                    cursor += 1;
+                    if (cursor > maxLen) maxLen = cursor;
                 }
+                arrayDeclWithoutSize->array.size = makeIntegerLiteral(maxLen);
+                if (typeNode && typeNode->kind == TypeNode::Kind::Array) typeNode->sizeExpr = arrayDeclWithoutSize->array.size.value();
             }
         }
 

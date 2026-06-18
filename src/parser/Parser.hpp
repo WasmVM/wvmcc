@@ -19,6 +19,12 @@ public:
     const std::vector<wvmcc::Diagnostic>& getDiagnostics() const { return diagnostics; }
     // Non-const access for passes (semantic checks) to append diagnostics
     std::vector<wvmcc::Diagnostic>& getDiagnosticsRef() { return diagnostics; }
+    // Resolved enumeration-constant values (name -> int value), collected during
+    // parsing. Codegen uses this to resolve an enum constant referenced in a
+    // runtime expression inside a function body — where the parser cannot fold
+    // it (a local may shadow it), so it is left as an identifier for scope-aware
+    // resolution after symbol-table lookup fails (6.2.1/6.7.2.2).
+    const std::unordered_map<std::string, long long>& getEnumConstants() const { return enum_constants; }
 
 private:
     Lexer &lex;

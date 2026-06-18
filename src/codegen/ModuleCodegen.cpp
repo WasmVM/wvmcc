@@ -990,24 +990,56 @@ bool ModuleCodegen::encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
         if (!elemType) return false;
         size_t elemSize = typeMap_.byteSize(elemType);
         if (elemSize == 0) return false;
-        for (size_t i = 0; i < clauses.size(); ++i) {
-            if (!clauses[i].init) continue; // hole → zeroed
-            if (!encodeConstInit(elemType, clauses[i].init, base + i * elemSize, out))
+        // Element index the next clause initializes; an index designator `[k]`
+        // repositions it (6.7.9p17,p18), and a later clause for the same index
+        // overrides the earlier one (p19) — which falls out naturally because
+        // `out` is simply rewritten. Nested designators (`[k].m`) in a global
+        // initializer are not yet supported.
+        size_t cursor = 0;
+        for (const auto& cl : clauses) {
+            if (!cl.designators.empty()) {
+                if (cl.designators.size() != 1
+                    || cl.designators.front().kind != wvmcc::parser::Designator::Kind::Index
+                    || !cl.designators.front().index)
+                    return false;
+                auto vi = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(
+                    cl.designators.front().index.value());
+                if (!vi.has_value()) return false;
+                cursor = (size_t)*vi;
+            }
+            if (cl.init && !encodeConstInit(elemType, cl.init, base + cursor * elemSize, out))
                 return false;
+            cursor += 1;
         }
         return true;
     }
     if (t->kind == TK::Struct || t->kind == TK::Union) {
         auto names = typeMap_.getOrderedFieldNames(t);
         size_t limit = (t->kind == TK::Union) ? 1 : names.size();
-        for (size_t i = 0; i < clauses.size() && i < limit; ++i) {
-            if (i >= names.size()) break;
-            if (!clauses[i].init) continue; // hole → zeroed
-            auto fieldType   = typeMap_.getFieldType(t, names[i]);
-            size_t fieldOff  = typeMap_.getFieldOffset(t, names[i]);
-            if (!fieldType) return false;
-            if (!encodeConstInit(fieldType, clauses[i].init, base + fieldOff, out))
-                return false;
+        // Field index the next clause initializes; a member designator `.m`
+        // repositions it to that field (6.7.9p17,p18). Nested designators
+        // (`.m.n`) in a global initializer are not yet supported.
+        size_t cursor = 0;
+        for (const auto& cl : clauses) {
+            if (!cl.designators.empty()) {
+                if (cl.designators.size() != 1
+                    || cl.designators.front().kind != wvmcc::parser::Designator::Kind::Member)
+                    return false;
+                const std::string& m = cl.designators.front().member;
+                size_t fi = 0; bool found = false;
+                for (; fi < names.size(); ++fi) if (names[fi] == m) { found = true; break; }
+                if (!found) return false;
+                cursor = fi;
+            }
+            if (cursor >= names.size() || cursor >= limit) break;
+            if (cl.init) {
+                auto fieldType   = typeMap_.getFieldType(t, names[cursor]);
+                size_t fieldOff  = typeMap_.getFieldOffset(t, names[cursor]);
+                if (!fieldType) return false;
+                if (!encodeConstInit(fieldType, cl.init, base + fieldOff, out))
+                    return false;
+            }
+            cursor += 1;
         }
         return true;
     }

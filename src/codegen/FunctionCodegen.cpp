@@ -624,6 +624,18 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
                 return;
             }
         }
+        // An enumeration constant referenced in a runtime expression (6.2.1/
+        // 6.7.2.2): the parser leaves these as identifiers inside a function
+        // body because a local could shadow the name. Symbol lookup just failed,
+        // so no local/global/function shadows it — fold to its int value. (An
+        // enum constant is never an lvalue, so this only applies in value
+        // context.)
+        if (!needLValue && moduleCg_) {
+            if (auto ev = moduleCg_->lookupEnumConstant(expr.name)) {
+                emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)*ev});
+                return;
+            }
+        }
         emitUnimplemented("use of undeclared identifier '" + expr.name + "'", expr.span);
         return;
     }
