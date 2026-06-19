@@ -156,7 +156,7 @@ using PPTokenStream = std::vector<PPToken>;
   - `src/link/` (integrated linker)
   - `src/exec/` (CLI driver)
   - `runtime/` (minimal freestanding libc → `libc.a`)
-  - `tests/{unit,integration,standard}/`
+  - `tests/{unit,standard}/`
 
 ## Milestones
 - M0: Parse/type-check core C; IR gen for expressions/statements; lower to minimal `WasmModule`; run pure computation programs in WasmVM.

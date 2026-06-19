@@ -187,7 +187,7 @@ readwasm app.wasm
 | `src/exec/` | CLI 驅動程式 (`main.cpp`) 與 sysroot 解析。/ CLI driver and sysroot resolution. |
 | `runtime/` | 最小化獨立式 libc——標頭 (`include/`) 與原始碼 (`src/`)，建置為 `libc.a`。/ Minimal freestanding libc. |
 | `docs/` | 規格、降階計畫、程式碼產生、前處理器設計，與 C17 一致性目錄 (`docs/standard/`)。/ Spec, lowering plan, codegen, preprocessor design, conformance catalog. |
-| `tests/` | 單元 (`tests/unit/`)、整合、與標準一致性 (`tests/standard/`) 測試套件。/ Unit, integration, and standard-conformance suites. |
+| `tests/` | 單元 (`tests/unit/`) 與標準一致性 (`tests/standard/`) 測試套件。/ Unit and standard-conformance suites. |
 
 ---
 

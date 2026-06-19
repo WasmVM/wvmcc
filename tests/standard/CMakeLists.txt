@@ -49,8 +49,8 @@ add_standard_static_assert(libc-stdbool ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdbool
 
 # --- `exit` Verify mode: compile, link against libc.a, run on wasmvm ---
 # A test passes iff the linked module runs and `main` returns 0 (the program
-# returns non-zero on its first failed assertion). Mirrors the proven
-# `add_link_test` from tests/integration. Skipped if wasmvm is not on PATH.
+# returns non-zero on its first failed assertion). Skipped if wasmvm is not on
+# PATH.
 set(RUNTIME_LIBDIR ${CMAKE_BINARY_DIR}/runtime/lib)
 find_program(WASMVM_EXECUTABLE NAMES wasmvm)
 if(NOT WASMVM_EXECUTABLE)
@@ -128,9 +128,8 @@ endforeach()
 
 # §7.24 <string.h> — minimal, robust slice only. The installed WasmVM
 # interpreter traps on some of string.c's i64/size_t loops with larger retained
-# call graphs (see tests/integration/phase5/e2e_libc_string.c), so this batch
-# stays to short inputs / tiny call graphs; broader string rows follow once the
-# interpreter issue is resolved.
+# call graphs, so this batch stays to short inputs / tiny call graphs; broader
+# string rows follow once the interpreter issue is resolved.
 add_standard_run_test(libc-string-strlen ${CMAKE_CURRENT_SOURCE_DIR}/libc/string/strlen.c)
 add_standard_run_test(libc-string-strcmp ${CMAKE_CURRENT_SOURCE_DIR}/libc/string/strcmp.c)
 
@@ -154,8 +153,8 @@ function(add_standard_stdout_test name source expected)
         LABELS "standard;stdout;status-${status}" TIMEOUT 15)
 endfunction()
 
-# §7.21 <stdio.h> — formatted/character output (LIBC-stdio-*). printf/puts are
-# exercised by existing integration tests, so the call graph is wasmvm-safe.
+# §7.21 <stdio.h> — formatted/character output (LIBC-stdio-*). printf/puts use
+# small, wasmvm-safe call graphs.
 set(STDIO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdio)
 add_standard_stdout_test(libc-stdio-puts          ${STDIO_DIR}/puts.c          ${STDIO_DIR}/puts.expected)
 add_standard_stdout_test(libc-stdio-putchar       ${STDIO_DIR}/putchar.c       ${STDIO_DIR}/putchar.expected)

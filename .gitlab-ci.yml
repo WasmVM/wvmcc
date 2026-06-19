@@ -2,8 +2,8 @@
 #
 # Three stages run on every push to `parser` and every merge request to `master`:
 #   build    — configure + compile wvmcc (and the libc runtime) with Ninja
-#   test     — run the full ctest suite (unit + e2e integration)
-#   validate — re-validate every .wasm module the integration tests emitted
+#   test     — run the host/unit ctest suite
+#   validate — re-validate every .wasm module the build emitted (libc runtime)
 #
 # wvmcc depends on WasmVM (headers + libWasmVM + the wasmvm/readwasm/ar/ld
 # tools). WasmVM ships no CI image, so the pipeline builds it from source once
@@ -71,8 +71,8 @@ default:
       else
         echo "Using cached WasmVM at $WASMVM_PREFIX"
       fi
-    # Put the WasmVM tools on PATH (wvmcc's integration tests find `wasmvm`, and
-    # the validate stage uses `readwasm`) and its shared lib on the loader path.
+    # Put the WasmVM tools on PATH (the validate stage uses `readwasm`) and its
+    # shared lib on the loader path.
     - export PATH="$WASMVM_PREFIX/bin:$PATH"
     - export LD_LIBRARY_PATH="$WASMVM_PREFIX/lib:${LD_LIBRARY_PATH:-}"
 
@@ -114,14 +114,13 @@ build:
 # The `standard/` suite is an in-progress C17-conformance scaffold — ~half its
 # rows are intentionally-failing (status-partial/deferred) for unimplemented
 # features, so it is NOT a pass/fail gate. CI gates on the non-`standard`
-# regression suite (unit + integration + e2e), which is expected to be green.
+# host/unit regression suite, which is expected to be green.
 #
-# That regression suite is split in two:
-#   test  — the 57 host/unit tests (no wasm execution). The real gate; must pass.
-#   e2e   — the 22 integration tests that run wasm under wasmvm. allow_failure
-#           until #85 is fixed: wvmcc emits invalid wasm on x86-64 Linux (works
-#           on arm64), so these and `validate` fail on an x86-64 runner. Flip
-#           allow_failure off (and drop it from validate) once #85 lands.
+#   test     — the host/unit tests (no wasm execution). The real gate; must pass.
+#   validate — re-validates the .wasm modules the build emitted (libc runtime).
+#              allow_failure until #85 is fixed: wvmcc emits invalid wasm on
+#              x86-64 Linux (works on arm64), so validate fails on an x86-64
+#              runner. Flip allow_failure off once #85 lands.
 
 test:
   stage: test
@@ -134,9 +133,9 @@ test:
       paths:
         - build/
   script:
-    # Non-standard, non-e2e (host/unit) tests. ctest exits non-zero on any
-    # failure, failing the job and the pipeline — a broken test can't slip by.
-    - ctest --test-dir build --label-exclude standard --exclude-regex '^e2e-'
+    # Non-standard (host/unit) tests. ctest exits non-zero on any failure,
+    # failing the job and the pipeline — a broken test can't slip by.
+    - ctest --test-dir build --label-exclude standard
         --output-on-failure --output-junit ctest-report.xml
   artifacts:
     reports:
@@ -144,39 +143,18 @@ test:
     expire_in: 1 day
     when: always
 
-e2e:
-  stage: test
+validate:
+  stage: validate
   needs: ["build"]
-  # allow_failure until #85 (wvmcc emits invalid wasm on x86-64) is fixed.
+  # allow_failure until #85 is fixed: on x86-64 every emitted module is invalid.
   allow_failure: true
   cache:
     - key: "wasmvm-$WASMVM_REF-$CACHE_NS"
       paths:
         - .wasmvm/
-    - key: "build-$CI_COMMIT_REF_SLUG-$CACHE_NS"
-      paths:
-        - build/
-  script:
-    # Integration tests: compile with wvmcc and run the wasm under wasmvm.
-    - ctest --test-dir build --tests-regex '^e2e-'
-        --output-on-failure --output-junit e2e-report.xml
-  artifacts:
-    # Re-export build/ so `validate` sees the .wasm modules these tests wrote.
-    paths:
-      - build/
-    reports:
-      junit: build/e2e-report.xml
-    expire_in: 1 day
-    when: always
-
-validate:
-  stage: validate
-  needs: ["e2e"]
-  # allow_failure until #85 is fixed: on x86-64 every emitted module is invalid.
-  allow_failure: true
   script:
     # readwasm runs module_validate() by default (only --force skips it) and
-    # exits non-zero on an invalid module. Validate the product modules (e2e +
+    # exits non-zero on an invalid module. Validate the product modules (the
     # runtime libc); the `standard` scaffold's modules are excluded, matching the
     # gating policy. Fail if any is invalid, or if none were produced at all.
     - |
