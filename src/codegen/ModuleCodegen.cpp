@@ -872,6 +872,22 @@ ModuleCodegen::evalAddressConstInit(const wvmcc::parser::ExprPtr& e) {
         return std::nullopt;
     }
 
+    // A file-scope compound literal (6.5.2.5p5: static storage duration). Bake
+    // its object into a data segment and use that object's address — for an
+    // array literal this is the array-to-pointer decay (`int *p = (int[]){…}`).
+    if (e->kind == K::CompoundLiteral) {
+        const auto& cl = static_cast<const wvmcc::parser::CompoundLiteral&>(*e);
+        auto addr = materializeCompoundLiteral(cl);
+        if (!addr) return std::nullopt;
+        AddrConst ac;
+        ac.value = (std::int64_t)*addr;
+        auto t = unwrapQual(cl.type);
+        ac.pointee = (t && t->kind == TK::Array)
+                         ? (t->element ? unwrapQual(t->element) : nullptr)
+                         : t;
+        return ac;
+    }
+
     // Pointer ± integer constant (array decay base or another address const).
     if (e->kind == K::Binary) {
         const auto& b = static_cast<const wvmcc::parser::BinaryExpr&>(*e);
@@ -900,6 +916,65 @@ ModuleCodegen::evalAddressConstInit(const wvmcc::parser::ExprPtr& e) {
     }
 
     return std::nullopt;
+}
+
+std::optional<size_t>
+ModuleCodegen::materializeCompoundLiteral(const wvmcc::parser::CompoundLiteral& cl) {
+    using TK = wvmcc::parser::TypeNode::Kind;
+    auto type = cl.type;
+    if (!type || !cl.init) return std::nullopt;
+
+    // Complete an unknown-size array literal from its initializer (6.7.9p22):
+    // largest designated index + 1, else the clause count.
+    if (type->kind == TK::Array && !type->sizeExpr.has_value()
+        && cl.init->kind == wvmcc::parser::Initializer::Kind::List) {
+        long long cursor = 0, maxLen = 0;
+        for (const auto& c : cl.init->clauses) {
+            if (!c.designators.empty()
+                && c.designators.front().kind == wvmcc::parser::Designator::Kind::Index
+                && c.designators.front().index) {
+                auto vi = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(
+                    c.designators.front().index.value());
+                if (vi.has_value()) cursor = *vi;
+            }
+            cursor += 1;
+            if (cursor > maxLen) maxLen = cursor;
+        }
+        auto il = std::make_shared<wvmcc::parser::IntegerLiteral>();
+        il->kind = wvmcc::parser::Expr::Kind::Integer;
+        il->value = maxLen;
+        il->raw = std::to_string(maxLen);
+        type->sizeExpr = il;
+    }
+
+    size_t size = typeMap_.byteSize(type);
+    size_t align = typeMap_.byteAlignment(type);
+    if (size == 0) return std::nullopt;
+    size_t addr = allocateStaticStorage(size, align);
+
+    // Encode the literal's bytes into its own segment. Any nested address sites
+    // belong to THIS object's segment, so isolate pendingAddrSites_ around the
+    // encode (the caller's outer encode is mid-flight and owns its own sites).
+    std::vector<std::byte> bytes(size, std::byte{0});
+    auto savedPending = std::move(pendingAddrSites_);
+    pendingAddrSites_.clear();
+    bool ok = encodeConstInit(type, cl.init, 0, bytes);
+    auto literalSites = std::move(pendingAddrSites_);
+    pendingAddrSites_ = std::move(savedPending);
+    if (!ok) return std::nullopt;
+
+    WasmVM::WasmData seg;
+    seg.mode.type = WasmVM::WasmData::DataMode::Mode::active;
+    seg.mode.memidx = 0;
+    seg.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
+    seg.init = std::move(bytes);
+    size_t dataIdx = module_.datas.size();
+    module_.datas.push_back(std::move(seg));
+    for (const auto& [boff, isFunc] : literalSites) {
+        if (isFunc) dataSegFuncPtrRelocs_.push_back({dataIdx, boff});
+        else        dataSegDataRelocs_.push_back({dataIdx, boff});
+    }
+    return addr;
 }
 
 // #77: encode a constant scalar initializer expression into `out` (little-

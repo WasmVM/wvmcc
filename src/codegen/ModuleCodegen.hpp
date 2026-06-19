@@ -236,6 +236,11 @@ private:
     };
     std::optional<AddrConst> evalAddressConstInit(const wvmcc::parser::ExprPtr& e);
     std::optional<Designator> evalDesignator(const wvmcc::parser::ExprPtr& e);
+    // Materialize a file-scope compound literal as a static object: allocate
+    // mem[0] storage, encode its initializer into an active data segment, and
+    // return the object's address (nullopt if not a constant aggregate). Used by
+    // evalAddressConstInit so `static int *p = (int[]){1,2,3};` works.
+    std::optional<size_t> materializeCompoundLiteral(const wvmcc::parser::CompoundLiteral& cl);
     // Address-constant sites collected by encodeConstInit for the segment
     // currently being built: (byteOffset within the object's buffer, isFuncPtr).
     // Drained by registerGlobalVar into dataSegDataRelocs_/dataSegFuncPtrRelocs_
