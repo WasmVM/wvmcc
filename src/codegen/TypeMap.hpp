@@ -41,6 +41,10 @@ public:
     // Get the byte offset of a named field in a struct/union type
     size_t getFieldOffset(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const;
 
+    // Bit-field placement for a named field, or an unset BitFieldInfo (isBitfield
+    // == false) when the field is an ordinary (non-bit-field) member.
+    BitFieldInfo getFieldBitInfo(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const;
+
     // Get the TypeNode of a named field in a struct/union type (nullptr if not found)
     wvmcc::parser::TypeNodePtr getFieldType(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const;
 

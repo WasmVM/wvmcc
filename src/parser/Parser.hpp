@@ -112,6 +112,9 @@ private:
     std::unordered_set<std::string> typedef_names{};
     // tag registry for struct/union names -> specifier (incomplete or complete)
     std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> tag_registry{};
+    // blockDepth at which each registered tag was declared, so a redefinition
+    // in an inner scope can be told apart from a same-scope duplicate (6.7.2.3).
+    std::unordered_map<std::string, int> tag_registry_depth{};
     // tag registry for enum names -> specifier (incomplete or complete)
     std::unordered_map<std::string, std::shared_ptr<DeclarationSpecifiers::TypeSpecifier::EnumSpecifier>> enum_tag_registry{};
     // enumeration constant name -> value, so enum constants fold to integer

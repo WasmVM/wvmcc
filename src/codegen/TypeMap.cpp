@@ -315,6 +315,15 @@ size_t TypeMap::getFieldOffset(const wvmcc::parser::TypeNodePtr& type, const std
     return 0;
 }
 
+BitFieldInfo TypeMap::getFieldBitInfo(const wvmcc::parser::TypeNodePtr& type, const std::string& fieldName) const {
+    if (type && type->su) {
+        auto layout = layoutEngine_.computeLayout(*type->su);
+        for (const auto& [name, info] : layout.bitFields)
+            if (name == fieldName) return info;
+    }
+    return BitFieldInfo{};
+}
+
 // Walk a declarator chain to its Identifier node, returning the declared
 // name (empty if none). The parser builds the chain outer→inner as
 //   [trailing-suffix(Array/Function)] → Identifier → [leading `*`s]
