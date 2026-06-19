@@ -51,6 +51,9 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
     // globals so they occupy the first defined-global slots (before any guard
     // globals allocated during secondPass).
     materializeExportedDataGlobals();
+    // Linkable mode: declare env.__memory_N imports for any wvmcc_memidx(N)
+    // placements discovered during firstPass (crt0 makes them local memories).
+    materializeMemoryImports();
     secondPass(tu);
     // #79: now that every function-pointer value has interned its table slot,
     // emit the funcref table + element segment that call_indirect dispatches
@@ -169,6 +172,47 @@ void ModuleCodegen::setupMemory() {
     // Freestanding: self-contained — define mem[0] and mem[1] locally.
     module_.mems.push_back(memTy);
     module_.mems.push_back(memTy);
+}
+
+bool ModuleCodegen::ensureMemory(uint8_t idx) {
+    if (idx > maxDataMemidx_) maxDataMemidx_ = idx;
+    if (compileMode_ == CompileMode::Linkable) {
+        // Linkable mode: memories are imports, not local definitions. The actual
+        // `env.__memory_N` imports are appended after firstPass once the
+        // high-water mark is known (materializeMemoryImports); the linker's crt0
+        // replaces them with local memories at the same indices. Here we only
+        // record that memory `idx` is in use.
+        return true;
+    }
+    // Freestanding: self-contained, so define the memory locally. Wasm memory
+    // indices are contiguous, so fill any gap up to `idx`.
+    WasmVM::MemType memTy;
+    memTy.min = 1;
+    memTy.is64 = true;
+    memTy.max = std::nullopt;
+    while (module_.mems.size() <= idx) module_.mems.push_back(memTy);
+    return true;
+}
+
+void ModuleCodegen::materializeMemoryImports() {
+    // Linkable mode only: for each explicitly-placed memory 2..maxDataMemidx_,
+    // import `env.__memory_N` so the object declares the memory it references
+    // (memory index N == the high-nibble pointer tag N). The range is filled
+    // densely so import order yields contiguous memory indices; the linker's
+    // crt0 drops these imports and materializes local memories at the same
+    // indices.
+    if (compileMode_ != CompileMode::Linkable) return;
+    WasmVM::MemType memTy;
+    memTy.min = 1;
+    memTy.is64 = true;
+    memTy.max = std::nullopt;
+    for (int n = 2; n <= (int)maxDataMemidx_; ++n) {
+        WasmVM::WasmImport imp;
+        imp.module = "env";
+        imp.name = "__memory_" + std::to_string(n);
+        imp.desc = memTy;
+        module_.imports.push_back(imp);
+    }
 }
 
 void ModuleCodegen::setupGlobals() {
@@ -1192,6 +1236,28 @@ void ModuleCodegen::registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& 
     }
 }
 
+uint8_t ModuleCodegen::readPlacementMemidx(const wvmcc::parser::DeclarationPtr& decl) {
+    for (const auto& a : decl->gnuAttributes) {
+        if (a.name != "wvmcc_memidx") continue;
+        auto reject = [&](const std::string& msg) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = msg;
+            d.span = decl->span;
+            diagnostics_.push_back(std::move(d));
+        };
+        if (a.intArgs.empty()) { reject("wvmcc_memidx requires an integer memory index"); return 0; }
+        long long n = a.intArgs.front();
+        if (n < 2 || n > 14) {
+            reject("wvmcc_memidx index must be in 2..14 (0/1 reserved, 15 is the function-pointer tag)");
+            return 0;
+        }
+        ensureMemory((uint8_t)n);
+        return (uint8_t)n;
+    }
+    return 0;
+}
+
 void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl) {
     if (!decl || !decl->declarator) return; // type-only decl (e.g. struct def)
     // Function declarators are prototypes — handled by registerFunctionDecl.
@@ -1202,6 +1268,12 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
 
     // `typedef` introduces no object.
     if (decl->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)) return;
+
+    // __attribute__((wvmcc_memidx(N))): place this object in linear memory N
+    // (2..14) instead of the default mem[0]. Honored on both the defining
+    // declaration and an `extern` reference (so an annotated extern resolves to
+    // the right memory cross-TU).
+    uint8_t memidx = readPlacementMemidx(decl);
 
     // `extern` (or a bare prototype) declares a reference, not a definition — no
     // storage in this TU. In Linkable mode we model it the same way `extern`
@@ -1231,6 +1303,7 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
         gm.isImport = true;
         gm.name = name;
         gm.importGlobalIndex = (int)gidx;
+        gm.memidx = memidx; // annotated extern -> deref/access targets memory N
         symbolTable_.define(name, gm);
         return;
     }
@@ -1250,6 +1323,7 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
         if (!gm || gm->isImport) return; // imported extern: no local storage
         typeNode = gm->type;
         addr = gm->address;
+        memidx = gm->memidx; // honor the placement chosen at first definition
         size = typeMap_.byteSize(typeNode);
         if (size == 0) size = 4;
     } else {
@@ -1268,6 +1342,7 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
         gm.dataSegmentIndex = -1;
         gm.address = addr;
         gm.name = name;
+        gm.memidx = memidx;
         symbolTable_.define(name, gm);
 
         // Export this definition's address as a Wasm global so other TUs'
@@ -1295,7 +1370,7 @@ void ModuleCodegen::registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl)
 
     WasmVM::WasmData seg;
     seg.mode.type = WasmVM::WasmData::DataMode::Mode::active;
-    seg.mode.memidx = 0;
+    seg.mode.memidx = memidx;
     seg.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
     seg.init = std::move(bytes);
     size_t dataIdx = module_.datas.size();

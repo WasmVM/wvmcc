@@ -69,6 +69,12 @@ public:
     // Intern a function type into module_.types (deduplicates).
     WasmVM::index_t internFuncType(const WasmVM::FuncType& ft);
 
+    // Highest linear-memory index in use by this module (>= 1: mem[0] heap +
+    // mem[1] shadow stack always exist). Grows when a file-scope object is
+    // placed via __attribute__((wvmcc_memidx(N))). FunctionCodegen reads this
+    // to size the runtime tag-dispatch in emitTaggedLoad/Store.
+    uint8_t maxDataMemidx() const { return maxDataMemidx_; }
+
     // M2-E: a module-level data-pointer relocation. `codeFuncIdx` is the
     // function's index within `module.funcs` (NOT the module-wide function
     // index space, which would include imports). `instrIdx` is the
@@ -193,6 +199,18 @@ private:
     void registerFunctionDeclaration(const wvmcc::parser::DeclarationPtr& decl);
 
     void setupMemory();
+    // Highest memidx in use (see maxDataMemidx()). 1 unless a global requests
+    // an explicit higher placement.
+    uint8_t maxDataMemidx_ = 1;
+    // Ensure memory `idx` is available for an explicit wvmcc_memidx(N) placement
+    // and bump maxDataMemidx_. Freestanding: defines the memory locally (filling
+    // gaps). Linkable: records the high-water mark only — the env.__memory_N
+    // imports are appended later by materializeMemoryImports(). Always succeeds.
+    bool ensureMemory(uint8_t idx);
+    // Linkable only: append `env.__memory_N` imports for every placed memory
+    // 2..maxDataMemidx_ (crt0 turns them into local memories). Runs after
+    // firstPass, once all placements are known.
+    void materializeMemoryImports();
     void setupGlobals();
     // Freestanding mode only: patch the `__heap_base` const i64 global (slot
     // heapBaseGlobalIdx_, reserved early in setupGlobals) to
@@ -208,6 +226,12 @@ private:
     // file scope before function bodies are emitted.
     void registerGlobalVars(const wvmcc::parser::TranslationUnitPtr& tu);
     void registerGlobalVar(const wvmcc::parser::DeclarationPtr& decl);
+    // Parse __attribute__((wvmcc_memidx(N))) on a file-scope declaration: returns
+    // the validated placement memory N (2..14), or 0 if absent. Emits a
+    // diagnostic for an invalid index and calls ensureMemory(N) on success.
+    // Used by both the defining and `extern`-referencing paths so an annotated
+    // extern (the shared-header idiom) reaches the right memory.
+    uint8_t readPlacementMemidx(const wvmcc::parser::DeclarationPtr& decl);
     // Recursively encode a constant initializer (scalar Expr or braced List)
     // for `type` into `out` at byte offset `base` (little-endian). Returns
     // false if any leaf is not a compile-time constant we can encode.

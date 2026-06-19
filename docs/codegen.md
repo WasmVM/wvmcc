@@ -121,8 +121,51 @@ memidx  Purpose
         [static_end..)  future heap (malloc)
   1     Shadow stack (Wasm64 i64 addresses, grows downward)
         [top..bottom]   call frames (address-taken locals, aggregate locals)
- 2–15   Reserved for future use
+ 2–14   Explicit per-object placement via
+        __attribute__((wvmcc_memidx(N))) on a file-scope/static object
+        (both freestanding and linkable/multi-TU; see below).
+   15   Reserved — the function-pointer tag (`kFuncPtrTag`); never a data memory,
+        so NULL (0) is never a valid function pointer.
 ```
+
+#### Explicit placement: `__attribute__((wvmcc_memidx(N)))`
+
+A file-scope or `static` object can be placed in linear memory `N` (2..14)
+instead of the default mem[0]:
+
+```c
+__attribute__((wvmcc_memidx(2))) int counter = 5;   // lives in mem[2]
+```
+
+`ModuleCodegen::registerGlobalVar` reads the attribute, stamps `GlobalMem.memidx`,
+bumps `maxDataMemidx_` (`ensureMemory`), and emits the initializer data segment
+into `(memory N)`. A named access compiles to a direct `(memory N)` load/store;
+`&counter` decays to a pointer tagged with nibble `N`, so an opaque deref
+dispatches to mem[N] via the tagged path below.
+
+How memory `N` comes to exist depends on the compile mode:
+
+- **Freestanding** (`-ffreestanding`): `ensureMemory` defines mem[N] locally,
+  filling any gap so memory indices stay contiguous.
+- **Linkable** (the default, multi-TU): the TU *imports* `env.__memory_N`
+  (`materializeMemoryImports`, run after firstPass), so the object declares the
+  memory it references. The linker's crt0 (`Crt0Synth`) drops every `env`
+  memory import (`__linear_memory`, `__stack_memory`, `__memory_N`) and
+  recreates that many local memories at the same indices. Per-TU static data —
+  across *all* memories — is rebased by the merger's single per-TU delta
+  (`ModuleMerge`); because each TU allocates offsets from one counter, the
+  uniform shift keeps objects disjoint within every memory simultaneously, so no
+  per-memory merge logic is needed. `__heap_base` is computed from mem[0]
+  segments only.
+
+  A cross-TU `extern` reference to a placed global works when the `extern`
+  declaration carries the same `wvmcc_memidx(N)` attribute (the shared-header
+  idiom) — `readPlacementMemidx` honors it on both the defining and referencing
+  paths, so the imported address-global is dereferenced against the right
+  memory. An *unannotated* `extern` of a placed global still resolves its
+  address but reads mem[0] (the default) — a silent mismatch, the same hazard as
+  declaring `extern` with the wrong type; keep the attribute in a shared
+  header.
 
 ### Tagged pointers (cross-memory dereference)
 
@@ -134,14 +177,15 @@ in the high nibble of the i64 (bit 60, `kMemidxShift`); the low 60 bits hold the
 byte offset (`kPtrOffMask`).
 
 - Taking an address (`&local`, array/aggregate decay) ORs in the object's tag
-  (`emitApplyTag`); mem[0] needs no tag (nibble 0), so only shadow-stack
-  addresses set a nibble.
-- A *named* lvalue resolves to a statically known memory (`addressKind` →
-  `Mem0`/`Mem1`) and uses a direct `load`/`store` with that memidx.
+  (`emitApplyTag`); mem[0] needs no tag (nibble 0), so only shadow-stack (mem[1])
+  and explicitly-placed (mem[N], N≥2) addresses set a nibble.
+- A *named* lvalue resolves to a statically known memory (`addressKind` carries
+  the concrete `memidx`) and uses a direct `load`/`store` with that memidx.
 - An *opaque* pointer-rooted lvalue (`addressKind` → `Dynamic`: deref, `->`,
   pointer indexing, call results, casts, pointer arithmetic) is dispatched at
-  runtime by `emitTaggedLoad`/`emitTaggedStore`: branch on the nibble, mask it
-  off, then `load`/`store` from the selected memory.
+  runtime by `emitTaggedLoad`/`emitTaggedStore`: branch on the nibble (an N-way
+  chain sized by the highest live memidx), mask it off, then `load`/`store` from
+  the selected memory.
 
 This is what makes the `&local`-passed-to-a-helper idiom work (issue #78) — it is
 pervasive in real C and in the M2 runtime libc (`vfprintf` builds a local output

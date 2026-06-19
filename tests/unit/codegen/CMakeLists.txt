@@ -62,6 +62,12 @@ target_link_directories(wvmcc-import-attribute-test PRIVATE ${WASMVM_LIBRARY_DIR
 target_link_libraries(wvmcc-import-attribute-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME import-attribute COMMAND wvmcc-import-attribute-test)
 
+add_executable(wvmcc-multimem-attribute-test multimem_attribute_test.cpp ${CODEGEN_FRONTEND_SRCS})
+target_include_directories(wvmcc-multimem-attribute-test PRIVATE ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-multimem-attribute-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-multimem-attribute-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME multimem-attribute COMMAND wvmcc-multimem-attribute-test)
+
 add_executable(wvmcc-start-wrapper-test start_wrapper_test.cpp ${CODEGEN_FRONTEND_SRCS})
 target_include_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_INCLUDE_DIR})
 target_link_directories(wvmcc-start-wrapper-test PRIVATE ${WASMVM_LIBRARY_DIR})
