@@ -1667,8 +1667,14 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
                 ls->stmt = sub;
                 ls->span = idtok.span;
                 ls->kind = Stmt::Kind::Label;
-                // uniqueness check within function: record labels, semantic will report duplicates
-                labels_in_current_function.insert(ls->name);
+                // 6.8.1p3: a label name shall be unique within its function.
+                if (!labels_in_current_function.insert(ls->name).second) {
+                    wvmcc::Diagnostic d;
+                    d.severity = wvmcc::Diagnostic::Severity::Error;
+                    d.message = "duplicate label '" + ls->name + "' in function";
+                    d.span = idtok.span;
+                    diagnostics.push_back(std::move(d));
+                }
                 auto bi = make_ast<BlockItem>();
                 bi->item = std::static_pointer_cast<Stmt>(ls);
                 body.push_back(bi);

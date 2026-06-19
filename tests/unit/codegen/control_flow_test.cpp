@@ -258,8 +258,9 @@ static int test_forward_goto_basic() {
     return 0;
 }
 
-// L: 1; goto L;  →  backward goto: Unreachable + diagnostic
-static int test_backward_goto_unreachable() {
+// L: 1; goto L;  →  backward goto lowers to a dispatch loop (no diagnostic):
+// a `loop` with a `br_table` dispatch and no "unsupported" error.
+static int test_backward_goto_dispatch_loop() {
     TypeMap tm; SymbolTable st;
     FunctionCodegen cg(tm, st);
 
@@ -271,10 +272,16 @@ static int test_backward_goto_unreachable() {
     cg.emitStmt(cs);
     const auto& I = cg.getInstructions();
 
-    // I32_const{1}, Drop, Unreachable
-    if (I.size() != 3) { std::cerr << "bwd_goto size " << I.size() << "\n"; return 1; }
-    if (!is(I[2], WasmVM::Opcode::Unreachable)) return 2;
-    if (cg.getDiagnostics().size() != 1) { std::cerr << "expected 1 diagnostic\n"; return 3; }
+    if (!cg.getDiagnostics().empty()) { std::cerr << "unexpected diagnostic\n"; return 1; }
+    bool hasLoop = false, hasBrTable = false, hasUnreachable = false;
+    for (const auto& instr : I) {
+        if (instr.opcode == WasmVM::Opcode::Loop) hasLoop = true;
+        if (instr.opcode == WasmVM::Opcode::Br_table) hasBrTable = true;
+        if (instr.opcode == WasmVM::Opcode::Unreachable) hasUnreachable = true;
+    }
+    if (!hasLoop) { std::cerr << "expected a dispatch loop\n"; return 2; }
+    if (!hasBrTable) { std::cerr << "expected a br_table dispatch\n"; return 3; }
+    if (hasUnreachable) { std::cerr << "backward goto should no longer be unreachable\n"; return 4; }
     return 0;
 }
 
@@ -389,7 +396,7 @@ int main() {
     RUN(test_nested_break_depths);
     RUN(test_nested_continue_depth);
     RUN(test_forward_goto_basic);
-    RUN(test_backward_goto_unreachable);
+    RUN(test_backward_goto_dispatch_loop);
     RUN(test_switch_dense_brtable);
     RUN(test_switch_sparse_ifchain);
     RUN(test_switch_break_exits);

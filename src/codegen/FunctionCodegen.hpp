@@ -176,6 +176,25 @@ public:
     // emission and nested compound-statement emission.
     void emitItemsWithGotoLift(const std::vector<wvmcc::parser::BlockItemPtr>& items);
 
+    // Whether `items` contain a label reached by a backward or non-local goto —
+    // i.e. one the simple forward-goto lift cannot express. Such a block is
+    // lowered via emitGotoDispatch (a state-machine dispatch loop) instead.
+    bool topLevelNeedsGotoDispatch(const std::vector<wvmcc::parser::BlockItemPtr>& items);
+
+    // Lower an arbitrary-goto block to a dispatch loop: split the items into
+    // segments at labels, drive them by an i32 `state` local, and turn every
+    // `goto L` into `state = seg(L); br $dispatch` and each label boundary into
+    // a br_table dispatch target (WebAssembly has only structured control flow).
+    void emitGotoDispatch(const std::vector<wvmcc::parser::BlockItemPtr>& items);
+
+    // Active dispatch-loop context (set while inside emitGotoDispatch) so a
+    // nested `goto` can branch back to the loop and re-dispatch.
+    bool gotoDispatchActive_ = false;
+    int gotoStateLocal_ = -1;       // i32 local holding the current segment id
+    int gotoDispatchLoopDepth_ = 0; // currentBlockDepth_ at the dispatch loop
+    int gotoDispatchExitDepth_ = 0; // currentBlockDepth_ at the enclosing exit block
+    std::unordered_map<std::string, int> gotoLabelSeg_; // label name -> segment id
+
     // For testing: force the frame-pointer local to a specific index.
     // In production, generate() sets this automatically when address-taken vars exist.
     void forceFramePointerLocal(int idx) { framePointerLocal_ = idx; }
