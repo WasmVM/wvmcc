@@ -162,6 +162,12 @@ public:
 
     void emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr);
 
+    // Copy `size` bytes from the address in `srcAddrLocal` (memory `srcMemidx`)
+    // to the address in `dstAddrLocal` (memory `dstMemidx`), in 8/4/2/1-byte
+    // chunks. Used for aggregate copy-initialization (`struct q = <rvalue>;`).
+    void emitBytewiseCopy(int dstAddrLocal, uint8_t dstMemidx,
+                          int srcAddrLocal, uint8_t srcMemidx, size_t size);
+
     void emitStmt(const wvmcc::parser::StmtPtr& stmt);
     void emitBlockItem(const wvmcc::parser::BlockItemPtr& item);
 
