@@ -40,6 +40,12 @@ struct GlobalMem {
     bool isImport = false;
     std::string name;
     int importGlobalIndex = -1; // Wasm global index of the imported address (isImport)
+    // Target linear memory for this object. 0 = default heap/static memory,
+    // 1 = shadow stack (unused for file-scope objects), 2..14 = an explicit
+    // placement requested via __attribute__((wvmcc_memidx(N))). A pointer to
+    // this object carries `memidx` in its high nibble (see FunctionCodegen's
+    // tagged-pointer model); a named access loads/stores `(memory memidx)`.
+    uint8_t memidx = 0;
 };
 
 struct FuncSymbol {

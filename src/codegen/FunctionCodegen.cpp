@@ -760,8 +760,9 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
         } else if constexpr (std::is_same_v<T, GlobalScalar>) {
             emit(WasmVM::Instr::Global_get{(WasmVM::index_t)info.globalIndex});
         } else if constexpr (std::is_same_v<T, GlobalMem>) {
-            // Static local / file-scope variable: address is in mem[0]
-            // (baked const, or global.get for a cross-TU extern import).
+            // Static local / file-scope variable: address is in its declared
+            // memory (mem[0] by default, or a wvmcc_memidx(N) placement) — a
+            // baked const, or global.get for a cross-TU extern import.
             emitGlobalMemAddr(info);
             // Aggregates (arrays/structs/unions) decay to their address in
             // expression context — don't load a scalar out of them.
@@ -770,7 +771,11 @@ void FunctionCodegen::emitIdentifierExpr(const wvmcc::parser::IdentifierExpr& ex
                     || info.type->kind == wvmcc::parser::TypeNode::Kind::Struct
                     || info.type->kind == wvmcc::parser::TypeNode::Kind::Union);
             if (!needLValue && !isAggregate) {
-                emit(typeMap_.makeLoad(info.type, 0));
+                emit(typeMap_.makeLoad(info.type, info.memidx));
+            } else if (!needLValue && isAggregate) {
+                // Decay to a pointer *value*: tag the address with its memidx so
+                // an opaque deref elsewhere dispatches to the right memory.
+                emitApplyTag(AddrKind::mem(info.memidx));
             }
         } else {
             emitUnimplemented("codegen: unsupported symbol kind for identifier");
@@ -892,8 +897,8 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                 emit(WasmVM::Instr::Local_set{(WasmVM::index_t)dstAddr});
                 AddrKind sk = addressKind(expr.rhs.get());
                 AddrKind dk = addressKind(expr.lhs.get());
-                emitBytewiseCopy(dstAddr, (dk == AddrKind::Mem0) ? 0 : 1,
-                                 srcAddr, (sk == AddrKind::Mem0) ? 0 : 1,
+                emitBytewiseCopy(dstAddr, dk.copyMemidx(),
+                                 srcAddr, sk.copyMemidx(),
                                  typeMap_.byteSize(lhsAggType));
                 // The assignment expression yields the lvalue object; leave its
                 // (tagged) address on the stack for any further use.
@@ -939,7 +944,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                     // newUnit = (old & ~(mask<<off)) | (field << off)
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
                     if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
-                    else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+                    else emit(typeMap_.makeLoad(fieldType, k.memidx));
                     emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)~(mask << bi.bitOffset)});
                     emit(WasmVM::Instr::I64_and{});
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)fieldTmp});
@@ -952,7 +957,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)fieldTmp});
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
                     if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
-                    else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+                    else emit(typeMap_.makeLoad(fieldType, k.memidx));
                     emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)~(mask << bi.bitOffset)});
                     emit(WasmVM::Instr::I32_and{});
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)fieldTmp});
@@ -966,7 +971,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                 emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
                 emit(WasmVM::Instr::Local_get{(WasmVM::index_t)unitTmp});
                 if (k == AddrKind::Dynamic) emitTaggedStore(fieldType);
-                else emit(typeMap_.makeStore(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+                else emit(typeMap_.makeStore(fieldType, k.memidx));
                 // Assignment value: the stored field value.
                 emit(WasmVM::Instr::Local_get{(WasmVM::index_t)fieldTmp});
                 return;
@@ -1018,7 +1023,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                         emit(WasmVM::Instr::I64_add{});
                         emit(WasmVM::Instr::Local_set{(WasmVM::index_t)dstAddr});
                         AddrKind sk = addressKind(expr.rhs.get());
-                        uint8_t srcMem = (sk == AddrKind::Mem0) ? 0 : 1;
+                        uint8_t srcMem = sk.copyMemidx();
                         emitBytewiseCopy(dstAddr, /*dstMemidx=*/1, srcAddr, srcMem,
                                          typeMap_.byteSize(ml->type));
                         // Result of the assignment is the destination object;
@@ -1039,7 +1044,8 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                     return;
                 }
                 if (auto* gm = std::get_if<GlobalMem>(&*sym)) {
-                    // Static local / file-scope variable: address is in mem[0].
+                    // Static local / file-scope variable: address is in its
+                    // declared memory (mem[0], or a wvmcc_memidx(N) placement).
                     auto rhsWasmType = getExprType(expr.rhs);
                     int tempIdx = allocRawLocal(rhsWasmType);
                     emitExpr(expr.rhs, false);
@@ -1049,7 +1055,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)tempIdx});
                     emitGlobalMemAddr(*gm);
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
-                    emit(typeMap_.makeStore(gm->type, 0));
+                    emit(typeMap_.makeStore(gm->type, gm->memidx));
                     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
                     return;
                 }
@@ -1093,7 +1099,7 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         if (k == AddrKind::Dynamic) {
             emitTaggedStore(lhsTypeNode);
         } else {
-            emit(typeMap_.makeStore(lhsTypeNode, k == AddrKind::Mem1 ? 1 : 0));
+            emit(typeMap_.makeStore(lhsTypeNode, k.memidx));
         }
         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)tempIdx});
         return;
@@ -1944,6 +1950,15 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     }
 }
 
+const FunctionCodegen::AddrKind FunctionCodegen::AddrKind::Mem0 = FunctionCodegen::AddrKind::mem(0);
+const FunctionCodegen::AddrKind FunctionCodegen::AddrKind::Mem1 = FunctionCodegen::AddrKind::mem(1);
+const FunctionCodegen::AddrKind FunctionCodegen::AddrKind::Dynamic =
+    FunctionCodegen::AddrKind{FunctionCodegen::AddrKind::KDynamic, 0};
+
+uint8_t FunctionCodegen::maxMemidx() const {
+    return moduleCg_ ? moduleCg_->maxDataMemidx() : 1;
+}
+
 FunctionCodegen::AddrKind FunctionCodegen::addressKind(const wvmcc::parser::Expr* e) {
     using K = wvmcc::parser::Expr::Kind;
     if (!e) return AddrKind::Mem1;
@@ -1951,9 +1966,12 @@ FunctionCodegen::AddrKind FunctionCodegen::addressKind(const wvmcc::parser::Expr
         case K::Ident: {
             const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*e);
             auto sym = symbolTable_.lookup(id.name);
-            // File-scope variables (GlobalMem) are static mem[0]; address-taken
-            // / aggregate locals (MemoryLocal) are static mem[1].
-            if (sym && std::holds_alternative<GlobalMem>(*sym)) return AddrKind::Mem0;
+            // File-scope variables (GlobalMem) are static, in their declared
+            // memory (mem[0] by default, or a wvmcc_memidx(N) placement);
+            // address-taken / aggregate locals (MemoryLocal) are static mem[1].
+            if (sym) {
+                if (auto* gm = std::get_if<GlobalMem>(&*sym)) return AddrKind::mem(gm->memidx);
+            }
             return AddrKind::Mem1;
         }
         case K::Member: {
@@ -1998,11 +2016,12 @@ FunctionCodegen::AddrKind FunctionCodegen::addressKind(const wvmcc::parser::Expr
     }
 }
 
-// OR the memidx tag onto the i64 address on top of the stack. Only mem[1]
-// needs a non-zero nibble; mem[0] and Dynamic (already-tagged) are no-ops.
+// OR the memidx tag onto the i64 address on top of the stack. A static access
+// to memory N (N>=1) stamps nibble N; mem[0] and Dynamic (already-tagged) are
+// no-ops.
 void FunctionCodegen::emitApplyTag(AddrKind k) {
-    if (k != AddrKind::Mem1) return;
-    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)((int64_t)1 << kMemidxShift)});
+    if (k.kind == AddrKind::KDynamic || k.memidx == 0) return;
+    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)((int64_t)k.memidx << kMemidxShift)});
     emit(WasmVM::Instr::I64_or{});
 }
 
@@ -2014,26 +2033,32 @@ void FunctionCodegen::emitApplyTag(AddrKind k) {
 void FunctionCodegen::emitTaggedLoad(const wvmcc::parser::TypeNodePtr& type) {
     int addrTmp = allocRawLocal(WasmVM::ValueType::i64);
     int resTmp  = allocRawLocal(typeMap_.toWasmType(type));
+    int nibbleTmp = allocRawLocal(WasmVM::ValueType::i32);
     emit(WasmVM::Instr::Local_tee{(WasmVM::index_t)addrTmp});
     // nibble (as i32, to avoid the WasmVM i64-compare interpreter trap)
     emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kMemidxShift});
     emit(WasmVM::Instr::I64_shr_u{});
     emit(WasmVM::Instr::I32_wrap_i64{});
-    emit(WasmVM::Instr::I32_const{1});
-    emit(WasmVM::Instr::I32_eq{});
-    emit(WasmVM::Instr::If{std::nullopt});
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
-    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
-    emit(WasmVM::Instr::I64_and{});
-    emit(typeMap_.makeLoad(type, 1));
-    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
-    emit(WasmVM::Instr::Else{});
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
-    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
-    emit(WasmVM::Instr::I64_and{});
-    emit(typeMap_.makeLoad(type, 0));
-    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
-    emit(WasmVM::Instr::End{});
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)nibbleTmp});
+    auto loadFrom = [&](uint8_t m) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+        emit(WasmVM::Instr::I64_and{});
+        emit(typeMap_.makeLoad(type, m));
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
+    };
+    // Dispatch nibble == 1, 2, ... maxMemidx; the innermost else is mem[0].
+    uint8_t maxM = maxMemidx();
+    for (uint8_t m = 1; m <= maxM; ++m) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)nibbleTmp});
+        emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)m});
+        emit(WasmVM::Instr::I32_eq{});
+        emit(WasmVM::Instr::If{std::nullopt});
+        loadFrom(m);
+        emit(WasmVM::Instr::Else{});
+    }
+    loadFrom(0);
+    for (uint8_t m = 1; m <= maxM; ++m) emit(WasmVM::Instr::End{});
     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)resTmp});
 }
 
@@ -2041,27 +2066,32 @@ void FunctionCodegen::emitTaggedLoad(const wvmcc::parser::TypeNodePtr& type) {
 void FunctionCodegen::emitTaggedStore(const wvmcc::parser::TypeNodePtr& type) {
     int valTmp  = allocRawLocal(typeMap_.toWasmType(type));
     int addrTmp = allocRawLocal(WasmVM::ValueType::i64);
+    int nibbleTmp = allocRawLocal(WasmVM::ValueType::i32);
     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)valTmp});   // pop value
     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)addrTmp});  // pop tagged addr
     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
     emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kMemidxShift});
     emit(WasmVM::Instr::I64_shr_u{});
     emit(WasmVM::Instr::I32_wrap_i64{});
-    emit(WasmVM::Instr::I32_const{1});
-    emit(WasmVM::Instr::I32_eq{});
-    emit(WasmVM::Instr::If{std::nullopt});
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
-    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
-    emit(WasmVM::Instr::I64_and{});
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)valTmp});
-    emit(typeMap_.makeStore(type, 1));
-    emit(WasmVM::Instr::Else{});
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
-    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
-    emit(WasmVM::Instr::I64_and{});
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)valTmp});
-    emit(typeMap_.makeStore(type, 0));
-    emit(WasmVM::Instr::End{});
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)nibbleTmp});
+    auto storeTo = [&](uint8_t m) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)kPtrOffMask});
+        emit(WasmVM::Instr::I64_and{});
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)valTmp});
+        emit(typeMap_.makeStore(type, m));
+    };
+    uint8_t maxM = maxMemidx();
+    for (uint8_t m = 1; m <= maxM; ++m) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)nibbleTmp});
+        emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)m});
+        emit(WasmVM::Instr::I32_eq{});
+        emit(WasmVM::Instr::If{std::nullopt});
+        storeTo(m);
+        emit(WasmVM::Instr::Else{});
+    }
+    storeTo(0);
+    for (uint8_t m = 1; m <= maxM; ++m) emit(WasmVM::Instr::End{});
 }
 
 void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr, bool needLValue) {
@@ -2092,7 +2122,7 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
 
     if (!needLValue) {
         if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
-        else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+        else emit(typeMap_.makeLoad(fieldType, k.memidx));
         // Bit-field read: extract the field's bits from the loaded storage unit.
         if (bitInfo.isBitfield)
             emitBitfieldExtract(this, bitInfo,
@@ -2162,7 +2192,7 @@ void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, b
         if (elemIsAggregate) {
             if (k != AddrKind::Dynamic) emitApplyTag(k);
         } else if (k == AddrKind::Dynamic) emitTaggedLoad(elemType);
-        else emit(typeMap_.makeLoad(elemType, k == AddrKind::Mem1 ? 1 : 0));
+        else emit(typeMap_.makeLoad(elemType, k.memidx));
     }
 }
 
@@ -2682,7 +2712,7 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                             emit(WasmVM::Instr::I64_add{});
                             emit(WasmVM::Instr::Local_set{(WasmVM::index_t)dstAddr});
                             AddrKind sk = addressKind(srcExpr.get());
-                            uint8_t srcMem = (sk == AddrKind::Mem0) ? 0 : 1;
+                            uint8_t srcMem = sk.copyMemidx();
                             emitBytewiseCopy(dstAddr, /*dstMemidx=*/1, srcAddr, srcMem,
                                              typeMap_.byteSize(typeNode));
                         } else {

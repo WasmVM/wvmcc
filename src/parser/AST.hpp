@@ -243,6 +243,7 @@ struct Parameter {
 struct GnuAttribute {
     std::string name;
     std::vector<std::string> stringArgs;
+    std::vector<long long> intArgs;   // integer-constant args, e.g. wvmcc_memidx(2)
 };
 
 // Declaration: specifiers + declarator + optional initializer

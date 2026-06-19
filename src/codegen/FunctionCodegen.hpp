@@ -127,8 +127,33 @@ public:
     // at a pointer value (deref/arrow/pointer-index anywhere in the chain) is
     // Dynamic: the pointer carries its memidx in the high nibble (see the
     // tagged-pointer model below), so the load/store must dispatch on that tag.
-    enum class AddrKind { Mem0, Mem1, Dynamic };
+    // Classifies where an lvalue lives. A *static* access targets a known
+    // linear memory `memidx` (0 = file-scope mem[0], 1 = shadow-stack mem[1],
+    // 2..14 = an __attribute__((wvmcc_memidx(N))) placement) and uses a plain
+    // load/store with that index. A *Dynamic* access is rooted at an opaque
+    // pointer value, so it dispatches on the pointer's high-nibble tag at the
+    // access site. The Mem0/Mem1/Dynamic spellings are kept for readability;
+    // equality compares both kind and memidx.
+    struct AddrKind {
+        enum Kind : uint8_t { KStatic, KDynamic };
+        Kind kind = KStatic;
+        uint8_t memidx = 0;
+        bool operator==(const AddrKind& o) const { return kind == o.kind && memidx == o.memidx; }
+        bool operator!=(const AddrKind& o) const { return !(*this == o); }
+        static AddrKind mem(uint8_t m) { return AddrKind{KStatic, m}; }
+        // Concrete memory index for an aggregate bytewise copy, which needs a
+        // *static* index (it can't dispatch on a runtime tag). A static operand
+        // uses its memidx; a Dynamic (opaque-pointer) aggregate rvalue — a call
+        // result, compound literal, etc. — lives in the shadow stack (mem[1]).
+        uint8_t copyMemidx() const { return kind == KDynamic ? 1 : memidx; }
+        static const AddrKind Mem0;
+        static const AddrKind Mem1;
+        static const AddrKind Dynamic;
+    };
     AddrKind addressKind(const wvmcc::parser::Expr* e);
+    // Highest live memidx (from ModuleCodegen, or 1 when standalone): sizes the
+    // runtime tag dispatch in emitTaggedLoad/Store.
+    uint8_t maxMemidx() const;
 
     // Tagged-pointer model (memidx in bits [60:63], offset in [0:59]):
     //   &x / array-or-aggregate decay produce a pointer *value* whose high

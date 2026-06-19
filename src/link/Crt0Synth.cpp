@@ -134,6 +134,11 @@ void synthesize(LinkContext& ctx) {
 
     // ----- 1. Drop env.__* imports of mem/global kind. They'll be
     //          replaced by local definitions at the same index positions.
+    //          Memory imports are env.__linear_memory (mem[0]),
+    //          env.__stack_memory (mem[1]) and, for wvmcc_memidx(N) placements,
+    //          env.__memory_N (mem[N]). Count them so we recreate exactly as
+    //          many local memories, preserving every memory index.
+    WasmVM::index_t droppedMems = 0;
     {
         std::vector<WasmVM::WasmImport> kept;
         kept.reserve(m.imports.size());
@@ -141,7 +146,9 @@ void synthesize(LinkContext& ctx) {
             const bool isMem    = std::holds_alternative<WasmVM::MemType>(imp.desc);
             const bool isGlobal = std::holds_alternative<WasmVM::GlobalType>(imp.desc);
             if (isMem && imp.module == "env" &&
-                (imp.name == "__linear_memory" || imp.name == "__stack_memory")) {
+                (imp.name == "__linear_memory" || imp.name == "__stack_memory" ||
+                 imp.name.rfind("__memory_", 0) == 0)) {
+                ++droppedMems;
                 continue; // drop
             }
             if (isGlobal && imp.module == "env" &&
@@ -153,20 +160,24 @@ void synthesize(LinkContext& ctx) {
         m.imports = std::move(kept);
     }
 
-    // ----- 2. Add local mems and globals at indices 0 and 1.
-    //          For now both heap and stack memories use the M1 size (1
-    //          page each). __heap_base is computed from the merged data
-    //          segment top (data segments still carry their TU-local
-    //          offsets — M2-L8 rebases multi-TU; single-TU is already
-    //          correct).
+    // ----- 2. Add local mems and globals. mem[0] = heap, mem[1] = stack, and
+    //          mem[2..] = wvmcc_memidx(N) placement memories (one per dropped
+    //          env memory import). All use the M1 size (1 page each).
+    //          __heap_base is computed from the merged mem[0] data top (data
+    //          segments still carry their TU-local offsets — M2-L8 rebases
+    //          multi-TU; single-TU is already correct).
     auto memTy = []() {
         WasmVM::MemType t;
         t.min = 1;
         t.is64 = true;
         return t;
     }();
-    m.mems.insert(m.mems.begin(), memTy);          // mem[0] = heap
-    m.mems.insert(m.mems.begin() + 1, memTy);      // mem[1] = stack
+    if (droppedMems < 2) droppedMems = 2; // heap + stack always exist
+    // Linkable inputs carry no local memories, so the merged module has none
+    // here; prepend `droppedMems` local memories at indices 0..droppedMems-1.
+    for (WasmVM::index_t i = 0; i < droppedMems; ++i) {
+        m.mems.insert(m.mems.begin() + i, memTy);
+    }
 
     // Stack pointer: mut i64 initialized to one page (0x10000).
     {
@@ -180,6 +191,9 @@ void synthesize(LinkContext& ctx) {
     {
         uint64_t top = 0;
         for (const auto& d : m.datas) {
+            // Only mem[0] holds the heap; placement memories (mem[2..]) have
+            // their own address spaces and must not inflate __heap_base.
+            if (d.mode.memidx.value_or(0) != 0) continue;
             uint64_t base = 0;
             if (d.mode.offset.has_value()) {
                 std::visit([&](const auto& v) {

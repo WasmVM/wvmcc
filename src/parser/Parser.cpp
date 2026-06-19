@@ -121,6 +121,8 @@ std::vector<GnuAttribute> Parser::parseGnuAttributeSpecifierList() {
                     if (r->kind() == TokenKind::Punctuator && r->lexeme() == ")") break;
                     if (r->kind() == TokenKind::StringLiteral) {
                         attr.stringArgs.push_back(r->lexeme());
+                    } else if (auto* it = std::get_if<IntegerToken>(&r->v)) {
+                        attr.intArgs.push_back((long long)it->info.value);
                     }
                     // string literals, identifiers, integers: consume; commas separate them
                     lex.next();
