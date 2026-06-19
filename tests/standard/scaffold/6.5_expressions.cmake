@@ -16,6 +16,7 @@ add_standard_run_test(lang-6.5.14-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_ex
 add_standard_run_test(lang-6.5.14-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.14_logical_or_yields_int.c supported)
 add_standard_run_test(lang-6.5.15-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.15_arithmetic_result_type.c supported)
 add_standard_run_test(lang-6.5.15-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.15_conditional_evaluates_one_operand.c supported)
+add_standard_run_test(lang-6.5.15-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.15_conditional_as_binary_operand.c supported)
 add_standard_compile_fail(lang-6.5.15-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.15_constraint_incompatible_operands.c supported)
 add_standard_run_test(lang-6.5.15-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.15_pointer_result_type.c supported)
 add_standard_compile_fail(lang-6.5.16.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.16.1_incompatible_pointer_assignment.c supported)

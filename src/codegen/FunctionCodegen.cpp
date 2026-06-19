@@ -576,11 +576,16 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
                     : (thenVt == WasmVM::ValueType::i64 || elseVt == WasmVM::ValueType::i64) ? WasmVM::ValueType::i64
                     :                                                                          WasmVM::ValueType::i32;
 
-        WasmVM::FuncType ifTy;
-        ifTy.results.push_back(common);
-        WasmVM::index_t ifTyIdx = moduleCg_->internFuncType(ifTy);
+        // Use a void `if` that writes each branch's value into a result local
+        // (rather than a typed-result block), then leave it on the stack. This
+        // avoids the WasmVM interpreter's mishandling of a typed-result block
+        // sitting above other operands on the value stack — e.g. the already-
+        // pushed left operand of an enclosing binary op in `X + (c ? A : B)`,
+        // which the typed-result form would clobber. Same quirk worked around
+        // in emitTaggedLoad.
+        int resTmp = allocRawLocal(common);
 
-        // Emit cond, normalize to i32, then typed if.
+        // Emit cond, normalize to i32, then void if.
         emitExpr(t.cond, false);
         auto condVt = getExprType(t.cond);
         if (condVt == WasmVM::ValueType::i64) {
@@ -593,13 +598,16 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
             emit(WasmVM::Instr::F64_const{0.0});
             emit(WasmVM::Instr::F64_ne{});
         }
-        emit(WasmVM::Instr::If{ifTyIdx});
+        emit(WasmVM::Instr::If{std::nullopt});
         emitExpr(t.thenExpr, false);
         emitConvert(this, thenVt, common);
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
         emit(WasmVM::Instr::Else{});
         emitExpr(t.elseExpr, false);
         emitConvert(this, elseVt, common);
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)resTmp});
         emit(WasmVM::Instr::End{});
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)resTmp});
         break;
     }
     case K::Sizeof: {
