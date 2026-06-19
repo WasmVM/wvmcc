@@ -539,6 +539,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.5.15-02` | 6.5.15p5 | Arithmetic 2nd/3rd operands → usual-arithmetic-conversion result type | Positive | supported | exit | |
 | `LANG-6.5.15-03` | 6.5.15p6 | Pointer 2nd/3rd operands → composite/qualified result type; null-constant and `void*` rules | Positive | supported | exit | |
 | `LANG-6.5.15-04` | 6.5.15p2,p3 | Constraints: 1st scalar; 2nd/3rd both arithmetic / same struct-union / void / compatible pointers / pointer+null / pointer+`void*` | Negative | supported | compile-fail | |
+| `LANG-6.5.15-05` | 6.5.15p4 | `?:` as an operand of a binary operator preserves the other operand (no value-stack corruption when the condition is true) | Positive | supported | exit | |
 
 ### 6.5.16 Assignment operators
 
