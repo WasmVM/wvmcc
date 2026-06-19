@@ -493,7 +493,7 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
         emitArrayIndexExpr(static_cast<const wvmcc::parser::IndexExpr&>(*expr), needLValue);
         break;
     case K::CompoundLiteral:
-        emitCompoundLiteralExpr(static_cast<const wvmcc::parser::CompoundLiteral&>(*expr));
+        emitCompoundLiteralExpr(static_cast<const wvmcc::parser::CompoundLiteral&>(*expr), needLValue);
         break;
     case K::Ternary: {
         const auto& t = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);
@@ -1744,6 +1744,13 @@ FunctionCodegen::AddrKind FunctionCodegen::addressKind(const wvmcc::parser::Expr
             if (u.op == "*") return AddrKind::Dynamic;   // deref of a pointer value
             return addressKind(u.rhs.get());
         }
+        case K::CompoundLiteral:
+            // A compound literal inside a function body is an automatic object
+            // living in the shadow-stack frame (mem[1]); emitCompoundLiteralExpr
+            // leaves its untagged frame address, so member/index access does a
+            // static mem[1] load. (File-scope literals go through the global
+            // path, not here.)
+            return AddrKind::Mem1;
         default:
             // Any computed pointer value (call result, cast, pointer arithmetic)
             // is opaque — dispatch on its tag at the access site.
@@ -1997,10 +2004,35 @@ void FunctionCodegen::emitListInitializer(int baseAddrLocal,
     }
 }
 
-void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr) {
+void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiteral& expr, bool needLValue) {
     if (!expr.type) {
         emitUnimplemented("codegen: compound literal missing type", expr.span);
         return;
+    }
+
+    // Complete an unknown-size array literal `(int[]){…}` from its initializer
+    // (6.7.9p22): the largest designated index + 1, else the clause count. The
+    // frame allocation below needs a concrete size.
+    if (expr.type->kind == wvmcc::parser::TypeNode::Kind::Array
+        && !expr.type->sizeExpr.has_value()
+        && expr.init && expr.init->kind == wvmcc::parser::Initializer::Kind::List) {
+        long long cursor = 0, maxLen = 0;
+        for (const auto& cl : expr.init->clauses) {
+            if (!cl.designators.empty()
+                && cl.designators.front().kind == wvmcc::parser::Designator::Kind::Index
+                && cl.designators.front().index) {
+                auto vi = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(
+                    cl.designators.front().index.value());
+                if (vi.has_value()) cursor = *vi;
+            }
+            cursor += 1;
+            if (cursor > maxLen) maxLen = cursor;
+        }
+        auto il = std::make_shared<wvmcc::parser::IntegerLiteral>();
+        il->kind = wvmcc::parser::Expr::Kind::Integer;
+        il->value = maxLen;
+        il->raw = std::to_string(maxLen);
+        expr.type->sizeExpr = il;
     }
 
     size_t size  = typeMap_.byteSize(expr.type);
@@ -2021,54 +2053,15 @@ void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiter
     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)addrLocal});
 
     bool isList = expr.init && expr.init->kind == wvmcc::parser::Initializer::Kind::List;
-    bool isStruct = expr.type->kind == wvmcc::parser::TypeNode::Kind::Struct
-                    || expr.type->kind == wvmcc::parser::TypeNode::Kind::Union;
+    bool isAggregate = expr.type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || expr.type->kind == wvmcc::parser::TypeNode::Kind::Union
+                    || expr.type->kind == wvmcc::parser::TypeNode::Kind::Array;
 
-    if (isList && isStruct && expr.type->su) {
-        // Struct/union list initializer: assign fields in declaration order.
-        // Match positionally (or by member designator).
-        size_t clauseIdx = 0;
-        for (const auto& member : expr.type->su->members) {
-            for (const auto& sd : member.declarators) {
-                if (!sd.declarator || sd.declarator->id.name.empty()) continue;
-                const std::string& fieldName = sd.declarator->id.name;
-
-                const wvmcc::parser::InitClause* clause = nullptr;
-                // Prefer member designator match
-                for (const auto& cl : expr.init->clauses) {
-                    if (!cl.designators.empty()
-                        && cl.designators[0].kind == wvmcc::parser::Designator::Kind::Member
-                        && cl.designators[0].member == fieldName) {
-                        clause = &cl;
-                        break;
-                    }
-                }
-                // Fall back to positional
-                if (!clause && clauseIdx < expr.init->clauses.size()) {
-                    const auto& cl = expr.init->clauses[clauseIdx];
-                    if (cl.designators.empty()) clause = &cl;
-                }
-                if (clause) ++clauseIdx;
-                if (!clause || !clause->init
-                    || clause->init->kind != wvmcc::parser::Initializer::Kind::Expr
-                    || !clause->init->expr) continue;
-
-                auto fieldType = typeMap_.getFieldType(expr.type, fieldName);
-                size_t fieldOff = typeMap_.getFieldOffset(expr.type, fieldName);
-
-                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
-                if (fieldOff > 0) {
-                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
-                    emit(WasmVM::Instr::I64_add{});
-                }
-                emitExpr(clause->init->expr);
-                // Convert the initializer to the member's type (as by
-                // assignment): e.g. the literal `0` (i32) into a pointer/long
-                // member (i64) needs an extend, or the store type-mismatches.
-                emitConvert(this, getExprType(clause->init->expr), typeMap_.toWasmType(fieldType));
-                emit(typeMap_.makeStore(fieldType, 1));
-            }
-        }
+    if (isList && isAggregate) {
+        // Struct/union/array list initializer: reuse the shared aggregate
+        // initializer (handles fields/elements, member/index designators, and
+        // nested aggregates). The frame object lives in mem[1] (memidx 1).
+        emitListInitializer(addrLocal, expr.type, expr.init, /*memidx=*/1);
     } else if (isList) {
         // Scalar list initializer: use first clause only
         if (!expr.init->clauses.empty()) {
@@ -2076,6 +2069,7 @@ void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiter
             if (cl.init && cl.init->kind == wvmcc::parser::Initializer::Kind::Expr && cl.init->expr) {
                 emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
                 emitExpr(cl.init->expr);
+                emitConvert(this, getExprType(cl.init->expr), typeMap_.toWasmType(expr.type));
                 emit(typeMap_.makeStore(expr.type, 1));
             }
         }
@@ -2085,8 +2079,23 @@ void FunctionCodegen::emitCompoundLiteralExpr(const wvmcc::parser::CompoundLiter
         emit(typeMap_.makeStore(expr.type, 1));
     }
 
-    // Leave address on stack as the expression value
+    // Leave the object's frame address on the stack. In lvalue context (`&`,
+    // member/index access) this untagged mem[1] address is consumed directly.
+    // In value context the object undergoes the usual conversions:
+    //   - array  → decays to a pointer *value*, tagged mem[1] so it derefs
+    //              correctly through an opaque pointer (`int *p = (int[]){…};`);
+    //   - scalar → lvalue conversion loads the value (`int x = (int){42};`),
+    //              else the i64 address would mismatch the expected scalar;
+    //   - struct/union → its "value" is its address in this ABI (left as-is).
     emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrLocal});
+    if (!needLValue) {
+        using TK = wvmcc::parser::TypeNode::Kind;
+        if (expr.type->kind == TK::Array) {
+            emitApplyTag(AddrKind::Mem1);
+        } else if (expr.type->kind != TK::Struct && expr.type->kind != TK::Union) {
+            emit(typeMap_.makeLoad(expr.type, 1));
+        }
+    }
 }
 
 void FunctionCodegen::emitStmt(const wvmcc::parser::StmtPtr& stmt) {
@@ -2316,11 +2325,11 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                         && (*v->initializer)->expr) {
                         const auto& srcExpr = (*v->initializer)->expr;
                         if (isAggregateType) {
-                            // Aggregate copy-initialization (`struct q = <rvalue>;`):
-                            // the source expression yields the object's address;
-                            // copy its bytes into this frame slot. (A scalar
-                            // makeStore here would store the *address*, not the
-                            // value — the bug that made `struct b = a;` corrupt.)
+                            // Aggregate copy-initialization (`struct q = <rvalue>;`,
+                            // incl. a struct/array compound literal): the source
+                            // expression yields the object's address; copy its
+                            // bytes into this frame slot. (A scalar makeStore here
+                            // would store the *address*, not the value.)
                             emitExpr(srcExpr, /*needLValue=*/true);
                             int srcAddr = allocRawLocal(WasmVM::ValueType::i64);
                             emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddr});
@@ -2453,10 +2462,6 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
     }
 }
 
-// #79: does an indirect call through `callee` (a function-pointer expression)
-// leave a value on the stack? False for a `void` return (call_indirect pushes
-// nothing, so the expression-statement path must not emit a Drop). Struct
-// returns currently still leave the sret pointer.
 void FunctionCodegen::emitBytewiseCopy(int dstAddrLocal, uint8_t dstMemidx,
                                        int srcAddrLocal, uint8_t srcMemidx, size_t size) {
     using O = WasmVM::offset_t;
@@ -2485,6 +2490,10 @@ void FunctionCodegen::emitBytewiseCopy(int dstAddrLocal, uint8_t dstMemidx,
     }
 }
 
+// #79: does an indirect call through `callee` (a function-pointer expression)
+// leave a value on the stack? False for a `void` return (call_indirect pushes
+// nothing, so the expression-statement path must not emit a Drop). Struct
+// returns currently still leave the sret pointer.
 bool FunctionCodegen::indirectCallLeavesValue(const wvmcc::parser::ExprPtr& callee) {
     auto ct = getExprTypeNode(callee);
     auto fn = ct;
@@ -3027,6 +3036,11 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         ptrTn->kind = wvmcc::parser::TypeNode::Kind::Pointer;
         ptrTn->pointee = charTn;
         return ptrTn;
+    }
+    case K::CompoundLiteral: {
+        // A compound literal has the type named by its `(type-name)`.
+        const auto& cl = static_cast<const wvmcc::parser::CompoundLiteral&>(*expr);
+        return cl.type;
     }
     case K::Sizeof:
     case K::AlignOf: {

@@ -2281,7 +2281,7 @@ ExprPtr Parser::parsePrimary() {
                 clit->init = parseInitializer();
                 clit->kind = Expr::Kind::CompoundLiteral;
                 clit->span = clit->init ? clit->init->span : SourceSpan{};
-                return clit;
+                return applyPostfixSuffix(clit);
             }
             // otherwise treat as parenthesized expression: parse assignment-expression
             ExprPtr inner = parseAssignmentExpression();
@@ -2903,6 +2903,11 @@ ExprPtr Parser::parseCastExpression() {
                 auto absDecl = parseDeclarator();
                 if (declaratorContainsPointer(absDecl) && castPointerDepth == 0) castPointerDepth = 1;
             }
+            // Abstract array declarator suffix, e.g. the `[]` / `[3]` of a
+            // compound literal `(int[]){…}` or `(int[3]){…}`. Without consuming
+            // it here the `[` trips the ')' check below.
+            std::vector<ExprPtr> castArrayDims;
+            parseAbstractArrayDims(castArrayDims);
             if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
                 if (lex.peek()) {
                     wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in cast"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
@@ -2913,21 +2918,30 @@ ExprPtr Parser::parseCastExpression() {
             // If a '{' follows the type-name, this is a compound-literal: (type-name) { initializer-list }
             if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "{") {
                 auto clit = make_ast<CompoundLiteral>();
-                // build a minimal TypeNode from specs
-                auto tn = make_ast<TypeNode>();
-                if (!specs.typeSpecifiers.empty()) {
-                    auto &ts = specs.typeSpecifiers.front();
-                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) { tn->kind = TypeNode::Kind::Builtin; tn->simple = ts.simple; }
-                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion && ts.su) { tn->kind = (ts.su->kind == StructOrUnionSpecifier::Kind::Struct) ? TypeNode::Kind::Struct : TypeNode::Kind::Union; tn->su = ts.su; }
-                    else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) { tn->kind = TypeNode::Kind::Builtin; tn->text = ts.text; }
-                    else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
-                } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+                // Constraint (6.5.2.5p1): the type-name of a compound literal
+                // shall not be a variable length array — i.e. any specified
+                // array dimension must be an integer constant expression. An
+                // unsized `[]` (null dim) is allowed (completed by the list).
+                for (const auto &dim : castArrayDims) {
+                    if (dim && !ConstExprEvaluator::evalIntegerConstantExpr(dim).has_value()) {
+                        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+                        d.message = "variable length array type is not permitted in a compound literal";
+                        d.span = dim->span;
+                        diagnostics.push_back(std::move(d));
+                    }
+                }
+                // Build the full type-name, carrying any pointer/array adornment
+                // (`(int[]){…}` must be an array type, not a bare `int`).
+                auto tn = buildTypeNameNode(specs, castPointerDepth, castArrayDims);
+                if (!tn) { tn = make_ast<TypeNode>(); tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                 clit->type = tn;
                 // parse initializer-list using existing helper
                 clit->init = parseInitializer();
                 clit->kind = Expr::Kind::CompoundLiteral;
                 clit->span = clit->init ? clit->init->span : SourceSpan{};
-                return clit;
+                // A compound literal is a postfix-expression: it may be followed
+                // by `[i]`, `.m`, `->m`, `++`/`--`, etc. — e.g. `(int[]){…}[1]`.
+                return applyPostfixSuffix(clit);
             }
 
             ExprPtr rhs = parseCastExpression();
