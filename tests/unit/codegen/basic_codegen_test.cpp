@@ -6,6 +6,7 @@
 #include "../../../src/codegen/SymbolTable.hpp"
 #include "../../../src/codegen/TypeIndexCache.hpp"
 #include "../../../src/codegen/GlobalDataAllocator.hpp"
+#include "../../../src/codegen/LayoutEngine.hpp"
 #include "../../../src/parser/AST.hpp"
 
 // Test that all codegen components can be instantiated and used
@@ -237,10 +238,48 @@ void test_function_codegen_expressions() {
     
 }
 
+// Regression: a struct member declaration with multiple declarators
+// (`int a, b, c;`) must lay out every field, not just the first. Previously
+// only declarators[0] was placed, so b/c aliased onto offset 0 and the struct
+// was under-sized (sizeof == 4 for three ints).
+void test_struct_multi_declarator_layout() {
+    using namespace wvmcc::parser;
+    using STS = DeclarationSpecifiers::SimpleTypeSpecifier;
+
+    StructOrUnionSpecifier spec;
+    spec.kind = StructOrUnionSpecifier::Kind::Struct;
+    spec.hasBody = true;
+
+    StructMember m;
+    DeclarationSpecifiers::TypeSpecifier ts;
+    ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+    ts.simple = {STS::Int};
+    m.specifiers.typeSpecifiers.push_back(ts);
+    for (const char* nm : {"a", "b", "c"}) {
+        StructDeclarator sd;
+        sd.declarator = make_ast<Declarator>();
+        sd.declarator->kind = Declarator::Kind::Identifier;
+        sd.declarator->id.name = nm;
+        m.declarators.push_back(sd);
+    }
+    spec.members.push_back(std::move(m));
+
+    wvmcc::codegen::LayoutEngine layout;
+    auto L = layout.computeLayout(spec);
+    assert(L.byteSize == 12);
+    assert(L.byteAlignment == 4);
+    assert(L.fieldOffsets.size() == 3);
+    assert(L.fieldOffsets[0].first == "a" && L.fieldOffsets[0].second == 0);
+    assert(L.fieldOffsets[1].first == "b" && L.fieldOffsets[1].second == 4);
+    assert(L.fieldOffsets[2].first == "c" && L.fieldOffsets[2].second == 8);
+
+    std::cout << "struct multi-declarator layout test passed" << std::endl;
+}
+
 // Main test function
 int main() {
     std::cout << "Running basic codegen tests..." << std::endl;
-    
+
     test_codegen_components();
     test_type_map();
     test_symbol_table();
@@ -248,7 +287,8 @@ int main() {
     test_global_data_allocator();
     test_get_data_segments();
     test_function_codegen_expressions();
-    
+    test_struct_multi_declarator_layout();
+
     std::cout << "All basic codegen tests passed!" << std::endl;
     return 0;
 }

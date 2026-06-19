@@ -141,33 +141,38 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
             memberAlignment = 8;
         }
         
-        // Apply pointer/array declarator layers (e.g. `char *p` → 8 bytes,
-        // `int a[4]` → 16 bytes). Uses the first declarator of the member.
-        if (!member.declarators.empty() && member.declarators[0].declarator) {
-            applyDeclaratorToLayout(member.declarators[0].declarator,
-                                    memberSize, memberAlignment);
-        }
+        // Place one field, applying alignment and advancing the running offset
+        // (struct) or overlaying at 0 (union).
+        auto placeField = [&](const std::string& name, size_t sz, size_t al) {
+            size_t fieldOffset;
+            if (isUnion) {
+                fieldOffset = 0;
+                maxMemberSize = std::max(maxMemberSize, sz);
+            } else {
+                size_t alignedOffset = (currentOffset + al - 1) & ~(al - 1);
+                fieldOffset = alignedOffset;
+                currentOffset = alignedOffset + sz;
+            }
+            layout.fieldOffsets.emplace_back(name, fieldOffset);
+            layout.byteAlignment = std::max(layout.byteAlignment, al);
+        };
 
-        size_t fieldOffset;
-        if (isUnion) {
-            // All union members overlay at offset 0.
-            fieldOffset = 0;
-            maxMemberSize = std::max(maxMemberSize, memberSize);
+        // A single member declaration may declare several fields
+        // (`int a, b, c;`, or mixed `int x, *p, arr[4];`). Each declarator
+        // shares the member's base type but carries its own pointer/array
+        // adornment and gets its own offset. (Previously only declarators[0]
+        // was laid out, so `int a, b;` aliased every field onto offset 0 and
+        // under-sized the struct.)
+        if (member.declarators.empty()) {
+            // Anonymous member (e.g. an anonymous struct/union).
+            placeField("", memberSize, memberAlignment);
         } else {
-            size_t alignedOffset = (currentOffset + memberAlignment - 1) & ~(memberAlignment - 1);
-            currentOffset = alignedOffset;
-            fieldOffset = currentOffset;
-            currentOffset += memberSize;
+            for (const auto& sd : member.declarators) {
+                size_t sz = memberSize, al = memberAlignment;
+                if (sd.declarator) applyDeclaratorToLayout(sd.declarator, sz, al);
+                placeField(sd.declarator ? declaratorName(sd.declarator) : "", sz, al);
+            }
         }
-
-        if (!member.declarators.empty() && member.declarators[0].declarator) {
-            layout.fieldOffsets.emplace_back(declaratorName(member.declarators[0].declarator), fieldOffset);
-        } else {
-            layout.fieldOffsets.emplace_back("", fieldOffset);
-        }
-
-        // Update max alignment.
-        layout.byteAlignment = std::max(layout.byteAlignment, memberAlignment);
     }
 
     // Final size: structs pad to alignment; unions are max-member-size padded.

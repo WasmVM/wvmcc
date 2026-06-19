@@ -2214,11 +2214,32 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 if (v->initializer && *v->initializer) {
                     if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
                         && (*v->initializer)->expr) {
-                        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
-                        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
-                        emit(WasmVM::Instr::I64_add{});
-                        emitExpr((*v->initializer)->expr);
-                        emit(typeMap_.makeStore(typeNode, 1));
+                        const auto& srcExpr = (*v->initializer)->expr;
+                        if (isAggregateType) {
+                            // Aggregate copy-initialization (`struct q = <rvalue>;`):
+                            // the source expression yields the object's address;
+                            // copy its bytes into this frame slot. (A scalar
+                            // makeStore here would store the *address*, not the
+                            // value — the bug that made `struct b = a;` corrupt.)
+                            emitExpr(srcExpr, /*needLValue=*/true);
+                            int srcAddr = allocRawLocal(WasmVM::ValueType::i64);
+                            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddr});
+                            int dstAddr = allocRawLocal(WasmVM::ValueType::i64);
+                            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+                            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
+                            emit(WasmVM::Instr::I64_add{});
+                            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)dstAddr});
+                            AddrKind sk = addressKind(srcExpr.get());
+                            uint8_t srcMem = (sk == AddrKind::Mem0) ? 0 : 1;
+                            emitBytewiseCopy(dstAddr, /*dstMemidx=*/1, srcAddr, srcMem,
+                                             typeMap_.byteSize(typeNode));
+                        } else {
+                            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+                            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
+                            emit(WasmVM::Instr::I64_add{});
+                            emitExpr(srcExpr);
+                            emit(typeMap_.makeStore(typeNode, 1));
+                        }
                     } else if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::List) {
                         int baseAddr = allocRawLocal(WasmVM::ValueType::i64);
                         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
@@ -2336,6 +2357,34 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
 // leave a value on the stack? False for a `void` return (call_indirect pushes
 // nothing, so the expression-statement path must not emit a Drop). Struct
 // returns currently still leave the sret pointer.
+void FunctionCodegen::emitBytewiseCopy(int dstAddrLocal, uint8_t dstMemidx,
+                                       int srcAddrLocal, uint8_t srcMemidx, size_t size) {
+    using O = WasmVM::offset_t;
+    auto copy = [&](WasmVM::WasmInstr ld, WasmVM::WasmInstr st) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)dstAddrLocal});
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)srcAddrLocal});
+        emit(ld);   // load chunk from src (uses its own byte offset)
+        emit(st);   // store chunk to dst (consumes [dstAddr, value])
+    };
+    size_t off = 0;
+    while (size - off >= 8) {
+        copy(WasmVM::Instr::I64_load{srcMemidx, (O)off, 3}, WasmVM::Instr::I64_store{dstMemidx, (O)off, 3});
+        off += 8;
+    }
+    if (size - off >= 4) {
+        copy(WasmVM::Instr::I32_load{srcMemidx, (O)off, 2}, WasmVM::Instr::I32_store{dstMemidx, (O)off, 2});
+        off += 4;
+    }
+    if (size - off >= 2) {
+        copy(WasmVM::Instr::I32_load16_u{srcMemidx, (O)off, 1}, WasmVM::Instr::I32_store16{dstMemidx, (O)off, 1});
+        off += 2;
+    }
+    if (size - off >= 1) {
+        copy(WasmVM::Instr::I32_load8_u{srcMemidx, (O)off, 0}, WasmVM::Instr::I32_store8{dstMemidx, (O)off, 0});
+        off += 1;
+    }
+}
+
 bool FunctionCodegen::indirectCallLeavesValue(const wvmcc::parser::ExprPtr& callee) {
     auto ct = getExprTypeNode(callee);
     auto fn = ct;
