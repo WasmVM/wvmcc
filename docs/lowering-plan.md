@@ -1,5 +1,12 @@
 # C17 → WasmVM Lowering Pipeline
 
+> **Status note.** This is the original lowering *plan*. The pipeline is now fully
+> implemented across all phases. A few details below were superseded during
+> implementation — notably tagged-pointer cross-memory dereference (replacing the
+> "distinct address spaces, no collision" assumption) and arbitrary `goto` via a
+> dispatch loop (replacing the forward-only restriction). For the as-built design,
+> see [`codegen.md`](codegen.md).
+
 ## Context
 
 wvmcc has a complete C17 parser and semantic analysis but produces empty `.wasm` binaries — `main.cpp:208` constructs an empty `WasmVM::WasmModule` with no code emission. This plan adds a `src/codegen/` layer that traverses the C17 AST and emits a populated `WasmModule` using the WasmVM struct API directly.
@@ -51,7 +58,7 @@ memidx  Purpose
 - **File-scope aggregates + string literals** → active `WasmData` segments in `mem[0]` at static addresses
 - **`__stack_pointer`** → mutable `i64` `WasmGlobal`, initialized to `mem[1]` top (e.g. `0x10000`)
 
-Stack addresses (into `mem[1]`) and heap/static addresses (into `mem[0]`) are distinct i64 address spaces — no collision possible.
+Stack addresses (`mem[1]`) and heap/static addresses (`mem[0]`) live in separate memories. Because an opaque pointer deref cannot statically know which memory it targets, a pointer *value* carries its target memidx in the high nibble of the i64 (the tagged-pointer scheme — see [`codegen.md`](codegen.md)); the access site masks off the tag and dispatches to the selected memory.
 
 Load/store instructions carry the memory index explicitly:
 - Global/heap/static data: `memidx=0`
@@ -120,7 +127,7 @@ All expression emission is stack-machine style: `emitExpr(ExprPtr, bool need_lva
 | `break` / `continue` | `Br{depth}` — depth computed from `ControlFlowStack` |
 | `switch` (dense) | `br_table` dispatch; nested `Block`s per case, outermost `Block` is break target |
 | `switch` (sparse) | chained `if`/`else` comparisons (when `max-min > 4 * num_cases`) |
-| `goto` (forward only) | Phase 4: `Block`+`Br` restructuring |
+| `goto` | dispatch loop for arbitrary (forward/backward/non-local) jumps; same-level forward gotos lifted to `Block`+`Br` |
 | `_Static_assert` | no code emitted (evaluated at semantic phase) |
 
 ---
@@ -330,7 +337,7 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 ---
 
 ### Phase 4 — Advanced Features
-**Milestone**: function pointers, `static` locals, forward `goto`
+**Milestone**: function pointers, `static` locals, `goto`
 
 #### Step 4.1 — Function table and `Call_indirect`
 - Add `WasmTableType` (funcref) to `mod_.tables`
@@ -343,9 +350,9 @@ WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointin
 - Assign a `WasmGlobal` or a `WasmData` slot in `mem[0]`; emit address as i64 constant
 - Initializer emitted once (first call) via a guard global flag
 
-#### Step 4.3 — Forward-only `goto`
-- Structural lifting: wrap the goto target and all code between goto and label in a `Block`; replace `goto L` with `Br{depth}`
-- Restriction: backward goto (loop) → emit `Unreachable` + diagnostic (not supported)
+#### Step 4.3 — `goto`
+- Same-level forward gotos: structural lifting — wrap the target and intervening code in a `Block`; replace `goto L` with `Br{depth}`
+- Backward and non-local gotos: lowered through a dispatch loop — a state local selects the target segment and re-enters via a `loop` (`emitGotoDispatch`), so arbitrary `goto` is supported
 
 #### Step 4.4 — Designated initializers
 - Emit struct/array initializer bytes in field-offset order, respecting designators

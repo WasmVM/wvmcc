@@ -135,7 +135,7 @@ private:
     - Quote includes search the current file directory first, then fall back to angle-style search paths (`-I`), reusing the same header-name sequence (C17 6.10.2).
     - Macro-replaced `#include` is supported: tokens after `include` are macro-expanded and reinterpreted as `<...>` or `"..."`; diagnostics report missing/unterminated header-names.
     - Cycle detection via inclusion stack is in place; comprehensive test coverage.
-    - Include guards optimization deferred.
+    - `#pragma once` is honored; automatic `#ifndef` include-guard detection (skipping re-reads of guarded files) is deferred.
 
 ### Phase 6: Utilities — ✅ Done
 - Implement `#error` (emit failure) and `#warning` (optional)
@@ -182,7 +182,7 @@ private:
 | Predefined macros | ✅ | `__FILE__`, `__LINE__` (dynamic), `__DATE__`, `__TIME__`, `__STDC__`, `__STDC_VERSION__`, `__STDC_HOSTED__`, `__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__` |
 | `#error`, `#warning` | ✅ | Full support with conditional checks |
 | `#line`, `#pragma` | ✅ | Full support with validation |
-| `#pragma once` | ✅ | Include guard optimization |
+| `#pragma once` | ✅ | Honored; guarded file included once |
 
 ## Error Handling
 - All directive errors must include `SourcePos` (line, column)
@@ -203,7 +203,7 @@ Tokenizer-focused tests use range-style iteration to verify phases 1–3 and lit
 - Avoid quadratic behavior in macro substitution by linear passes with markers
 
 ## Future Extensions
-- Include guard optimization (complex pattern detection needed during directive processing)
+- Automatic `#ifndef` include-guard detection to skip re-reading guarded files (`#pragma once` is already honored)
 - Configurable predefined macros by target/flags
 - File-level preprocessing API (beyond path-based run)
 - Advanced diagnostic formatting and source tracking

@@ -79,12 +79,12 @@ A self-contained pipeline, with no third-party assembler/linker:
   A minimal freestanding C library (`runtime/`) built by wvmcc itself and bundled into `libc.a`,
   installed under a sysroot.
 
-資料模型與 ABI 見 [`docs/spec.md`](docs/spec.md)，降階／程式碼產生設計見
-[`docs/lowering-plan.md`](docs/lowering-plan.md)，進度見 [`docs/milestones.md`](docs/milestones.md)。
+資料模型與 ABI 見 [`docs/spec.md`](docs/spec.md)，降階設計見
+[`docs/lowering-plan.md`](docs/lowering-plan.md)，程式碼產生實作見 [`docs/codegen.md`](docs/codegen.md)。
 
 See [`docs/spec.md`](docs/spec.md) for the data model and ABI,
-[`docs/lowering-plan.md`](docs/lowering-plan.md) for the codegen/lowering design, and
-[`docs/milestones.md`](docs/milestones.md) for status.
+[`docs/lowering-plan.md`](docs/lowering-plan.md) for the lowering design, and
+[`docs/codegen.md`](docs/codegen.md) for the code-generation implementation.
 
 ---
 
@@ -186,7 +186,7 @@ readwasm app.wasm
 | `src/link/` | 整合式連結器：符號解析、封存／物件載入、重定位、DCE、`crt0`。/ Integrated linker. |
 | `src/exec/` | CLI 驅動程式 (`main.cpp`) 與 sysroot 解析。/ CLI driver and sysroot resolution. |
 | `runtime/` | 最小化獨立式 libc——標頭 (`include/`) 與原始碼 (`src/`)，建置為 `libc.a`。/ Minimal freestanding libc. |
-| `docs/` | 規格、降階計畫、進度、前處理器設計，與 C17 一致性目錄 (`docs/standard/`)。/ Spec, plans, milestones, conformance catalog. |
+| `docs/` | 規格、降階計畫、程式碼產生、前處理器設計，與 C17 一致性目錄 (`docs/standard/`)。/ Spec, lowering plan, codegen, preprocessor design, conformance catalog. |
 | `tests/` | 單元 (`tests/unit/`)、整合、與標準一致性 (`tests/standard/`) 測試套件。/ Unit, integration, and standard-conformance suites. |
 
 ---
