@@ -364,6 +364,14 @@ bool Semantic::exprIsStaticInitConstant(const ExprPtr &e) const {
             && exprIsStaticInitConstant(te->elseExpr);
     }
     if (e->kind == Expr::Kind::Sizeof || e->kind == Expr::Kind::AlignOf) return true;
+    // A file-scope compound literal has static storage duration (6.5.2.5p5): it
+    // is a valid static initializer when its own initializer list is constant
+    // (used by value, or via its address-constant array decay).
+    if (e->kind == Expr::Kind::CompoundLiteral) {
+        auto cl = std::static_pointer_cast<CompoundLiteral>(e);
+        std::vector<wvmcc::Diagnostic> tmp;
+        return initializerIsConstant(cl->init, tmp);
+    }
     return false;
 }
 

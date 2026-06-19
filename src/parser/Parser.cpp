@@ -14,6 +14,9 @@ Parser::Parser(Lexer &lexer) : lex(lexer) {
     typedef_names.insert("__builtin_va_list");
 }
 
+static bool initializerIsConstant(const InitializerPtr &init);
+static bool declaratorContainsPointer(const DeclaratorPtr &d);
+
 // Whether an expression is a valid static-storage-duration initializer constant
 // (6.6p7-9): an arithmetic constant expression, a null pointer constant, an
 // address constant, or such combined with an integer constant — broader than an
@@ -51,6 +54,13 @@ static bool exprIsStaticInitConstant(const ExprPtr &e) {
             && exprIsStaticInitConstant(te->elseExpr);
     }
     if (e->kind == Expr::Kind::Sizeof || e->kind == Expr::Kind::AlignOf) return true;
+    // A compound literal at file scope has static storage duration (6.5.2.5p5),
+    // so it is a valid static initializer when its own initializer list is
+    // constant — whether used by value (`static int x = (int){42};`) or via its
+    // address-constant decay (`static int *p = (int[]){1,2,3};`).
+    if (e->kind == Expr::Kind::CompoundLiteral) {
+        return initializerIsConstant(std::static_pointer_cast<CompoundLiteral>(e)->init);
+    }
     return false;
 }
 
@@ -2195,21 +2205,14 @@ ExprPtr Parser::parsePrimary() {
                     lex.next();
                 } else {
                     auto specs = parseDeclarationSpecifiers();
-                    // build minimal TypeNode from specs
-                    auto tn = make_ast<TypeNode>();
-                    if (!specs.typeSpecifiers.empty()) {
-                        auto &ts = specs.typeSpecifiers.front();
-                        if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple) {
-                            tn->kind = TypeNode::Kind::Builtin;
-                            tn->simple = ts.simple;
-                        } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Other) {
-                            tn->kind = TypeNode::Kind::Builtin;
-                            tn->text = ts.text;
-                        } else {
-                            tn->kind = TypeNode::Kind::Builtin;
-                            tn->text = "type";
-                        }
-                    } else { tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
+                    // A _Generic association type-name may carry an abstract
+                    // declarator (`int *: …`, `int[4]: …`); build the full type
+                    // so pointer/array associations match their controlling type.
+                    int ptrDepth = parseAbstractPointerDepth();
+                    std::vector<ExprPtr> arrayDims;
+                    parseAbstractArrayDims(arrayDims);
+                    auto tn = buildTypeNameNode(specs, ptrDepth, arrayDims);
+                    if (!tn) { tn = make_ast<TypeNode>(); tn->kind = TypeNode::Kind::Builtin; tn->text = "type"; }
                     // expect ':'
                     if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":")) {
                         if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ':' after type name in _Generic association"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
@@ -2430,6 +2433,14 @@ ExprPtr Parser::parseUnaryExpression() {
                 if (isType) {
                     auto specs = parseDeclarationSpecifiers();
                     int ptrDepth = parseAbstractPointerDepth();
+                    // Parenthesized abstract declarator, e.g. the `(*)(void)` of
+                    // `sizeof(int (*)(void))` (a function pointer) — its size is a
+                    // pointer's, so fold a pointer-bearing inner declarator into
+                    // the pointer depth (mirrors the cast path).
+                    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
+                        auto absDecl = parseDeclarator();
+                        if (declaratorContainsPointer(absDecl) && ptrDepth == 0) ptrDepth = 1;
+                    }
                     std::vector<ExprPtr> arrayDims;
                     parseAbstractArrayDims(arrayDims);
                     if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
