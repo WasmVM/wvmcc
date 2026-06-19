@@ -7,10 +7,22 @@
 
 namespace wvmcc::codegen {
 
+// Per-field bit-field placement within its storage unit. byteOffset (in
+// StructLayout::fieldOffsets) is the unit's offset; these describe the field's
+// position inside it. LSB-first: bitOffset 0 is the least-significant bit.
+struct BitFieldInfo {
+    bool isBitfield = false;
+    unsigned bitOffset = 0;   // first bit within the storage unit
+    unsigned bitWidth = 0;    // field width in bits
+    size_t storageSize = 0;   // access-unit size in bytes (1/2/4/8)
+    bool isSigned = false;    // signed bit-fields sign-extend on load
+};
+
 struct StructLayout {
     size_t byteSize;
     size_t byteAlignment;
     std::vector<std::pair<std::string, size_t>> fieldOffsets; // name -> offset
+    std::vector<std::pair<std::string, BitFieldInfo>> bitFields; // name -> bit info
 };
 
 class LayoutEngine {

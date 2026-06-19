@@ -4,6 +4,7 @@
 #include <unordered_set>
 #include <functional>
 #include <string>
+#include <algorithm>
 #include "ConstExprEval.hpp"
 
 using wvmcc::Diagnostic;
@@ -1072,6 +1073,20 @@ std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSp
     std::vector<DeclaratorPtr> layers;
     DeclaratorPtr cur = decl;
     while (cur) { layers.push_back(cur); if (cur->inner.has_value()) cur = cur->inner.value(); else break; }
+    // Array subscripts nest rightmost-outermost in the declarator chain, but C
+    // requires the leftmost subscript to be the outermost dimension. Reverse
+    // each maximal run of adjacent Array layers so the inner-first wrapping
+    // below yields the correct dimension order (int[2][3] -> array[2] of
+    // array[3] of int). Pointer/function layers break the run, so the spiral
+    // rule (int *a[3] vs int (*a)[3]) is preserved.
+    for (size_t s = 0; s < layers.size(); ) {
+        if (layers[s] && layers[s]->kind == Declarator::Kind::Array) {
+            size_t e = s;
+            while (e < layers.size() && layers[e] && layers[e]->kind == Declarator::Kind::Array) ++e;
+            std::reverse(layers.begin() + s, layers.begin() + e);
+            s = e;
+        } else ++s;
+    }
     // Start from baseType and wrap
     std::shared_ptr<TypeNode> curType = tn;
     for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
@@ -1165,6 +1180,16 @@ std::shared_ptr<TypeNode> Semantic::canonicalTypeRepr(const DeclarationSpecifier
         std::vector<DeclaratorPtr> layers;
         DeclaratorPtr curd = d;
         while (curd) { layers.push_back(curd); if (curd->inner.has_value()) curd = curd->inner.value(); else break; }
+        // Reverse each maximal run of adjacent Array layers (see the matching
+        // comment in buildTypeFromDeclaration) so multidim dims nest correctly.
+        for (size_t s = 0; s < layers.size(); ) {
+            if (layers[s] && layers[s]->kind == Declarator::Kind::Array) {
+                size_t e = s;
+                while (e < layers.size() && layers[e] && layers[e]->kind == Declarator::Kind::Array) ++e;
+                std::reverse(layers.begin() + s, layers.begin() + e);
+                s = e;
+            } else ++s;
+        }
         for (int i = static_cast<int>(layers.size()) - 1; i >= 0; --i) {
             auto layer = layers[i];
             if (!layer) continue;
@@ -2391,20 +2416,24 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         // for char arrays or braced list with no designators).
         DeclaratorPtr arrayDeclWithoutSize = findFirstArrayDeclaratorWithoutSize(d->declarator);
         if (arrayDeclWithoutSize) {
-            // string-literal -> char[] special-case: set size to length+1
+            // string-literal -> char[]/wide-char[] special-case: set size to
+            // (element count)+1. The lexer strips the encoding prefix, so the
+            // literal's `value` holds one entry per source character regardless
+            // of width — element count = value.size(). A wide-char array
+            // (wchar_t[]) takes a wide string literal (6.7.9p15); its element is
+            // a wider integer Builtin, so accept any integer-Builtin element.
             if (d->initializer.value()->kind == Initializer::Kind::Expr && d->initializer.value()->expr && d->initializer.value()->expr->kind == Expr::Kind::String) {
                 if (typeNode && typeNode->kind == TypeNode::Kind::Array && typeNode->element) {
-                    bool isChar = false;
+                    bool isCharLike = false;
                     if (typeNode->element->kind == TypeNode::Kind::Builtin) {
+                        using S = DeclarationSpecifiers::SimpleTypeSpecifier;
                         for (auto st : typeNode->element->simple) {
-                            using S = DeclarationSpecifiers::SimpleTypeSpecifier;
-                            if (st == S::Char) { isChar = true; break; }
+                            if (st == S::Char || st == S::Short || st == S::Int
+                                || st == S::Long || st == S::Unsigned || st == S::Signed) { isCharLike = true; break; }
                         }
-                        if (!isChar && !typeNode->element->text.empty()) {
-                            if (typeNode->element->text == "char") isChar = true;
-                        }
+                        if (!isCharLike && typeNode->element->text == "char") isCharLike = true;
                     }
-                    if (isChar) {
+                    if (isCharLike) {
                         auto sl = std::dynamic_pointer_cast<StringLiteral>(d->initializer.value()->expr);
                         if (sl) {
                             long long len = static_cast<long long>(sl->value.size()) + 1; // include NUL

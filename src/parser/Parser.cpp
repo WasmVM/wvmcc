@@ -556,6 +556,16 @@ DeclarationSpecifiers::TypeSpecifier Parser::parseStructOrUnionSpecifier() {
             if (it == tag_registry.end()) {
             // no prior tag: insert current specifier (may be incomplete if no body)
             tag_registry[*tagName] = su;
+            tag_registry_depth[*tagName] = blockDepth;
+        } else if (hasBodyNow && tag_registry_depth[*tagName] < blockDepth) {
+            // 6.7.2.3p4,p5: a tag defined (with a body) in an inner scope is a
+            // NEW, distinct type that shadows the outer one. Replace the
+            // registry entry for the duration of this scope (restored on block
+            // exit by the compound-body guard) so an inner bodyless reference
+            // — e.g. `sizeof(struct tag)` — resolves to the inner type, not the
+            // outer (LANG-6.7.2.3-05). ts.su already points at the new `su`.
+            tag_registry[*tagName] = su;
+            tag_registry_depth[*tagName] = blockDepth;
         } else {
             auto existing = it->second;
             // C 6.7.2.3p2: a tag declared with one kind (struct/union) shall not
@@ -1473,6 +1483,21 @@ std::vector<BlockItemPtr> Parser::parseCompoundBody() {
             p.typedef_struct = std::move(structs);
         }
     } _tdGuard{*this, typedef_names, typedef_simple, typedef_struct};
+    // Scoped struct/union/enum tag shadowing (6.7.2.3p4,p5): snapshot the tag
+    // registries on block entry and restore them on exit, so a tag (re)declared
+    // inside this block does not leak out and the outer tag's meaning is
+    // recovered after the block.
+    struct TagScopeGuard {
+        Parser &p;
+        std::unordered_map<std::string, std::shared_ptr<StructOrUnionSpecifier>> tags;
+        std::unordered_map<std::string, int> depths;
+        std::unordered_map<std::string, std::shared_ptr<DeclarationSpecifiers::TypeSpecifier::EnumSpecifier>> enums;
+        ~TagScopeGuard() {
+            p.tag_registry = std::move(tags);
+            p.tag_registry_depth = std::move(depths);
+            p.enum_tag_registry = std::move(enums);
+        }
+    } _tagGuard{*this, tag_registry, tag_registry_depth, enum_tag_registry};
     std::vector<BlockItemPtr> body;
     // Forward-progress guard (#92): some malformed or not-yet-supported
     // constructs cause a statement-parsing path to return without consuming any

@@ -26,16 +26,27 @@ WasmVM::ValueType arithCommonType(WasmVM::ValueType lhs, WasmVM::ValueType rhs) 
 
 // Emit a conversion instruction that turns `from` into `to`. Caller guarantees
 // the value of type `from` is on top of the Wasm stack. No-op if from == to.
-// (Signed conversions; unsigned variants are not yet exposed by the type system.)
-static void emitConvert(FunctionCodegen* fc, WasmVM::ValueType from, WasmVM::ValueType to) {
+// `fromUnsigned` selects zero-extension / unsigned->float conversions when the
+// source C type is unsigned (6.3.1.3/6.3.1.8): widening a sub-INT_MAX unsigned
+// int to i64 must zero-extend, not sign-extend.
+static void emitConvert(FunctionCodegen* fc, WasmVM::ValueType from, WasmVM::ValueType to,
+                        bool fromUnsigned = false) {
     if (from == to) return;
     using VT = WasmVM::ValueType;
-    if (from == VT::i32 && to == VT::i64) { fc->emit(WasmVM::Instr::I64_extend_i32_s{}); return; }
+    if (from == VT::i32 && to == VT::i64) {
+        if (fromUnsigned) fc->emit(WasmVM::Instr::I64_extend_i32_u{});
+        else              fc->emit(WasmVM::Instr::I64_extend_i32_s{});
+        return;
+    }
     if (from == VT::i64 && to == VT::i32) { fc->emit(WasmVM::Instr::I32_wrap_i64{}); return; }
-    if (from == VT::i32 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_convert_i32_s{}); return; }
-    if (from == VT::i32 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_convert_i32_s{}); return; }
-    if (from == VT::i64 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_convert_i64_s{}); return; }
-    if (from == VT::i64 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_convert_i64_s{}); return; }
+    if (from == VT::i32 && to == VT::f32) {
+        if (fromUnsigned) fc->emit(WasmVM::Instr::F32_convert_i32_u{}); else fc->emit(WasmVM::Instr::F32_convert_i32_s{}); return; }
+    if (from == VT::i32 && to == VT::f64) {
+        if (fromUnsigned) fc->emit(WasmVM::Instr::F64_convert_i32_u{}); else fc->emit(WasmVM::Instr::F64_convert_i32_s{}); return; }
+    if (from == VT::i64 && to == VT::f32) {
+        if (fromUnsigned) fc->emit(WasmVM::Instr::F32_convert_i64_u{}); else fc->emit(WasmVM::Instr::F32_convert_i64_s{}); return; }
+    if (from == VT::i64 && to == VT::f64) {
+        if (fromUnsigned) fc->emit(WasmVM::Instr::F64_convert_i64_u{}); else fc->emit(WasmVM::Instr::F64_convert_i64_s{}); return; }
     if (from == VT::f32 && to == VT::f64) { fc->emit(WasmVM::Instr::F64_promote_f32{}); return; }
     if (from == VT::f64 && to == VT::f32) { fc->emit(WasmVM::Instr::F32_demote_f64{}); return; }
     // Floating -> integer truncates toward zero (6.3.1.4).
@@ -44,6 +55,40 @@ static void emitConvert(FunctionCodegen* fc, WasmVM::ValueType from, WasmVM::Val
     if (from == VT::f32 && to == VT::i64) { fc->emit(WasmVM::Instr::I64_trunc_sat_f32_s{}); return; }
     if (from == VT::f64 && to == VT::i64) { fc->emit(WasmVM::Instr::I64_trunc_sat_f64_s{}); return; }
     fc->emitUnimplemented("codegen: unsupported value-type conversion");
+}
+
+static bool isBoolTypeNode(const wvmcc::parser::TypeNodePtr& type);
+
+// Extract a bit-field value from its storage unit (already loaded on the stack):
+// logical shift right by bitOffset, mask to bitWidth, and sign-extend a signed
+// field from its top bit. `isI64` selects i32/i64 instructions for the unit.
+static void emitBitfieldExtract(FunctionCodegen* fc,
+                                const wvmcc::codegen::BitFieldInfo& bi, bool isI64) {
+    namespace I = WasmVM::Instr;
+    unsigned w = bi.bitWidth;
+    if (isI64) {
+        if (bi.bitOffset) { fc->emit(I::I64_const{(WasmVM::i64_t)bi.bitOffset}); fc->emit(I::I64_shr_u{}); }
+        if (w < 64) {
+            fc->emit(I::I64_const{(WasmVM::i64_t)((((unsigned long long)1 << w) - 1))});
+            fc->emit(I::I64_and{});
+        }
+        if (bi.isSigned && w < 64) {
+            unsigned sh = 64 - w;
+            fc->emit(I::I64_const{(WasmVM::i64_t)sh}); fc->emit(I::I64_shl{});
+            fc->emit(I::I64_const{(WasmVM::i64_t)sh}); fc->emit(I::I64_shr_s{});
+        }
+    } else {
+        if (bi.bitOffset) { fc->emit(I::I32_const{(WasmVM::i32_t)bi.bitOffset}); fc->emit(I::I32_shr_u{}); }
+        if (w < 32) {
+            fc->emit(I::I32_const{(WasmVM::i32_t)((1u << w) - 1u)});
+            fc->emit(I::I32_and{});
+        }
+        if (bi.isSigned && w < 32) {
+            unsigned sh = 32 - w;
+            fc->emit(I::I32_const{(WasmVM::i32_t)sh}); fc->emit(I::I32_shl{});
+            fc->emit(I::I32_const{(WasmVM::i32_t)sh}); fc->emit(I::I32_shr_s{});
+        }
+    }
 }
 
 
@@ -547,6 +592,13 @@ void FunctionCodegen::emitExpr(const wvmcc::parser::ExprPtr& expr, bool needLVal
             opType = semantic_->canonicalTypeRepr(*so.typeSpecs, nullptr);
         } else if (so.type.has_value()) {
             opType = *so.type;
+        } else if (so.expr && so.expr->kind == K::String) {
+            // `sizeof "literal"` is the array length incl. the NUL (6.5.3.4):
+            // the array does NOT decay to a pointer here, so don't go through
+            // getExprTypeNode (which reports the decayed `char *`).
+            const auto& sl = static_cast<const wvmcc::parser::StringLiteral&>(*so.expr);
+            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)(sl.value.size() + 1)});
+            break;
         } else {
             opType = getExprTypeNode(so.expr);
         }
@@ -736,18 +788,53 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
 
     // --- Compound assignment: `lhs OP= rhs`  ==>  `lhs = (lhs OP rhs)` ---
     // Reuses the plain-`=` lvalue machinery and the binary-op (incl. pointer-
-    // arithmetic) machinery below. The lhs subtree is evaluated twice; for the
-    // address-bearing lvalues libc uses (locals, `*p`, `a[i]`, `s->m`) that is
-    // observationally fine. Yields the assigned value, as C requires.
+    // arithmetic) machinery below. Per 6.5.16.2p3 the lvalue `lhs` must be
+    // evaluated only ONCE. For a bare-identifier lvalue re-evaluation has no
+    // side effect, so the direct rewrite is fine (and keeps the named-scalar
+    // fast paths). For any other lvalue (`*p`, `a[i]`, `s->m`, `*call()`) the
+    // address subexpression may have a side effect (e.g. `*select() += 5`), so
+    // materialize the (tagged) address into a temp pointer once and rewrite
+    // through a synthetic deref of it.
     {
         static const std::unordered_map<std::string, std::string> kCompound = {
             {"+=", "+"}, {"-=", "-"}, {"*=", "*"}, {"/=", "/"}, {"%=", "%"},
             {"<<=", "<<"}, {">>=", ">>"}, {"&=", "&"}, {"|=", "|"}, {"^=", "^"}};
         auto it = kCompound.find(expr.op);
         if (it != kCompound.end()) {
-            auto inner = makeBinaryExpr(it->second, expr.lhs, expr.rhs, expr.span);
-            auto assign = makeBinaryExpr("=", expr.lhs, inner, expr.span);
+            if (expr.lhs && expr.lhs->kind == K::Ident) {
+                auto inner = makeBinaryExpr(it->second, expr.lhs, expr.rhs, expr.span);
+                auto assign = makeBinaryExpr("=", expr.lhs, inner, expr.span);
+                emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*assign));
+                return;
+            }
+            auto lhsTypeNode = getExprTypeNode(expr.lhs);
+            AddrKind k = addressKind(expr.lhs.get());
+            int ptrTmp = allocRawLocal(WasmVM::ValueType::i64);
+            emitExpr(expr.lhs, /*needLValue=*/true);    // evaluate the address ONCE
+            // Make the cached address a self-describing tagged pointer so the
+            // synthetic Dynamic deref below dispatches to the right memory.
+            if (k != AddrKind::Dynamic) emitApplyTag(k);
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)ptrTmp});
+
+            auto ptrType = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            ptrType->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+            ptrType->pointee = lhsTypeNode;
+            std::string synthName = "$cmpd." + std::to_string(ptrTmp);
+            symbolTable_.pushScope();
+            symbolTable_.define(synthName, ScalarLocal{ptrType, false, ptrTmp});
+            auto synthId = wvmcc::parser::make_ast<wvmcc::parser::IdentifierExpr>();
+            synthId->kind = K::Ident;
+            synthId->name = synthName;
+            synthId->span = expr.span;
+            auto synthLhs = wvmcc::parser::make_ast<wvmcc::parser::UnaryExpr>();
+            synthLhs->kind = K::Unary;
+            synthLhs->op = "*";
+            synthLhs->rhs = synthId;
+            synthLhs->span = expr.span;
+            auto inner = makeBinaryExpr(it->second, synthLhs, expr.rhs, expr.span);
+            auto assign = makeBinaryExpr("=", synthLhs, inner, expr.span);
             emitBinaryExpr(static_cast<const wvmcc::parser::BinaryExpr&>(*assign));
+            symbolTable_.popScope();
             return;
         }
     }
@@ -763,6 +850,106 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
 
     // --- Assignment ---
     if (expr.op == "=") {
+        // Aggregate assignment (`s1 = s2`, struct/union/array): both operands
+        // are lvalues with addresses; copy the object bytewise. A scalar store
+        // would move only one Wasm value (8 bytes) and could read/write past the
+        // object — overflowing a smaller aggregate (the i64-store-of-a-4-byte-
+        // struct trap).
+        {
+            auto lhsAggType = getExprTypeNode(expr.lhs);
+            bool lhsIsAggregate = lhsAggType
+                && (lhsAggType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || lhsAggType->kind == wvmcc::parser::TypeNode::Kind::Union
+                    || lhsAggType->kind == wvmcc::parser::TypeNode::Kind::Array);
+            if (lhsIsAggregate) {
+                emitExpr(expr.rhs, /*needLValue=*/true);
+                int srcAddr = allocRawLocal(WasmVM::ValueType::i64);
+                emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddr});
+                emitExpr(expr.lhs, /*needLValue=*/true);
+                int dstAddr = allocRawLocal(WasmVM::ValueType::i64);
+                emit(WasmVM::Instr::Local_set{(WasmVM::index_t)dstAddr});
+                AddrKind sk = addressKind(expr.rhs.get());
+                AddrKind dk = addressKind(expr.lhs.get());
+                emitBytewiseCopy(dstAddr, (dk == AddrKind::Mem0) ? 0 : 1,
+                                 srcAddr, (sk == AddrKind::Mem0) ? 0 : 1,
+                                 typeMap_.byteSize(lhsAggType));
+                // The assignment expression yields the lvalue object; leave its
+                // (tagged) address on the stack for any further use.
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)dstAddr});
+                emitApplyTag(dk);
+                return;
+            }
+        }
+
+        // Bit-field assignment: read-modify-write the storage unit so only the
+        // field's bits change. The new value is normalized (_Bool → 0/1),
+        // truncated to the field width, shifted into place, OR'd into the unit
+        // with the field's old bits cleared (6.7.2.1p10,p11).
+        if (expr.lhs && expr.lhs->kind == K::Member) {
+            const auto& me = static_cast<const wvmcc::parser::MemberExpr&>(*expr.lhs);
+            auto bt = getExprTypeNode(me.base);
+            if (me.isArrow && bt && bt->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+                bt = bt->pointee;
+            auto bi = bt ? typeMap_.getFieldBitInfo(bt, me.member)
+                         : wvmcc::codegen::BitFieldInfo{};
+            if (bi.isBitfield) {
+                auto fieldType = typeMap_.getFieldType(bt, me.member);
+                bool isI64 = typeMap_.toWasmType(fieldType) == WasmVM::ValueType::i64;
+                AddrKind k = addressKind(expr.lhs.get());
+                int addrTmp = allocRawLocal(WasmVM::ValueType::i64);
+                emitExpr(expr.lhs, /*needLValue=*/true);   // storage-unit address
+                emit(WasmVM::Instr::Local_set{(WasmVM::index_t)addrTmp});
+
+                // Masked field value (normalized, truncated to width) → fieldTmp.
+                int fieldTmp = allocRawLocal(isI64 ? WasmVM::ValueType::i64 : WasmVM::ValueType::i32);
+                emitExpr(expr.rhs, false);
+                emitConvert(this, getExprType(expr.rhs), typeMap_.toWasmType(fieldType));
+                if (isBoolTypeNode(fieldType)) { // any nonzero → 1
+                    if (isI64) { emit(WasmVM::Instr::I64_const{0}); emit(WasmVM::Instr::I64_ne{}); }
+                    else       { emit(WasmVM::Instr::I32_const{0}); emit(WasmVM::Instr::I32_ne{}); }
+                }
+                unsigned w = bi.bitWidth;
+                if (isI64) {
+                    unsigned long long mask = (w < 64) ? (((unsigned long long)1 << w) - 1) : ~0ull;
+                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)mask});
+                    emit(WasmVM::Instr::I64_and{});
+                    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)fieldTmp});
+                    // newUnit = (old & ~(mask<<off)) | (field << off)
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+                    if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
+                    else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+                    emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)~(mask << bi.bitOffset)});
+                    emit(WasmVM::Instr::I64_and{});
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)fieldTmp});
+                    if (bi.bitOffset) { emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)bi.bitOffset}); emit(WasmVM::Instr::I64_shl{}); }
+                    emit(WasmVM::Instr::I64_or{});
+                } else {
+                    unsigned mask = (w < 32) ? ((1u << w) - 1u) : ~0u;
+                    emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)mask});
+                    emit(WasmVM::Instr::I32_and{});
+                    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)fieldTmp});
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+                    if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
+                    else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+                    emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)~(mask << bi.bitOffset)});
+                    emit(WasmVM::Instr::I32_and{});
+                    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)fieldTmp});
+                    if (bi.bitOffset) { emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)bi.bitOffset}); emit(WasmVM::Instr::I32_shl{}); }
+                    emit(WasmVM::Instr::I32_or{});
+                }
+                // newUnit is on the stack; store it back through addrTmp. Stage
+                // it in a temp so the store sees [addr, value] in order.
+                int unitTmp = allocRawLocal(isI64 ? WasmVM::ValueType::i64 : WasmVM::ValueType::i32);
+                emit(WasmVM::Instr::Local_set{(WasmVM::index_t)unitTmp});
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)addrTmp});
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)unitTmp});
+                if (k == AddrKind::Dynamic) emitTaggedStore(fieldType);
+                else emit(typeMap_.makeStore(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+                // Assignment value: the stored field value.
+                emit(WasmVM::Instr::Local_get{(WasmVM::index_t)fieldTmp});
+                return;
+            }
+        }
         // ScalarLocal: value → local.tee (sets local, leaves value on stack)
         if (expr.lhs && expr.lhs->kind == K::Ident) {
             const auto& id = static_cast<const wvmcc::parser::IdentifierExpr&>(*expr.lhs);
@@ -982,6 +1169,24 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
         return;
     }
 
+    // --- Pointer difference `ptr - ptr` (6.5.6p9) ---
+    // The result is the number of array *elements* between the two pointers, of
+    // type ptrdiff_t (i64). Both operands address the same object, so their tag
+    // nibbles are identical and cancel under i64.sub, leaving the raw byte
+    // difference; divide by the element size to recover the element count.
+    if (expr.op == "-" && lhsPtrLike && rhsPtrLike) {
+        size_t pointeeSize = 1;
+        if (auto pt = pointeeType(lhsTypeNode)) { size_t s = typeMap_.byteSize(pt); if (s) pointeeSize = s; }
+        emitExpr(expr.lhs, false);                      // tagged addr (i64)
+        emitExpr(expr.rhs, false);                      // tagged addr (i64)
+        emit(WasmVM::Instr::I64_sub{});                 // byte difference (tags cancel)
+        if (pointeeSize > 1) {
+            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)pointeeSize});
+            emit(WasmVM::Instr::I64_div_s{});           // signed: ptrdiff_t
+        }
+        return;
+    }
+
     // --- Normal binary ops ---
     // Compute the common arithmetic type (usual arithmetic conversions) and
     // promote both operands to it before dispatching. Float operands route to
@@ -1002,16 +1207,25 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
     // unsigned; a right shift looks only at the (left) value being shifted.
     bool lhsUnsigned = typeMap_.isUnsignedScalarInteger(getExprTypeNode(expr.lhs));
     bool rhsUnsigned = typeMap_.isUnsignedScalarInteger(getExprTypeNode(expr.rhs));
-    bool opUnsigned = lhsUnsigned || rhsUnsigned;
+    // The operation's signedness is that of the *common* type, not "either
+    // operand is unsigned" (6.3.1.8p1). When the common type is i64-wide, an
+    // i32-wide unsigned operand (e.g. `unsigned int`) is fully representable in
+    // the signed 64-bit type, so it does NOT force an unsigned operation; only
+    // an i64-wide unsigned operand (`unsigned long`) does. At i32 width both
+    // operands share the rank, so either-unsigned makes the result unsigned.
+    bool opUnsigned = (commonType == WasmVM::ValueType::i64)
+        ? ((lhsUnsigned && lhsValueType == WasmVM::ValueType::i64)
+           || (rhsUnsigned && rhsValueType == WasmVM::ValueType::i64))
+        : (lhsUnsigned || rhsUnsigned);
     // Pick the unsigned or signed form of an instruction by a signedness flag.
     auto emitSU = [&](bool uns, auto unsignedInstr, auto signedInstr) {
         if (uns) emit(unsignedInstr); else emit(signedInstr);
     };
 
     emitExpr(expr.lhs, false);
-    emitConvert(this, lhsValueType, commonType);
+    emitConvert(this, lhsValueType, commonType, lhsUnsigned);
     emitExpr(expr.rhs, false);
-    emitConvert(this, rhsValueType, commonType);
+    emitConvert(this, rhsValueType, commonType, rhsUnsigned);
 
     using VT = WasmVM::ValueType;
     if (expr.op == "+") {
@@ -1260,34 +1474,14 @@ void FunctionCodegen::emitCastExpr(const wvmcc::parser::CastExpr& expr) {
         return;
     }
 
+    // Source signedness drives integer widening / int->float conversion: an
+    // unsigned source zero-extends (6.3.1.3) and uses the unsigned float
+    // conversion (6.3.1.4), rather than sign-extending garbage high bits.
+    bool srcUnsigned = typeMap_.isUnsignedScalarInteger(getExprTypeNode(expr.expr));
     if (sourceType == targetType) {
         // no-op (width narrowing below still applies for char/short targets)
-    } else if (sourceType == WasmVM::ValueType::i32 && targetType == WasmVM::ValueType::i64) {
-        emit(WasmVM::Instr::I64_extend_i32_s{});
-    } else if (sourceType == WasmVM::ValueType::i64 && targetType == WasmVM::ValueType::i32) {
-        emit(WasmVM::Instr::I32_wrap_i64{});
-    } else if (sourceType == WasmVM::ValueType::f32 && targetType == WasmVM::ValueType::i32) {
-        emit(WasmVM::Instr::I32_trunc_sat_f32_s{});
-    } else if (sourceType == WasmVM::ValueType::f64 && targetType == WasmVM::ValueType::i32) {
-        emit(WasmVM::Instr::I32_trunc_sat_f64_s{});
-    } else if (sourceType == WasmVM::ValueType::f32 && targetType == WasmVM::ValueType::i64) {
-        emit(WasmVM::Instr::I64_trunc_sat_f32_s{});
-    } else if (sourceType == WasmVM::ValueType::f64 && targetType == WasmVM::ValueType::i64) {
-        emit(WasmVM::Instr::I64_trunc_sat_f64_s{});
-    } else if (sourceType == WasmVM::ValueType::i32 && targetType == WasmVM::ValueType::f32) {
-        emit(WasmVM::Instr::F32_convert_i32_s{});
-    } else if (sourceType == WasmVM::ValueType::i64 && targetType == WasmVM::ValueType::f32) {
-        emit(WasmVM::Instr::F32_convert_i64_s{});
-    } else if (sourceType == WasmVM::ValueType::i32 && targetType == WasmVM::ValueType::f64) {
-        emit(WasmVM::Instr::F64_convert_i32_s{});
-    } else if (sourceType == WasmVM::ValueType::i64 && targetType == WasmVM::ValueType::f64) {
-        emit(WasmVM::Instr::F64_convert_i64_s{});
-    } else if (sourceType == WasmVM::ValueType::f32 && targetType == WasmVM::ValueType::f64) {
-        emit(WasmVM::Instr::F64_promote_f32{});
-    } else if (sourceType == WasmVM::ValueType::f64 && targetType == WasmVM::ValueType::f32) {
-        emit(WasmVM::Instr::F32_demote_f64{});
     } else {
-        emitUnimplemented("codegen: unsupported cast conversion", expr.span);
+        emitConvert(this, sourceType, targetType, srcUnsigned);
     }
 
     // Conversion to a narrow integer type (6.3.1.3): char/short are represented
@@ -1833,6 +2027,8 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
 
     size_t fieldOffset = baseType ? typeMap_.getFieldOffset(baseType, expr.member) : 0;
     auto fieldType     = baseType ? typeMap_.getFieldType(baseType, expr.member)   : nullptr;
+    auto bitInfo       = baseType ? typeMap_.getFieldBitInfo(baseType, expr.member)
+                                  : wvmcc::codegen::BitFieldInfo{};
     // `->` is rooted at a pointer value (Dynamic, tag-dispatched); `.` follows
     // the base's storage to a static memory.
     AddrKind k = addressKind(&expr);
@@ -1851,6 +2047,10 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
     if (!needLValue) {
         if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
         else emit(typeMap_.makeLoad(fieldType, k == AddrKind::Mem1 ? 1 : 0));
+        // Bit-field read: extract the field's bits from the loaded storage unit.
+        if (bitInfo.isBitfield)
+            emitBitfieldExtract(this, bitInfo,
+                                typeMap_.toWasmType(fieldType) == WasmVM::ValueType::i64);
     }
 }
 
@@ -1903,7 +2103,19 @@ void FunctionCodegen::emitArrayIndexExpr(const wvmcc::parser::IndexExpr& expr, b
     emit(WasmVM::Instr::I64_add{});
 
     if (!needLValue) {
-        if (k == AddrKind::Dynamic) emitTaggedLoad(elemType);
+        // An aggregate element (e.g. the sub-array `m[i]` of an `int[N][M]`, or
+        // a struct element of an array-of-struct) does not load in value
+        // context — it decays to / yields its own address. Tag that address so
+        // an opaque-pointer deref dispatches to the right memory. For a pointer
+        // base the address already carries its tag (Dynamic); for an array base
+        // apply the base's static tag.
+        bool elemIsAggregate = elemType
+            && (elemType->kind == wvmcc::parser::TypeNode::Kind::Array
+                || elemType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                || elemType->kind == wvmcc::parser::TypeNode::Kind::Union);
+        if (elemIsAggregate) {
+            if (k != AddrKind::Dynamic) emitApplyTag(k);
+        } else if (k == AddrKind::Dynamic) emitTaggedLoad(elemType);
         else emit(typeMap_.makeLoad(elemType, k == AddrKind::Mem1 ? 1 : 0));
     }
 }
@@ -1923,81 +2135,155 @@ void FunctionCodegen::emitListInitializer(int baseAddrLocal,
         }
     };
 
-    if ((type->kind == TypeNode::Kind::Struct || type->kind == TypeNode::Kind::Union) && type->su) {
-        // Walk fields in declaration order. For each field, look for a clause
-        // with a matching `.field` designator first, then fall back to the
-        // next positional clause.
-        size_t posIdx = 0;
-        for (const auto& member : type->su->members) {
-            for (const auto& sd : member.declarators) {
-                if (!sd.declarator) continue;
-                std::string fieldName = sd.declarator->id.name;
-                if (fieldName.empty()) continue;
+    // Descend a nested designator chain (`[1].b`, `.m.n`) past the first
+    // component (which the cursor logic already consumed): refine the byte
+    // offset and subobject type for designators[from..] (6.7.9p7).
+    auto applyRest = [&](size_t off, TypeNodePtr sub,
+                         const std::vector<Designator>& ds, size_t from)
+        -> std::pair<size_t, TypeNodePtr> {
+        for (size_t i = from; i < ds.size() && sub; ++i) {
+            if (ds[i].kind == Designator::Kind::Index
+                && sub->kind == TypeNode::Kind::Array && sub->element
+                && ds[i].index.has_value()) {
+                auto v = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(*ds[i].index);
+                size_t k = (v.has_value() && *v >= 0) ? (size_t)*v : 0;
+                off += k * typeMap_.byteSize(sub->element);
+                sub = sub->element;
+            } else if (ds[i].kind == Designator::Kind::Member
+                       && (sub->kind == TypeNode::Kind::Struct
+                           || sub->kind == TypeNode::Kind::Union)) {
+                off += typeMap_.getFieldOffset(sub, ds[i].member);
+                sub = typeMap_.getFieldType(sub, ds[i].member);
+            } else break;
+        }
+        return {off, sub};
+    };
 
-                const InitClause* clause = nullptr;
-                for (const auto& cl : init->clauses) {
-                    if (!cl.designators.empty()
-                        && cl.designators[0].kind == Designator::Kind::Member
-                        && cl.designators[0].member == fieldName) {
-                        clause = &cl;
-                        break;
-                    }
+    // Emit one clause's initializer at (off, subtype): a scalar Expr store or a
+    // recursive aggregate init.
+    auto emitInitAt = [&](size_t off, const TypeNodePtr& subtype,
+                          const InitializerPtr& clInit) {
+        if (!subtype || !clInit) return;
+        if (clInit->kind == Initializer::Kind::Expr && clInit->expr) {
+            emitBase(off);
+            emitExpr(clInit->expr);
+            // Convert to the target type (as by assignment) so e.g. literal `0`
+            // (i32) into a pointer/long member (i64) extends rather than
+            // type-mismatching the store.
+            emitConvert(this, getExprType(clInit->expr), typeMap_.toWasmType(subtype));
+            emit(typeMap_.makeStore(subtype, memidx));
+        } else if (clInit->kind == Initializer::Kind::List) {
+            int subAddr = allocRawLocal(WasmVM::ValueType::i64);
+            emitBase(off);
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)subAddr});
+            emitListInitializer(subAddr, subtype, clInit, memidx);
+        }
+    };
+
+    auto isAggregate = [](const TypeNodePtr& t) {
+        return t && (t->kind == TypeNode::Kind::Array
+                     || ((t->kind == TypeNode::Kind::Struct
+                          || t->kind == TypeNode::Kind::Union) && t->su));
+    };
+
+    // Flatten the undesignated scalar clauses of `init->clauses` (from *ci) into
+    // the leaves of aggregate (or scalar) `t` at byte `off`, advancing `ci`
+    // (6.7.9p17-p20: a non-braced initializer list fills subobjects in order,
+    // the "current object" descending into nested aggregates). Stops at a
+    // braced clause or a designator — those reset to the enclosing object and
+    // are handled by the top-level loops below.
+    std::function<void(const TypeNodePtr&, size_t, size_t&)> fillLeaves =
+        [&](const TypeNodePtr& t, size_t off, size_t& ci) {
+            if (!t || ci >= init->clauses.size()) return;
+            if (!isAggregate(t)) {            // scalar leaf: consume one clause
+                emitInitAt(off, t, init->clauses[ci].init);
+                ++ci;
+                return;
+            }
+            auto stop = [&](const InitClause& cl) {
+                return !cl.designators.empty()
+                       || (cl.init && cl.init->kind == Initializer::Kind::List);
+            };
+            if (t->kind == TypeNode::Kind::Array && t->element) {
+                size_t esz = typeMap_.byteSize(t->element);
+                size_t n = esz ? typeMap_.byteSize(t) / esz : 0;
+                for (size_t i = 0; i < n && ci < init->clauses.size(); ++i) {
+                    if (stop(init->clauses[ci])) break;
+                    fillLeaves(t->element, off + i * esz, ci);
                 }
-                if (!clause) {
-                    // Advance positional index past any leading designated clauses.
-                    while (posIdx < init->clauses.size()
-                           && !init->clauses[posIdx].designators.empty()) {
-                        ++posIdx;
+            } else { // struct / union
+                for (const auto& member : t->su->members) {
+                    for (const auto& sd : member.declarators) {
+                        if (!sd.declarator || sd.declarator->id.name.empty()) continue;
+                        if (ci >= init->clauses.size() || stop(init->clauses[ci])) return;
+                        size_t foff = typeMap_.getFieldOffset(t, sd.declarator->id.name);
+                        auto ft = typeMap_.getFieldType(t, sd.declarator->id.name);
+                        fillLeaves(ft, off + foff, ci);
+                        if (t->kind == TypeNode::Kind::Union) return; // one member only
                     }
-                    if (posIdx < init->clauses.size()) {
-                        clause = &init->clauses[posIdx++];
-                    }
-                }
-                if (!clause || !clause->init) continue;
-
-                size_t fieldOff = typeMap_.getFieldOffset(type, fieldName);
-                auto fieldType = typeMap_.getFieldType(type, fieldName);
-
-                if (clause->init->kind == Initializer::Kind::Expr && clause->init->expr) {
-                    emitBase(fieldOff);
-                    emitExpr(clause->init->expr);
-                    // Convert to the member type (as by assignment) so e.g. the
-                    // literal `0` (i32) into a pointer/long member (i64) extends
-                    // rather than type-mismatching the store.
-                    emitConvert(this, getExprType(clause->init->expr), typeMap_.toWasmType(fieldType));
-                    emit(typeMap_.makeStore(fieldType, memidx));
-                } else if (clause->init->kind == Initializer::Kind::List && fieldType) {
-                    // Nested aggregate: recurse with a base = baseAddr + fieldOff.
-                    int subAddr = allocRawLocal(WasmVM::ValueType::i64);
-                    emitBase(fieldOff);
-                    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)subAddr});
-                    emitListInitializer(subAddr, fieldType, clause->init, memidx);
                 }
             }
+        };
+
+    if ((type->kind == TypeNode::Kind::Struct || type->kind == TypeNode::Kind::Union) && type->su) {
+        // Field names in declaration order.
+        std::vector<std::string> fields;
+        for (const auto& member : type->su->members)
+            for (const auto& sd : member.declarators) {
+                if (!sd.declarator || sd.declarator->id.name.empty()) continue;
+                fields.push_back(sd.declarator->id.name);
+            }
+
+        // Clause-driven forward pass with a field cursor (6.7.9p17-p19): a
+        // `.member` designator repositions the cursor to that field; every
+        // clause writes the cursor's field and advances it. An undesignated
+        // clause after `.b` continues at the field *after* b (continuation), a
+        // second designator for the same field overwrites the first (last write
+        // wins), and an undesignated scalar against an aggregate member flattens
+        // into it (consuming subsequent clauses).
+        size_t fi = 0, ci = 0;
+        while (ci < init->clauses.size()) {
+            const auto& cl = init->clauses[ci];
+            if (!cl.designators.empty()
+                && cl.designators[0].kind == Designator::Kind::Member) {
+                auto it = std::find(fields.begin(), fields.end(), cl.designators[0].member);
+                if (it != fields.end()) fi = (size_t)(it - fields.begin());
+            }
+            if (fi >= fields.size() || !cl.init) { ++fi; ++ci; continue; }
+
+            size_t fieldOff = typeMap_.getFieldOffset(type, fields[fi]);
+            auto fieldType = typeMap_.getFieldType(type, fields[fi]);
+            // A nested designator (`.m.n`) descends into the member.
+            auto [off, sub] = applyRest(fieldOff, fieldType, cl.designators, 1);
+            if (cl.init->kind == Initializer::Kind::List || !isAggregate(sub)) {
+                emitInitAt(off, sub, cl.init);
+                ++ci;
+            } else {
+                fillLeaves(sub, off, ci);    // flatten scalars into the member
+            }
+            ++fi;
         }
     } else if (type->kind == TypeNode::Kind::Array && type->element) {
         size_t elemSize = typeMap_.byteSize(type->element);
-        size_t curIdx = 0;
-        for (const auto& cl : init->clauses) {
+        size_t curIdx = 0, ci = 0;
+        while (ci < init->clauses.size()) {
+            const auto& cl = init->clauses[ci];
             if (!cl.designators.empty()
                 && cl.designators[0].kind == Designator::Kind::Index
                 && cl.designators[0].index.has_value()) {
                 auto v = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(*cl.designators[0].index);
                 if (v.has_value() && *v >= 0) curIdx = (size_t)*v;
             }
-            if (!cl.init) { ++curIdx; continue; }
+            if (!cl.init) { ++curIdx; ++ci; continue; }
 
-            size_t off = curIdx * elemSize;
-            if (cl.init->kind == Initializer::Kind::Expr && cl.init->expr) {
-                emitBase(off);
-                emitExpr(cl.init->expr);
-                emitConvert(this, getExprType(cl.init->expr), typeMap_.toWasmType(type->element));
-                emit(typeMap_.makeStore(type->element, memidx));
-            } else if (cl.init->kind == Initializer::Kind::List) {
-                int subAddr = allocRawLocal(WasmVM::ValueType::i64);
-                emitBase(off);
-                emit(WasmVM::Instr::Local_set{(WasmVM::index_t)subAddr});
-                emitListInitializer(subAddr, type->element, cl.init, memidx);
+            // A nested designator chain (`[k].m`, `[k][j]`) descends into the
+            // element at curIdx.
+            auto [off, sub] = applyRest(curIdx * elemSize, type->element, cl.designators, 1);
+            if (cl.init->kind == Initializer::Kind::List || !isAggregate(sub)) {
+                emitInitAt(off, sub, cl.init);
+                ++ci;
+            } else {
+                fillLeaves(sub, off, ci);    // flatten scalars into the element
             }
             ++curIdx;
         }
@@ -2255,6 +2541,17 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 return;
             }
 
+            // Block-scope `extern` (6.2.2p4): a reference, not a definition. It
+            // keeps the linkage of any prior visible declaration, so when the
+            // identifier already resolves — e.g. to a file-scope static/global —
+            // reuse that object instead of allocating a shadowing local that
+            // would read as an uninitialized fresh variable (LANG-6.2.2-02).
+            bool isExtern = v->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern);
+            if (isExtern && !(v->initializer && *v->initializer)
+                && symbolTable_.lookup(name).has_value()) {
+                return;
+            }
+
             // Infer an omitted array bound from its initializer (6.7.9p22):
             // `int a[] = {1,2,3}` or `char s[] = "ab"`. Without this the frame
             // slot is sized to a single element and the initializer stores out
@@ -2365,12 +2662,25 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 info.localIndex = slotOrOffset;
                 symbolTable_.define(name, info);
 
-                if (v->initializer
-                    && (*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
-                    && (*v->initializer)->expr) {
-                    emitExpr((*v->initializer)->expr);
+                // A braced scalar initializer `int b = {42}` (6.7.9p11) is a
+                // single-element list; unwrap it to the inner expression so the
+                // scalar store below applies.
+                wvmcc::parser::ExprPtr initExpr;
+                if (v->initializer) {
+                    const auto& ini = **v->initializer;
+                    if (ini.kind == wvmcc::parser::Initializer::Kind::Expr)
+                        initExpr = ini.expr;
+                    else if (ini.kind == wvmcc::parser::Initializer::Kind::List
+                             && ini.clauses.size() == 1
+                             && ini.clauses[0].designators.empty()
+                             && ini.clauses[0].init
+                             && ini.clauses[0].init->kind == wvmcc::parser::Initializer::Kind::Expr)
+                        initExpr = ini.clauses[0].init->expr;
+                }
+                if (initExpr) {
+                    emitExpr(initExpr);
                     // Convert initializer to local's declared type if needed.
-                    auto rhsVt = getExprType((*v->initializer)->expr);
+                    auto rhsVt = getExprType(initExpr);
                     auto lhsVt = typeNode ? typeMap_.toWasmType(typeNode)
                                           : WasmVM::ValueType::i32;
                     emitConvert(this, rhsVt, lhsVt);
@@ -2434,7 +2744,11 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
     int srcAddrLocal = allocRawLocal(WasmVM::ValueType::i64);
     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddrLocal});
 
-    // Field-by-field copy: load from mem[1] (shadow stack), store to mem[0] (via hidden ptr).
+    // Field-by-field copy from the source struct to the hidden sret buffer.
+    // The caller always allocates that buffer in its own shadow stack and
+    // passes an untagged mem[1] frame offset (see the call-site sret setup), so
+    // both the load and the store target mem[1]. (Storing to mem[0] wrote the
+    // struct to the wrong memory — LANG-6.7.9-08.)
     for (const auto& member : returnTypeNode_->su->members) {
         for (const auto& sd : member.declarators) {
             if (!sd.declarator || sd.declarator->id.name.empty()) continue;
@@ -2456,8 +2770,8 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
                 emit(WasmVM::Instr::I64_add{});
             }
             emit(typeMap_.makeLoad(fieldType, 1));
-            // store to hidden ptr (mem[0])
-            emit(typeMap_.makeStore(fieldType, 0));
+            // store to hidden sret buffer (mem[1] shadow stack)
+            emit(typeMap_.makeStore(fieldType, 1));
         }
     }
 }
@@ -3269,7 +3583,24 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
                 if (lp && !rp) return lp;     // ptr - int
             }
         }
-        // Arithmetic / bitwise / shift: usual arithmetic conversions on operand
+        // Shift operators (6.5.7p3): the result type is the *promoted left
+        // operand* type; the usual arithmetic conversions are NOT performed, so
+        // the right operand's (possibly wider) type is irrelevant. sizeof
+        // observes this — `sizeof(int << longlong)` is sizeof(int)
+        // (LANG-6.5.7-07).
+        if (b.op == "<<" || b.op == ">>") {
+            auto lt = getExprTypeNode(b.lhs);
+            if (lt && typeMap_.toWasmType(lt) == WasmVM::ValueType::i32
+                && typeMap_.byteSize(lt) < 4) {
+                auto promoted = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                promoted->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                promoted->simple.push_back(
+                    wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+                return promoted;
+            }
+            return lt;
+        }
+        // Arithmetic / bitwise: usual arithmetic conversions on operand
         // types; here we pick the "wider" of the two.
         auto lt = getExprTypeNode(b.lhs);
         auto rt = getExprTypeNode(b.rhs);
@@ -3387,10 +3718,23 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
             if (rhsType && rhsType->kind == wvmcc::parser::TypeNode::Kind::Pointer)
                 return rhsType->pointee;
         }
-        // Arithmetic / bitwise unary ops (+ - ~) preserve the operand type;
-        // logical-not yields int.
-        if (u.op == "-" || u.op == "+" || u.op == "~"
-            || u.op == "++" || u.op == "--") {
+        // Arithmetic / bitwise unary ops (+ - ~) apply the integer promotions
+        // (6.5.3.3): a sub-int operand (char/short/_Bool) yields int. sizeof
+        // observes this — `sizeof(+(char)x)` is sizeof(int) (LANG-6.3.1.1-02).
+        if (u.op == "-" || u.op == "+" || u.op == "~") {
+            auto t = getExprTypeNode(u.rhs);
+            if (t && typeMap_.toWasmType(t) == WasmVM::ValueType::i32
+                && typeMap_.byteSize(t) < 4) {
+                auto promoted = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                promoted->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+                promoted->simple.push_back(
+                    wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+                return promoted;
+            }
+            return t;
+        }
+        // ++/-- keep the operand's (lvalue) type — no promotion.
+        if (u.op == "++" || u.op == "--") {
             return getExprTypeNode(u.rhs);
         }
         if (u.op == "!") {

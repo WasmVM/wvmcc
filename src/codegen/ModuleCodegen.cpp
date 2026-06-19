@@ -1029,6 +1029,29 @@ bool ModuleCodegen::encodeConstInit(const wvmcc::parser::TypeNodePtr& type,
     // Scalar (Expr) initializer — possibly brace-wrapped (`int x = {5};`).
     if (init->kind == wvmcc::parser::Initializer::Kind::Expr) {
         if (!init->expr) return false;
+        // A char array initialized by a string literal (6.7.9p14): copy the
+        // literal's bytes into the array; a NUL terminator (and any further
+        // padding) is the zero already present in `out`. `char a[]="abc"` (size
+        // incl. NUL) and the truncating `char b[3]="abc"` both fall out of the
+        // min() below (LANG-6.7.9-09).
+        if (t->kind == TK::Array && t->element
+            && init->expr->kind == wvmcc::parser::Expr::Kind::String) {
+            const auto& sl = static_cast<const wvmcc::parser::StringLiteral&>(*init->expr);
+            size_t elemSize = typeMap_.byteSize(t->element);
+            size_t arrayBytes = typeMap_.byteSize(t);
+            if (elemSize == 0 || base + arrayBytes > out.size()) return false;
+            // One element per source character (the lexer strips the encoding
+            // prefix); each is written little-endian in `elemSize` bytes, so a
+            // wide-char array (wchar_t[]) widens each char. A NUL terminator and
+            // any padding are the zeros already present in `out`.
+            size_t nchars = std::min(sl.value.size(), arrayBytes / elemSize);
+            for (size_t i = 0; i < nchars; ++i) {
+                std::uint64_t cv = (unsigned char)sl.value[i];
+                for (size_t b = 0; b < elemSize; ++b)
+                    out[base + i * elemSize + b] = std::byte((cv >> (8 * b)) & 0xFF);
+            }
+            return true;
+        }
         if (t->kind == TK::Array || t->kind == TK::Struct || t->kind == TK::Union)
             return false; // aggregate initialized by a scalar expr — unsupported
         size_t sz = typeMap_.byteSize(t);
