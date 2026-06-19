@@ -119,7 +119,193 @@ void resolveGlobalImports(LinkContext& ctx) {
     m.imports = std::move(kept);
 }
 
+// Imports that are runtime contracts (satisfied by the host at instantiation
+// or by crt0), never user externs — mirrors the diagnostics allow-list. These
+// are kept even when nothing in the module references them.
+const std::unordered_set<std::string> kEnvRuntimeState = {
+    "__linear_memory", "__stack_memory", "__stack_pointer",
+    "__heap_base", "__indirect_function_table",
+};
+
+bool isRuntimeImport(const WasmVM::WasmImport& imp) {
+    if (kHostModules.count(imp.module) > 0) return true;
+    if (imp.module == "env" && kEnvRuntimeState.count(imp.name) > 0) return true;
+    return false;
+}
+
+void collectConstInstrFuncRefs(const WasmVM::ConstInstr& c,
+                               std::unordered_set<WasmVM::index_t>& sink) {
+    std::visit([&](const auto& v) {
+        using T = std::decay_t<decltype(v)>;
+        if constexpr (std::is_same_v<T, WasmVM::Instr::Ref_func>) sink.insert(v.index);
+    }, c);
+}
+
+// Drop function imports that nothing in the (post-DCE) module references. A
+// declared-but-unused `extern` introduces no link requirement (C 6.9p5), so an
+// unresolved import with zero references must be removed rather than reported —
+// otherwise the emitted module would import a symbol the host can't satisfy and
+// fail to instantiate. Runtime-contract imports are always kept. Reindexing
+// mirrors resolveImports: removing low-index function imports shifts later
+// function indices down.
+void pruneUnreferencedFunctionImports(LinkContext& ctx) {
+    auto& m = ctx.output;
+    namespace Op = WasmVM::Opcode;
+
+    std::unordered_set<WasmVM::index_t> referenced;
+    for (const auto& f : m.funcs) {
+        for (const auto& instr : f.body) {
+            if (instr.opcode == Op::Call || instr.opcode == Op::Return_call
+                || instr.opcode == Op::Ref_func) {
+                if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm))
+                    referenced.insert(oi->index);
+            }
+        }
+    }
+    for (const auto& e : m.elems)
+        for (const auto& entry : e.elemlist) collectConstInstrFuncRefs(entry, referenced);
+    for (const auto& g : m.globals) collectConstInstrFuncRefs(g.init, referenced);
+    for (const auto& ex : m.exports)
+        if (ex.desc == WasmVM::WasmExport::DescType::func) referenced.insert(ex.index);
+    if (m.start.has_value()) referenced.insert(*m.start);
+
+    std::vector<WasmVM::index_t> funcRemap; // old func-import idx → new funcidx
+    std::vector<WasmVM::WasmImport> kept;
+    WasmVM::index_t newFuncImportIdx = 0;
+    WasmVM::index_t funcImportIdx = 0;
+    int droppedCount = 0;
+    for (const auto& imp : m.imports) {
+        if (std::holds_alternative<WasmVM::index_t>(imp.desc)) {
+            WasmVM::index_t thisIdx = funcImportIdx++;
+            const bool keep = isRuntimeImport(imp) || referenced.count(thisIdx) > 0;
+            if (keep) {
+                funcRemap.push_back(newFuncImportIdx++);
+                kept.push_back(imp);
+            } else {
+                funcRemap.push_back((WasmVM::index_t)-1); // dropped; never referenced
+                ++droppedCount;
+            }
+        } else {
+            kept.push_back(imp);
+        }
+    }
+    if (droppedCount == 0) return;
+
+    const WasmVM::index_t oldFuncImportCount = (WasmVM::index_t)funcRemap.size();
+    const WasmVM::index_t newFuncImportCount = newFuncImportIdx;
+    auto remapFunc = [&](WasmVM::index_t old) -> WasmVM::index_t {
+        if (old < funcRemap.size()) return funcRemap[old];
+        return newFuncImportCount + (old - oldFuncImportCount);
+    };
+
+    for (auto& f : m.funcs) {
+        for (auto& instr : f.body) {
+            switch (instr.opcode) {
+                case Op::Call:
+                case Op::Return_call:
+                case Op::Ref_func:
+                    if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm))
+                        oi->index = remapFunc(oi->index);
+                    break;
+                default: break;
+            }
+        }
+    }
+    for (auto& ex : m.exports)
+        if (ex.desc == WasmVM::WasmExport::DescType::func) ex.index = remapFunc(ex.index);
+    {
+        std::vector<WasmVM::index_t> fullRemap;
+        WasmVM::index_t totalOldFuncs = oldFuncImportCount + (WasmVM::index_t)m.funcs.size();
+        fullRemap.reserve(totalOldFuncs);
+        for (WasmVM::index_t i = 0; i < totalOldFuncs; ++i) fullRemap.push_back(remapFunc(i));
+        for (auto& e : m.elems)
+            for (auto& entry : e.elemlist) rewriteConstInstr(entry, fullRemap);
+        for (auto& g : m.globals) rewriteConstInstr(g.init, fullRemap);
+    }
+    if (m.start.has_value()) m.start = remapFunc(*m.start);
+
+    m.imports = std::move(kept);
+}
+
+// Global-import analogue of pruneUnreferencedFunctionImports.
+void pruneUnreferencedGlobalImports(LinkContext& ctx) {
+    auto& m = ctx.output;
+    namespace Op = WasmVM::Opcode;
+
+    std::unordered_set<WasmVM::index_t> referenced;
+    for (const auto& f : m.funcs) {
+        for (const auto& instr : f.body) {
+            if (instr.opcode == Op::Global_get || instr.opcode == Op::Global_set) {
+                if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm))
+                    referenced.insert(oi->index);
+            }
+        }
+    }
+    for (const auto& ex : m.exports)
+        if (ex.desc == WasmVM::WasmExport::DescType::global) referenced.insert(ex.index);
+    for (const auto& g : m.globals) {
+        std::visit([&](const auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, WasmVM::Instr::Global_get>) referenced.insert(v.index);
+        }, g.init);
+    }
+
+    std::vector<WasmVM::index_t> globalRemap;
+    std::vector<WasmVM::WasmImport> kept;
+    WasmVM::index_t newGlobalImportIdx = 0;
+    WasmVM::index_t globalImportIdx = 0;
+    int droppedCount = 0;
+    for (const auto& imp : m.imports) {
+        if (std::holds_alternative<WasmVM::GlobalType>(imp.desc)) {
+            WasmVM::index_t thisIdx = globalImportIdx++;
+            const bool keep = isRuntimeImport(imp) || referenced.count(thisIdx) > 0;
+            if (keep) {
+                globalRemap.push_back(newGlobalImportIdx++);
+                kept.push_back(imp);
+            } else {
+                globalRemap.push_back((WasmVM::index_t)-1);
+                ++droppedCount;
+            }
+        } else {
+            kept.push_back(imp);
+        }
+    }
+    if (droppedCount == 0) return;
+
+    const WasmVM::index_t oldGlobalImportCount = (WasmVM::index_t)globalRemap.size();
+    const WasmVM::index_t newGlobalImportCount = newGlobalImportIdx;
+    auto remapGlobal = [&](WasmVM::index_t old) -> WasmVM::index_t {
+        if (old < globalRemap.size()) return globalRemap[old];
+        return newGlobalImportCount + (old - oldGlobalImportCount);
+    };
+
+    for (auto& f : m.funcs) {
+        for (auto& instr : f.body) {
+            if (instr.opcode == Op::Global_get || instr.opcode == Op::Global_set) {
+                if (auto* oi = std::get_if<WasmVM::WasmInstr::OneIdx>(&instr.imm))
+                    oi->index = remapGlobal(oi->index);
+            }
+        }
+    }
+    for (auto& ex : m.exports)
+        if (ex.desc == WasmVM::WasmExport::DescType::global) ex.index = remapGlobal(ex.index);
+    for (auto& g : m.globals) {
+        std::visit([&](auto& v) {
+            using T = std::decay_t<decltype(v)>;
+            if constexpr (std::is_same_v<T, WasmVM::Instr::Global_get>) v.index = remapGlobal(v.index);
+        }, g.init);
+    }
+
+    m.imports = std::move(kept);
+}
+
 } // namespace
+
+void pruneUnreferencedImports(LinkContext& ctx) {
+    // Independent index spaces; order doesn't matter.
+    pruneUnreferencedGlobalImports(ctx);
+    pruneUnreferencedFunctionImports(ctx);
+}
 
 void resolveImports(LinkContext& ctx) {
     auto& m = ctx.output;

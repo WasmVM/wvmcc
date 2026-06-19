@@ -18,7 +18,9 @@ double __wvmcc_nan(void);
 double __wvmcc_inf(void);
 #define NAN      (__wvmcc_nan())
 #define INFINITY (__wvmcc_inf())
-#define HUGE_VAL INFINITY
+#define HUGE_VAL  INFINITY
+#define HUGE_VALF ((float)INFINITY)
+#define HUGE_VALL ((long double)INFINITY)
 
 #define FP_NAN       0
 #define FP_INFINITE  1

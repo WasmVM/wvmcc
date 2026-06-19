@@ -196,6 +196,14 @@ void phaseDeadCodeElim(LinkContext& ctx) {
     dce::eliminate(ctx);
 }
 
+// Drop unreferenced, non-contract imports before diagnostics: a
+// declared-but-unused `extern` (C 6.9p5) needs no definition, so an unresolved
+// import that nothing references must be removed, not reported.
+void phasePruneImports(LinkContext& ctx) {
+    ctx.note("phase: prune-imports");
+    resolve::pruneUnreferencedImports(ctx);
+}
+
 // M2-L9: report unresolved imports outside the host-runtime allow-list.
 void phaseDiagnostics(LinkContext& ctx) {
     ctx.note("phase: diagnostics");
@@ -231,6 +239,7 @@ LinkResult link(std::vector<LinkInput> inputs, const LinkOptions& opts) {
         phaseResolveImports(ctx);
         phaseCrt0(ctx);
         phaseDeadCodeElim(ctx);
+        phasePruneImports(ctx);
         phaseDiagnostics(ctx);
         phaseMapOutput(ctx);
     }
