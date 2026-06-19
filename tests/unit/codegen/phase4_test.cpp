@@ -1,7 +1,7 @@
 // Phase 4 unit tests — _Bool normalization at the codegen level. The Phase 4
 // features that depend on a full ModuleCodegen (function tables / static
 // locals / designated initializers for declarations) are covered by the
-// integration tests under tests/integration/phase4 because they need a real
+// end-to-end conformance suite under tests/standard/ because they need a real
 // translation unit.
 #include <cstdint>
 #include <iostream>

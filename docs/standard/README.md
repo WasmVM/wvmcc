@@ -97,8 +97,9 @@ placed **inline** under the standard section that governs them.
    freestanding host syscalls) → `by-design`.
 4. Otherwise not yet reached → `deferred`.
 
-> Integration tests (`tests/integration/`) are **being deprecated** by this suite and are **not**
-> cited as evidence. Unit tests (`tests/unit/`) **are** cited, via the `unit-xref` Verify mode.
+> The legacy integration tests (`tests/integration/`) have been **removed** in favor of this suite,
+> which now owns end-to-end runtime coverage. Unit tests (`tests/unit/`) **are** cited, via the
+> `unit-xref` Verify mode.
 
 ### Verify — how the case is checked
 | Verify | Mechanism |
@@ -130,9 +131,9 @@ Rule: **one file per subsection (language) or per entity (libc)**; all rows for 
 subsection/entity are asserted inside the one file, keyed by ID in comments. Heavy cases may be
 split into `<name>_<NN>.c`; the README rule is the default.
 
-The harness mirrors the existing macros in `tests/integration/CMakeLists.txt`
-(`add_e2e_test` / `add_link_test` / `add_link_stdout_test`) — wiring is part of the test-writing
-pass, not this catalog.
+The harness defines its own helpers in `tests/standard/CMakeLists.txt`
+(`add_standard_static_assert` / `add_standard_run_test` / `add_standard_stdout_test`, etc.) —
+wiring is part of the test-writing pass, not this catalog.
 
 ---
 

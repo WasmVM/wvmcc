@@ -145,11 +145,11 @@ byte offset (`kPtrOffMask`).
 
 This is what makes the `&local`-passed-to-a-helper idiom work (issue #78) — it is
 pervasive in real C and in the M2 runtime libc (`vfprintf` builds a local output
-context and calls `do_format(&o, …)`, etc.). Regression coverage lives in
-`tests/integration/phase5/e2e_addr_of_local.c`. (Caveat: a pointer laundered
-through an integer *typedef* such as `<stdint.h>`'s `uintptr_t` can still mis-size
-to i32 and truncate the tag — that is the separate typedef-resolution gap, not a
-flaw in this scheme.)
+context and calls `do_format(&o, …)`, etc.), so the conformance run-suite under
+`tests/standard/` exercises it implicitly. (Caveat: a pointer laundered through an
+integer *typedef* such as `<stdint.h>`'s `uintptr_t` can still mis-size to i32 and
+truncate the tag — that is the separate typedef-resolution gap, not a flaw in this
+scheme.)
 
 ## Integration with Main Pipeline
 
