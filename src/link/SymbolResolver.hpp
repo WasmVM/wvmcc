@@ -19,4 +19,13 @@ namespace wvmcc::link::resolve {
 // crt0 needs to satisfy env.__* (which it currently does directly).
 void resolveImports(LinkContext& ctx);
 
+// Drop imports that nothing in the (post-DCE) module references and that are
+// not runtime contracts (host modules / env runtime state). A declared-but-
+// unused `extern` imposes no link requirement (C 6.9p5), so such an unresolved
+// import must be removed rather than reported as undefined — leaving it would
+// make the module fail to instantiate. Reindexes the function and global index
+// spaces like resolveImports. Run after DCE (which may strip the last user of
+// an import) and before diagnostics.
+void pruneUnreferencedImports(LinkContext& ctx);
+
 } // namespace wvmcc::link::resolve

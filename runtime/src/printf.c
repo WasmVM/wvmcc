@@ -391,17 +391,22 @@ static int _emit_hex_float(double value, char *buf, int upper) {
     }
     buf[n++] = (char)('0' + lead_digit);
 
-    // Emit the mantissa as 13 hex digits, then strip trailing zeros — but
-    // keep at least one digit after the dot so `1.0` prints as `0x1.0p+0`
-    // (matches the M2-14 acceptance spec; glibc prints `0x1p+0` instead).
-    char mbuf[16];
-    int m = 0;
-    for (int s = 48; s >= 0; s -= 4) {
-        mbuf[m++] = hex[(int)((mant >> s) & 0xfUL)];
+    // Zero has no significant fractional digits, so per C17 7.21.6.1 (precision
+    // omitted => minimum digits for an exact representation) it prints with no
+    // dot at all: `0x0p+0`.
+    if (!(exp_field == 0 && mant == 0)) {
+        // Emit the mantissa as 13 hex digits, then strip trailing zeros — but
+        // keep at least one digit after the dot so `1.0` prints as `0x1.0p+0`
+        // (matches the M2-14 acceptance spec; glibc prints `0x1p+0` instead).
+        char mbuf[16];
+        int m = 0;
+        for (int s = 48; s >= 0; s -= 4) {
+            mbuf[m++] = hex[(int)((mant >> s) & 0xfUL)];
+        }
+        while (m > 1 && mbuf[m - 1] == '0') m--;
+        buf[n++] = '.';
+        for (int i = 0; i < m; i++) buf[n++] = mbuf[i];
     }
-    while (m > 1 && mbuf[m - 1] == '0') m--;
-    buf[n++] = '.';
-    for (int i = 0; i < m; i++) buf[n++] = mbuf[i];
 
     buf[n++] = upper ? 'P' : 'p';
     if (unbiased < 0) { buf[n++] = '-'; unbiased = -unbiased; }

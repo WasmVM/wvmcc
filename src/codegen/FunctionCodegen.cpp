@@ -120,14 +120,23 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         else ++it;
     }
 
-    // Detect struct return: struct/union base type AND no pointer in the declarator chain
-    // before the function declarator.
+    // Detect struct return: struct/union base type AND the return type is not a
+    // pointer. The declarator chain is laid out outer→inner as
+    //   [trailing suffix (Function)] → Identifier → [leading `*`s]
+    // so the pointers that decorate the RETURN type sit BELOW the Identifier.
+    // Look for a Pointer layer after the Identifier (a bare `break` at Function
+    // would miss `T *f()`, whose `*` is below the identifier).
     bool hasReturnPointer = false;
+    bool sawReturnIdentifier = false;
     for (auto cur = funcDef->declarator; cur;
          cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
-        if (cur->kind == wvmcc::parser::Declarator::Kind::Function
-            || cur->kind == wvmcc::parser::Declarator::Kind::Identifier) break;
-        if (cur->kind == wvmcc::parser::Declarator::Kind::Pointer) { hasReturnPointer = true; break; }
+        if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier) {
+            sawReturnIdentifier = true;
+        } else if (sawReturnIdentifier
+                   && cur->kind == wvmcc::parser::Declarator::Kind::Pointer) {
+            hasReturnPointer = true;
+            break;
+        }
     }
     if (!hasReturnPointer) {
         for (const auto& ts : funcDef->specifiers.typeSpecifiers) {
@@ -140,6 +149,19 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
                 node->su = ts.su;
                 returnTypeNode_ = node;
                 break;
+            }
+        }
+        // A return type spelled as a typedef-name (e.g. `imaxdiv_t`, `div_t`)
+        // carries no StructOrUnion specifier above. Resolve it through
+        // Semantic so struct-by-value returns named via a typedef are still
+        // routed through the hidden sret pointer rather than mis-lowered to a
+        // scalar Wasm result.
+        if (!returnTypeNode_ && semantic_) {
+            auto resolved = semantic_->canonicalTypeRepr(funcDef->specifiers, nullptr);
+            if (resolved && resolved->su
+                && (resolved->kind == wvmcc::parser::TypeNode::Kind::Struct
+                    || resolved->kind == wvmcc::parser::TypeNode::Kind::Union)) {
+                returnTypeNode_ = resolved;
             }
         }
     }
@@ -980,6 +1002,30 @@ void FunctionCodegen::emitBinaryExpr(const wvmcc::parser::BinaryExpr& expr) {
                     return;
                 }
                 if (auto* ml = std::get_if<MemoryLocal>(&*sym)) {
+                    // Struct/union assignment from a struct rvalue (e.g. a
+                    // struct-returning call): the RHS yields an *address*, so
+                    // copy its bytes rather than scalar-storing the address.
+                    // Mirrors the aggregate copy-initialization path.
+                    if (ml->type
+                        && (ml->type->kind == wvmcc::parser::TypeNode::Kind::Struct
+                            || ml->type->kind == wvmcc::parser::TypeNode::Kind::Union)) {
+                        emitExpr(expr.rhs, /*needLValue=*/true);
+                        int srcAddr = allocRawLocal(WasmVM::ValueType::i64);
+                        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddr});
+                        int dstAddr = allocRawLocal(WasmVM::ValueType::i64);
+                        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+                        emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)ml->frameOffset});
+                        emit(WasmVM::Instr::I64_add{});
+                        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)dstAddr});
+                        AddrKind sk = addressKind(expr.rhs.get());
+                        uint8_t srcMem = (sk == AddrKind::Mem0) ? 0 : 1;
+                        emitBytewiseCopy(dstAddr, /*dstMemidx=*/1, srcAddr, srcMem,
+                                         typeMap_.byteSize(ml->type));
+                        // Result of the assignment is the destination object;
+                        // leave its address (struct rvalues are addresses here).
+                        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)dstAddr});
+                        return;
+                    }
                     auto rhsWasmType = getExprType(expr.rhs);
                     int tempIdx = allocRawLocal(rhsWasmType);
                     emitExpr(expr.rhs, false);
