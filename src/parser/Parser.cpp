@@ -210,6 +210,18 @@ TypeNodePtr Parser::buildTypeNameNode(const DeclarationSpecifiers &specs, int po
     return tn;
 }
 
+// The declared identifier of a declarator, walking past pointer/array/function
+// adornments to the inner Identifier. `d->id.name` alone only works for a bare
+// identifier; a derived declarator like `Pair[2]` keeps the name in `inner`.
+static std::string declaratorIdentName(const DeclaratorPtr &d) {
+    for (auto cur = d; cur; cur = cur->inner.has_value() ? *cur->inner : nullptr) {
+        if (cur->kind == Declarator::Kind::Identifier && !cur->id.name.empty())
+            return cur->id.name;
+        if (!cur->id.name.empty()) return cur->id.name;
+    }
+    return {};
+}
+
 void Parser::recordTypedef(const std::string &name, const DeclarationSpecifiers &specs, const DeclaratorPtr &declr) {
     typedef_names.insert(name);
     // Only capture an underlying simple type when the declarator is a *bare*
@@ -1322,8 +1334,8 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
     // If this declaration introduces a typedef-name, record it for future
     // recognition in `parseDeclarationSpecifiers()`.
     if (specs.hasStorage(StorageClass::Typedef)) {
-        if (decl->declarator && !decl->declarator->id.name.empty()) {
-            recordTypedef(decl->declarator->id.name, specs, decl->declarator);
+        if (auto tdName = declaratorIdentName(decl->declarator); decl->declarator && !tdName.empty()) {
+            recordTypedef(tdName, specs, decl->declarator);
         }
     }
 
@@ -1370,8 +1382,8 @@ DeclarationPtr Parser::parseDeclaration(const DeclarationSpecifiers& specs, cons
         lex.next();
     }
     if (specs.hasStorage(StorageClass::Typedef)) {
-        if (decl->declarator && !decl->declarator->id.name.empty()) {
-            recordTypedef(decl->declarator->id.name, specs, decl->declarator);
+        if (auto tdName = declaratorIdentName(decl->declarator); decl->declarator && !tdName.empty()) {
+            recordTypedef(tdName, specs, decl->declarator);
         }
     }
     // Constraint C 6.7.2.2: require declarator/tag/enum-members for declarations
@@ -1410,9 +1422,9 @@ std::vector<DeclarationPtr> Parser::parseInitDeclaratorList(const DeclarationSpe
             decl->initializer = parseInitializer();
         }
         // a declared typedef-name must be recognized for later declarations
-        if (specs.hasStorage(StorageClass::Typedef)
-            && decl->declarator && !decl->declarator->id.name.empty()) {
-            recordTypedef(decl->declarator->id.name, specs, decl->declarator);
+        if (auto tdName = declaratorIdentName(decl->declarator);
+            specs.hasStorage(StorageClass::Typedef) && decl->declarator && !tdName.empty()) {
+            recordTypedef(tdName, specs, decl->declarator);
         }
         out.push_back(std::move(decl));
 
