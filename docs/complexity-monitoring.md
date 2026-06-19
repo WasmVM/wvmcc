@@ -8,24 +8,22 @@ This project includes automated code complexity monitoring integrated into the C
 
 ### Basic Usage
 
-After configuring with CMake, run these commands from your build directory:
+After configuring with CMake, run these targets through `cmake --build` so they
+work with any generator (Ninja recommended, but Make etc. also work):
 
 ```bash
 # View complexity analysis
-make complexity
+cmake --build build --target complexity
 
 # Generate HTML complexity report
-make complexity-report
+cmake --build build --target complexity-report
 
 # Check complexity against thresholds
-make complexity-check
-
-# Count lines of code
-make loc
-
-# Combined metrics (LOC + complexity)
-make metrics
+cmake --build build --target complexity-check
 ```
+
+With a Ninja build tree you can also invoke them directly, e.g.
+`ninja -C build complexity`.
 
 ## Metrics Explained
 
@@ -78,14 +76,13 @@ apt-get install cloc  # Ubuntu/Debian
 
 ## Integration with CI/CD
 
-Add to your CI pipeline:
+Add to your CI pipeline (the project's CI is GitLab CI, `.gitlab-ci.yml`):
 
 ```yaml
-# Example for GitHub Actions
-- name: Check Code Complexity
-  run: |
-    cd build
-    make complexity-check
+complexity:
+  script:
+    - cmake -G Ninja -S . -B build
+    - cmake --build build --target complexity-check
 ```
 
 ## Example Output
@@ -104,8 +101,8 @@ NLOC    CCN   token  PARAM  length  location
 
 ## Recommendations
 
-1. **Run before commits**: `make complexity-check`
-2. **Review weekly**: `make complexity-report` and review HTML output
+1. **Run before commits**: `cmake --build build --target complexity-check`
+2. **Review weekly**: `cmake --build build --target complexity-report` and review HTML output
 3. **Set CI gates**: Fail builds if CCN > 20
 4. **Refactor regularly**: Target CCN < 10 for critical functions
 

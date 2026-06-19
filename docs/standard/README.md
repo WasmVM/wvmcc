@@ -13,7 +13,7 @@ The catalog is split two ways, matching the standard:
 
 > **Design rule.** wvmcc is a *new compiler for a new target*. Expected behavior is derived from the
 > **C17 standard** and wvmcc's **own design docs** (`docs/spec.md`, `docs/lowering-plan.md`,
-> `docs/milestones.md`) — **never** from GCC, Clang, or any other compiler. Every
+> `docs/codegen.md`) — **never** from GCC, Clang, or any other compiler. Every
 > implementation-defined expectation cites `docs/spec.md`.
 
 ---
@@ -145,11 +145,12 @@ pass, not this catalog.
 | `libc.md` (7.2–7.31) | complete |
 
 The catalog is exhaustive across C17 Clauses 4–7 and the reachable Annex J behavior items. The
-test-writing pass materializes each row under `tests/standard/` per the ID→path convention above
-(the first `static-assert` batch has landed). Known prerequisites surfaced while materializing it:
+test-writing pass materializes each row under `tests/standard/` per the ID→path convention above.
+The prerequisites surfaced while materializing it have since been resolved:
 
-- **#80** — preprocessor/parser errors must force a non-zero exit (gates `compile-fail` rows).
-- **#81** — the `_Static_assert` ICE evaluator must accept `sizeof`/`_Alignof`/casts (gates the
-  type-width/alignment/signedness `static-assert` rows; only macro-value rows are live until then).
-- **Missing freestanding headers** — `<float.h>`, `<iso646.h>`, `<stdalign.h>`, `<stdnoreturn.h>`
-  (required per 4p6) are not yet in `runtime/include`; their rows stay `deferred`.
+- **#80** (closed) — preprocessor/parser errors now force a non-zero exit, enabling `compile-fail` rows.
+- **#81** (closed) — the `_Static_assert` ICE evaluator now accepts `sizeof`/`_Alignof`/casts,
+  enabling the type-width/alignment/signedness `static-assert` rows.
+- **Freestanding headers** — `<float.h>`, `<iso646.h>`, `<stdalign.h>`, `<stdnoreturn.h>` (required
+  per 4p6) are now in `runtime/include` and exercised by
+  `tests/standard/language/4_conformance/4_freestanding_headers.c`.

@@ -172,31 +172,35 @@ Comprehensive unit tests are provided in `tests/unit/codegen/` that verify:
 
 ## Phase Implementation Status
 
+All five lowering phases are complete; codegen produces validated `WasmModule`s
+for the full C17 subset described in `docs/lowering-plan.md`.
+
 ### Phase 1 - Scalar Foundation (Complete)
 - Basic type mapping and memory model
 - Symbol table with scope management
 - Function code generation skeleton
 - Module generation with proper memory setup
 
-### Phase 2 - Memory and Aggregates (In Progress)
-- Address taken analysis
+### Phase 2 - Memory and Aggregates (Complete)
+- Address-taken analysis
 - Shadow stack management
 - Struct/union layout support
-- Pointer and address expression handling
+- Pointer and address expression handling (tagged-pointer cross-memory deref)
 
-### Phase 3 - Control Flow Completeness (In Progress)
+### Phase 3 - Control Flow Completeness (Complete)
 - Break/continue support
-- Switch statement handling
+- Switch statement handling (dense `br_table` and sparse `if`/`else`)
 - Short-circuit evaluation
 - Ternary operator support
 
-### Phase 4 - Advanced Features (Planned)
-- Function pointers and call_indirect
+### Phase 4 - Advanced Features (Complete)
+- Function pointers via tagged-i64 funcref-table slots + `call_indirect`
 - Static local variables
-- Forward-only goto support
+- Arbitrary `goto` lowered through a dispatch loop (forward, backward, and
+  non-local jumps), superseding the original forward-only restriction
 
-### Phase 5 - Robustness (Planned)
-- Comprehensive diagnostics
+### Phase 5 - Robustness (Complete)
+- Comprehensive diagnostics on unimplemented paths
 - BSS zero-initialization
 - Integration testing suite
 

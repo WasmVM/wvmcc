@@ -2,7 +2,7 @@
 
 ## Goals
 - Freestanding C17 compiler (no libc, no WASI). No reliance on host syscalls; only pure computation and explicit imports chosen by us.
-- Output format: WasmVM `WasmModule` as the final IR/module. Internal compilation can use a custom IR before lowering.
+- Output format: WasmVM `WasmModule` as the final IR/module. Codegen lowers the typed AST directly to `WasmModule`; there is no separate IR layer.
 - Initial focus: correctness and clean architecture over optimizations.
 
 ## Language Scope (M0 → M2)
@@ -30,14 +30,13 @@
   - Parser: hand-written recursive descent with declarator grammar; recovery at `;`/`}`/`,`.
   - AST: typed nodes, source spans; casts inserted during semantic analysis.
   - Semantics: scope stacks (file/block/function/tag), type system (qualifiers, arrays, functions, pointers), conversions, constant folding, diagnostics.
-- IR:
-  - Custom IR: SSA-like blocks with simple three-address ops for expressions/control flow.
-  - Passes: const-fold, copy-prop, dead-code elim (basic), canonicalization.
-- Backend:
-  - Final output is `WasmModule`; lowering to wasm binary is handled by `WasmVM::module_encode`.
-  - Lower custom IR → WasmVM op set (`i32/i64/f32/f64`) mapped into linear memory for aggregates.
+- Backend (codegen):
+  - No separate IR: `src/codegen/` walks the typed AST and emits a `WasmModule` directly (see `docs/codegen.md` and `docs/lowering-plan.md`). Constant folding happens in semantic analysis.
+  - Maps C types onto the WasmVM op set (`i32/i64/f32/f64`); aggregates live in linear memory.
   - Calling convention: wasm64-compatible; spill to linear memory as needed.
-  - No host imports in M0; expose only minimal module sections.
+  - Final output is `WasmModule`; lowering to the wasm binary is handled by `WasmVM::module_encode`.
+- Linker:
+  - `src/link/` merges translation units and `.o`/`.wasm` objects, resolves symbols, pulls archive members lazily, applies relocations, eliminates dead code, and synthesizes `crt0` (freestanding builds skip linking via `-ffreestanding`).
 
 ## Translation Phases (C17 §5.1.1.2)
 - Phase 1: Source mapping + trigraphs
@@ -140,23 +139,24 @@ using PPTokenStream = std::vector<PPToken>;
   - Extended characters are UTF-8; tokenization treats them as part of identifiers/literals where allowed.
 
 ## Developer Workflows
-- Build: `mkdir build && cd build && cmake .. && make -j4`
+- Build: `cmake -G Ninja -S . -B build && cmake --build build` (Ninja is recommended; any CMake generator works).
 - Run: `wvmcc source.c -o out.wasm` (CLI emits WasmModule → wasm or native WasmVM format depending on support).
   - Preprocess: `src/pp` performs phases 1–4 before lexing/parsing.
 - Tests:
-  - Unit: C++ tests for lexer/parser/semantics/IR.
+  - Unit: C++ tests for lexer/parser/semantics/codegen.
   - E2E: compile small freestanding programs (no I/O), e.g., arithmetic, branches, function calls; validate results by reading memory/return values via a test harness.
   - Diagnostics: en-US messages in M0; plan switch to zh-TW as primary in a later milestone.
 
 ## Project Conventions
 - C++20 only; minimal dependencies.
 - Tree:
-  - `src/{lexer,parser,ast,semantics}/`
-  - `src/ir/`
-  - `src/pp/` (preprocessor)
-  - `src/exec/`
-  - `include/` (public headers)
-  - `tests/{unit,e2e}/`
+  - `src/pp/` (tokenizer + preprocessor)
+  - `src/parser/` (lexer, parser, AST, semantics)
+  - `src/codegen/` (AST → `WasmModule` lowering, layout, symbol table, reloc)
+  - `src/link/` (integrated linker)
+  - `src/exec/` (CLI driver)
+  - `runtime/` (minimal freestanding libc → `libc.a`)
+  - `tests/{unit,integration,standard}/`
 
 ## Milestones
 - M0: Parse/type-check core C; IR gen for expressions/statements; lower to minimal `WasmModule`; run pure computation programs in WasmVM.
