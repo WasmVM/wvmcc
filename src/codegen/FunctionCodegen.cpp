@@ -207,6 +207,28 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
                         paramType = ptrNode;
                     }
                 }
+                // Parameter type adjustment (6.7.6.3p7,p8): a parameter
+                // declared "array of T" is adjusted to "pointer to T", and one
+                // declared "function returning T" to "pointer to function".
+                // The argument is passed as a (tagged) pointer value, so the
+                // parameter must be a pointer for indexing/deref to dispatch on
+                // the tag and for sizeof to see a pointer (LANG-6.7.6.3-03).
+                {
+                    auto adj = paramType;
+                    while (adj && adj->kind == wvmcc::parser::TypeNode::Kind::Qualified)
+                        adj = adj->pointee;
+                    if (adj && adj->kind == wvmcc::parser::TypeNode::Kind::Array) {
+                        auto p = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                        p->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                        p->pointee = adj->element;
+                        paramType = p;
+                    } else if (adj && adj->kind == wvmcc::parser::TypeNode::Kind::Function) {
+                        auto p = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                        p->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                        p->pointee = adj;
+                        paramType = p;
+                    }
+                }
                 ScalarLocal info;
                 info.type = paramType;
                 info.isAddressTaken = false;
@@ -1165,10 +1187,18 @@ void FunctionCodegen::emitUnaryExpr(const wvmcc::parser::UnaryExpr& expr, bool n
             emitUnimplemented("codegen: unsupported operand type for unary '~'", expr.span);
         }
     } else if (expr.op == "!") {
+        // `!E` yields int 1 if E compares equal to 0, else 0 (6.5.3.3p5).
         if (exprType == WasmVM::ValueType::i32) {
             emit(WasmVM::Instr::I32_eqz{});
         } else if (exprType == WasmVM::ValueType::i64) {
             emit(WasmVM::Instr::I64_eqz{});
+        } else if (exprType == WasmVM::ValueType::f32) {
+            // f32 has no eqz: compare against 0.0; result is i32.
+            emit(WasmVM::Instr::F32_const{0.0f});
+            emit(WasmVM::Instr::F32_eq{});
+        } else if (exprType == WasmVM::ValueType::f64) {
+            emit(WasmVM::Instr::F64_const{0.0});
+            emit(WasmVM::Instr::F64_eq{});
         } else {
             emitUnimplemented("codegen: unsupported operand type for unary '!'", expr.span);
         }
@@ -1572,9 +1602,28 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
     int numVariadic = totalArgs - namedParamCount;
     size_t spillSize = static_cast<size_t>(numVariadic) * 8;
 
-    // 1. Push named args (left-to-right).
+    // 1. Push named args (left-to-right), each converted to its parameter's
+    // Wasm value type as by assignment (6.5.2.2p7) — exactly as the
+    // non-variadic path does. Without this, e.g. `snprintf(0, 0, ...)` pushes
+    // i32 literals into the i64 `char*`/`size_t` named parameters and fails
+    // validation (LIBC-stdio-snprintf).
+    std::vector<WasmVM::ValueType> namedParamTypes;
+    if (isDirect) {
+        auto funcSym = symbolTable_.lookupFunction(directName);
+        if (funcSym) namedParamTypes = funcSym->paramTypes;
+    } else {
+        auto calleeType = getExprTypeNode(expr.callee);
+        auto fnNode = calleeType;
+        if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Pointer)
+            fnNode = fnNode->pointee;
+        if (fnNode && fnNode->kind == wvmcc::parser::TypeNode::Kind::Function)
+            for (const auto& p : fnNode->params)
+                namedParamTypes.push_back(typeMap_.toWasmType(p));
+    }
     for (int i = 0; i < namedParamCount; ++i) {
         emitExpr(expr.args[i]);
+        if (i < (int)namedParamTypes.size())
+            emitConvert(this, getExprType(expr.args[i]), namedParamTypes[i]);
     }
 
     // 2. Save current SP into a local.
@@ -2197,6 +2246,36 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 return;
             }
 
+            // Infer an omitted array bound from its initializer (6.7.9p22):
+            // `int a[] = {1,2,3}` or `char s[] = "ab"`. Without this the frame
+            // slot is sized to a single element and the initializer stores out
+            // of bounds (LANG-6.3.2.1-03). The synthesized bound also feeds
+            // sizeof.
+            if (typeNode && typeNode->kind == wvmcc::parser::TypeNode::Kind::Array
+                && !typeNode->sizeExpr && v->initializer && *v->initializer) {
+                using namespace wvmcc::parser;
+                const auto& ini = **v->initializer;
+                size_t count = 0;
+                if (ini.kind == Initializer::Kind::List) {
+                    size_t cur = 0;
+                    for (const auto& cl : ini.clauses) {
+                        if (!cl.designators.empty()
+                            && cl.designators[0].kind == Designator::Kind::Index
+                            && cl.designators[0].index.has_value()) {
+                            auto iv = ConstExprEvaluator::evalIntegerConstantExpr(
+                                *cl.designators[0].index);
+                            if (iv.has_value() && *iv >= 0) cur = (size_t)*iv;
+                        }
+                        ++cur;
+                        if (cur > count) count = cur;
+                    }
+                } else if (ini.kind == Initializer::Kind::Expr && ini.expr
+                           && ini.expr->kind == Expr::Kind::String) {
+                    count = static_cast<const StringLiteral&>(*ini.expr).value.size() + 1;
+                }
+                if (count > 0) typeNode->sizeExpr = makeIntLiteralExpr((std::int64_t)count);
+            }
+
             bool isAddrTaken = addressTakenNames_.count(name) > 0;
             // Struct/union/array variables are always memory-resident.
             bool isAggregateType = typeNode
@@ -2213,6 +2292,27 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
 
                 if (v->initializer && *v->initializer) {
                     if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
+                        && (*v->initializer)->expr
+                        && typeNode->kind == wvmcc::parser::TypeNode::Kind::Array
+                        && typeNode->element
+                        && typeMap_.byteSize(typeNode->element) == 1
+                        && (*v->initializer)->expr->kind == wvmcc::parser::Expr::Kind::String) {
+                        // `char s[] = "abc"` (6.7.9p14): copy the literal's bytes
+                        // (including the terminating NUL) element-by-element into
+                        // the array slot rather than storing the decayed pointer.
+                        // Any trailing elements of a larger array are zeroed.
+                        const auto& sv = static_cast<const wvmcc::parser::StringLiteral&>(
+                            *(*v->initializer)->expr).value;
+                        size_t arrLen = typeMap_.byteSize(typeNode); // char elems: 1 byte each
+                        for (size_t i = 0; i < arrLen; ++i) {
+                            std::uint8_t byte = i < sv.size() ? (std::uint8_t)sv[i] : 0;
+                            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
+                            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)(info.frameOffset + i)});
+                            emit(WasmVM::Instr::I64_add{});
+                            emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)byte});
+                            emit(typeMap_.makeStore(typeNode->element, 1));
+                        }
+                    } else if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
                         && (*v->initializer)->expr) {
                         emit(WasmVM::Instr::Local_get{(WasmVM::index_t)framePointerLocal_});
                         emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
@@ -2910,6 +3010,35 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
                             && b.op != "==" && b.op != "!="
                             && b.op != "<=" && b.op != ">="))
             return getExprTypeNode(b.lhs);
+        // Pointer arithmetic (6.5.6): `ptr ± int` (and `int + ptr`) yields the
+        // pointer's type, NOT a plain integer. Returning the pointer type is
+        // what lets a following deref pick the correct load width — e.g.
+        // `*(charptr + 1)` must do an 8-bit load, not the i32 default. (`ptr -
+        // ptr` yields ptrdiff_t and falls through to the integer path below.)
+        if (b.op == "+" || b.op == "-") {
+            auto decayToPtr = [](wvmcc::parser::TypeNodePtr t)
+                -> wvmcc::parser::TypeNodePtr {
+                while (t && t->kind == wvmcc::parser::TypeNode::Kind::Qualified)
+                    t = t->pointee;
+                if (!t) return nullptr;
+                if (t->kind == wvmcc::parser::TypeNode::Kind::Pointer) return t;
+                if (t->kind == wvmcc::parser::TypeNode::Kind::Array) {
+                    auto p = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    p->kind = wvmcc::parser::TypeNode::Kind::Pointer;
+                    p->pointee = t->element;
+                    return p;
+                }
+                return nullptr;
+            };
+            auto lp = decayToPtr(getExprTypeNode(b.lhs));
+            auto rp = decayToPtr(getExprTypeNode(b.rhs));
+            if (b.op == "+") {
+                if (lp) return lp;            // ptr + int
+                if (rp) return rp;            // int + ptr
+            } else {                          // b.op == "-"
+                if (lp && !rp) return lp;     // ptr - int
+            }
+        }
         // Arithmetic / bitwise / shift: usual arithmetic conversions on operand
         // types; here we pick the "wider" of the two.
         auto lt = getExprTypeNode(b.lhs);
@@ -2940,13 +3069,40 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     }
     case K::Ternary: {
         const auto& t = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);
-        // Result is the common-arithmetic type of the two branches; we
-        // approximate by returning the "then" branch's type when both are
-        // available (matches the common case where both branches yield the
-        // same C type).
+        // Result is the common-arithmetic type of the two branches. The
+        // codegen path (case K::Ternary in emitExpr) converts both branches to
+        // the wider WasmVM value type, so this must agree: return whichever
+        // branch yields the wider type. Mismatching here makes the consumer
+        // (e.g. an assignment store) expect the wrong stack type and fail
+        // module validation (LANG-6.5.15-02).
         auto th = getExprTypeNode(t.thenExpr);
-        if (th) return th;
-        return getExprTypeNode(t.elseExpr);
+        auto el = getExprTypeNode(t.elseExpr);
+        if (!th) return el;
+        if (!el) return th;
+        // Rank value types widest-first: f64 > f32 > i64 > i32.
+        auto rank = [](WasmVM::ValueType vt) -> int {
+            switch (vt) {
+            case WasmVM::ValueType::f64: return 3;
+            case WasmVM::ValueType::f32: return 2;
+            case WasmVM::ValueType::i64: return 1;
+            default:                     return 0;
+            }
+        };
+        auto result = rank(typeMap_.toWasmType(el)) > rank(typeMap_.toWasmType(th)) ? el : th;
+        // Usual arithmetic conversions integer-promote sub-int operands: when
+        // both branches are integers narrower than int (char/short/_Bool), the
+        // result type is int, not the narrow type (6.5.15p5, 6.3.1.1). sizeof
+        // observes this (LANG-6.5.15-02). Pointers are i64, so this only
+        // catches genuine narrow integers.
+        if (result && typeMap_.toWasmType(result) == WasmVM::ValueType::i32 &&
+            typeMap_.byteSize(result) < 4) {
+            auto promoted = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+            promoted->kind = wvmcc::parser::TypeNode::Kind::Builtin;
+            promoted->simple.push_back(
+                wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+            return promoted;
+        }
+        return result;
     }
     case K::Call: {
         const auto& call = static_cast<const wvmcc::parser::CallExpr&>(*expr);
@@ -3053,7 +3209,15 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
     }
     case K::Index: {
         const auto& idx = static_cast<const wvmcc::parser::IndexExpr&>(*expr);
+        // E1[E2] is *((E1)+(E2)); the pointer/array operand may be either side
+        // (`2[a]` == `a[2]`). Mirror emitArrayIndexExpr and pick whichever side
+        // is the pointer/array — otherwise `2[a]` yields no type, the access
+        // defaults to i32, and a containing comparison mismatches the i64
+        // address actually on the stack (LANG-6.5.3.2-03).
         auto baseType = getExprTypeNode(idx.base);
+        if (!(baseType && (baseType->kind == wvmcc::parser::TypeNode::Kind::Pointer
+                           || baseType->kind == wvmcc::parser::TypeNode::Kind::Array)))
+            baseType = getExprTypeNode(idx.index);
         if (baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Pointer)
             return baseType->pointee;
         if (baseType && baseType->kind == wvmcc::parser::TypeNode::Kind::Array)
