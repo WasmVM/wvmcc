@@ -16,8 +16,12 @@ int atexit(void (*func)(void));
 /* Conversion */
 int      atoi(const char *s);
 long     atol(const char *s);
+double   atof(const char *s);
 long     strtol(const char *s, char **endptr, int base);
 unsigned long strtoul(const char *s, char **endptr, int base);
+double      strtod(const char *s, char **endptr);
+float       strtof(const char *s, char **endptr);
+long double strtold(const char *s, char **endptr);
 
 /* Integer arithmetic (7.22.6). div_t/ldiv_t/lldiv_t hold a quotient and
  * remainder of the corresponding signed integer type. The div/ldiv/lldiv and

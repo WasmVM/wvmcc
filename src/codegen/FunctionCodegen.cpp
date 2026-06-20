@@ -2728,6 +2728,12 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                             emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)info.frameOffset});
                             emit(WasmVM::Instr::I64_add{});
                             emitExpr(srcExpr);
+                            // Convert the initializer to the slot's declared type
+                            // before the store (e.g. the literal 0 — i32 — into an
+                            // i64 pointer slot), mirroring the scalar (non-address-
+                            // taken) and general-assignment paths.
+                            emitConvert(this, getExprType(srcExpr),
+                                        typeMap_.toWasmType(typeNode));
                             emit(typeMap_.makeStore(typeNode, 1));
                         }
                     } else if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::List) {

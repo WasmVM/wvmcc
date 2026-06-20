@@ -219,9 +219,9 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-stdlib-EXIT-01` | 7.22p3 | EXIT_SUCCESS / EXIT_FAILURE / NULL / RAND_MAX / MB_CUR_MAX | obj-macro | Defined with the required forms/values | Positive | partial | static-assert | `MB_CUR_MAX == 1` |
 | `LIBC-stdlib-div_t-01` | 7.22p3 | div_t / ldiv_t / lldiv_t / size_t / wchar_t | type | Result/utility types defined | Positive | supported | static-assert | |
-| `LIBC-stdlib-atof-01` | 7.22.1.1 | atof | fn | Parses a `double` | Positive | partial | exit | |
+| `LIBC-stdlib-atof-01` | 7.22.1.1 | atof | fn | Parses a `double` | Positive | supported | exit | |
 | `LIBC-stdlib-atoi-01` | 7.22.1.2 | atoi / atol / atoll | fn | Parse `int`/`long`/`long long` | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdlib-strtod-01` | 7.22.1.3 | strtod / strtof / strtold | fn | Parse floating with end pointer; over/underflow → `ERANGE` | Positive | partial | exit | |
+| `LIBC-stdlib-strtod-01` | 7.22.1.3 | strtod / strtof / strtold | fn | Parse floating with end pointer; over/underflow → `ERANGE` | Positive | supported | exit | |
 | `LIBC-stdlib-strtol-01` | 7.22.1.4 | strtol / strtoll / strtoul / strtoull | fn | Parse integer with base & end pointer; range → `ERANGE` | Positive | partial | exit | entity undeclared — not yet implemented |
 | `LIBC-stdlib-rand-01` | 7.22.2.1 | rand / srand | fn | Pseudo-random in `[0, RAND_MAX]`; reproducible per seed | Positive | partial | exit | |
 | `LIBC-stdlib-malloc-01` | 7.22.3.4 | malloc | fn | Allocates uninitialized, suitably aligned storage | Positive | supported | exit | |
