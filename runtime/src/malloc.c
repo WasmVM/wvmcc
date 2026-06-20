@@ -32,6 +32,19 @@ void *malloc(size_t size) {
     return (void *)p;
 }
 
+void *aligned_alloc(size_t alignment, size_t size) {
+    if (alignment == 0) return (void *)0;
+    /* 7.22.3.1: the requested alignment must be supported; for the bump
+       allocator we simply advance the running offset so the next slab's
+       in-memory address is a multiple of `alignment`. (The pointer's low
+       bits carry the mem offset; the high-nibble tag is untouched by the
+       modulo.) */
+    unsigned long base = __heap_base + __heap_offset;
+    unsigned long misalign = base % alignment;
+    if (misalign) __heap_offset += (alignment - misalign);
+    return malloc(size);
+}
+
 void free(void *ptr) {
     /* No-op: bump allocator never reclaims. Memory is freed at process
        exit. This is a documented M2 limitation. */

@@ -27,4 +27,10 @@ char   *strstr(const char *haystack, const char *needle);
 char   *strdup(const char *s);
 size_t  strnlen(const char *s, size_t maxlen);
 
+size_t  strspn(const char *s, const char *accept);
+size_t  strcspn(const char *s, const char *reject);
+char   *strpbrk(const char *s, const char *accept);
+char   *strtok(char *s, const char *delim);
+char   *strerror(int errnum);
+
 #endif // _WVMCC_STRING_H
