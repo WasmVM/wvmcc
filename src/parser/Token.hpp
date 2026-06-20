@@ -18,6 +18,7 @@ enum class TokenKind {
     CharacterConstant,
     StringLiteral,
     Punctuator,
+    Other,
     EndOfFile
 };
 
@@ -63,8 +64,13 @@ struct FloatingToken {
     enum class ResolvedType { Float, Double, LongDouble } resolved{ResolvedType::Double};
 };
 struct EndOfFileToken {};
+// A stray, non-white-space character that cannot form any other token
+// (C 6.4p1's final "each non-white-space character that cannot be one of the
+// above"). Kept distinct from EndOfFile so the parser can diagnose it rather
+// than mistake it for end-of-input.
+struct OtherToken { std::string lexeme; };
 
-using TokenVariant = std::variant<KeywordToken, IdentifierToken, IntegerToken, FloatingToken, EnumerationToken, CharacterToken, StringLiteralToken, PunctuatorToken, EndOfFileToken>;
+using TokenVariant = std::variant<KeywordToken, IdentifierToken, IntegerToken, FloatingToken, EnumerationToken, CharacterToken, StringLiteralToken, PunctuatorToken, OtherToken, EndOfFileToken>;
 
 struct Token {
     TokenVariant v;
@@ -83,6 +89,7 @@ struct Token {
             if constexpr (std::is_same_v<T, CharacterToken>) return TokenKind::CharacterConstant;
             if constexpr (std::is_same_v<T, StringLiteralToken>) return TokenKind::StringLiteral;
             if constexpr (std::is_same_v<T, PunctuatorToken>) return TokenKind::Punctuator;
+            if constexpr (std::is_same_v<T, OtherToken>) return TokenKind::Other;
             return TokenKind::EndOfFile;
         }, v);
     }
@@ -98,6 +105,7 @@ struct Token {
             if constexpr (std::is_same_v<T, CharacterToken>) return arg.info.lexeme;
             if constexpr (std::is_same_v<T, StringLiteralToken>) return arg.lexeme;
             if constexpr (std::is_same_v<T, PunctuatorToken>) return arg.lexeme;
+            if constexpr (std::is_same_v<T, OtherToken>) return arg.lexeme;
             return std::string();
         }, v);
     }

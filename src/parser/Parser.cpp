@@ -2359,10 +2359,24 @@ ExprPtr Parser::parsePrimary() {
             }
         }
     }
+    // A stray character that forms no valid token (6.4p1) is a hard error, not
+    // something to recover from with a synthetic identifier. Diagnose it,
+    // consume it so the parser makes progress, and report "no expression".
+    if (auto tok = lex.peek(); tok && tok->kind() == TokenKind::Other) {
+        wvmcc::Diagnostic d;
+        d.severity = wvmcc::Diagnostic::Severity::Error;
+        d.message = "stray '" + tok->lexeme() + "' in program";
+        d.span = tok->span;
+        diagnostics.push_back(std::move(d));
+        lex.next();
+        return nullptr;
+    }
     // Last-resort fallback for genuinely unrecognized tokens — produce a
     // synthetic identifier so the rest of the parser can recover. Skipping
     // this would drop user code from the AST silently.
-    auto tok = *lex.next();
+    auto next = lex.next();
+    if (!next) return nullptr;  // nothing left to consume — avoid UB on empty optional
+    auto tok = *next;
     auto id = make_ast<IdentifierExpr>();
     id->span = tok.span;
     id->name = tok.lexeme();
