@@ -207,6 +207,11 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
             return Token(StringLiteralToken{pp.lexeme}, pp.span);
         case K::Punctuator:
             return Token(PunctuatorToken{pp.lexeme}, pp.span);
+        case K::Other:
+            // A stray character that forms no valid token (6.4p1). Surface it as
+            // a distinct Other token so the parser diagnoses it, rather than
+            // disguising it as end-of-input.
+            return Token(OtherToken{pp.lexeme}, pp.span);
         default:
             return Token(EndOfFileToken{}, pp.span);
     }
