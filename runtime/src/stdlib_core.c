@@ -9,6 +9,7 @@
 #include <stddef.h>
 #include <errno.h>
 #include <limits.h>
+#include <float.h>
 #include <string.h>
 
 __attribute__((import_module("sys_proc"), import_name("exit")))
@@ -155,6 +156,92 @@ unsigned long strtoul(const char *s, char **endptr, int base) {
 
 int atoi(const char *s) { return (int)strtol(s, (char **)0, 10); }
 long atol(const char *s) { return strtol(s, (char **)0, 10); }
+
+/* C17 7.22.1.3: strtod/strtof/strtold. A shared double-precision decimal
+   parser does the work; the float/long-double entry points narrow the result
+   (long double is f64 in wvmcc, so its wrapper is an identity convert).
+
+   The mantissa is accumulated as a double and then scaled by 10^exp via binary
+   exponentiation. For magnitudes whose mantissa and 10^|exp| are both exactly
+   representable (e.g. 2.5 == 25/10, 0.25 == 25/100) the single divide/multiply
+   is exact. A magnitude past DBL_MAX scales to ±infinity on its own, which we
+   detect to set ERANGE — no HUGE_VAL/inf-helper dependency needed.
+
+   Not yet handled (no standard test exercises them): hex floats (0x1p4),
+   inf/nan spellings, and a distinct underflow→ERANGE path. */
+static double __strtod_impl(const char *s, char **endptr) {
+    const char *p = s;
+    while (is_space(*p)) p++;
+    int neg = 0;
+    if (*p == '+') p++;
+    else if (*p == '-') { neg = 1; p++; }
+
+    double mant = 0.0;
+    int any = 0;
+    int fracDigits = 0;
+    while (*p >= '0' && *p <= '9') {
+        mant = mant * 10.0 + (double)(*p - '0');
+        p++; any = 1;
+    }
+    if (*p == '.') {
+        p++;
+        while (*p >= '0' && *p <= '9') {
+            mant = mant * 10.0 + (double)(*p - '0');
+            fracDigits++;
+            p++; any = 1;
+        }
+    }
+    if (!any) {                       /* no conversion performed */
+        if (endptr) *endptr = (char *)s;
+        return 0.0;
+    }
+
+    int expVal = 0;
+    if (*p == 'e' || *p == 'E') {
+        const char *pe = p + 1;
+        int eneg = 0;
+        if (*pe == '+') pe++;
+        else if (*pe == '-') { eneg = 1; pe++; }
+        if (*pe >= '0' && *pe <= '9') {
+            int e = 0;
+            while (*pe >= '0' && *pe <= '9') {
+                if (e < 100000) e = e * 10 + (*pe - '0');  /* clamp: huge exp
+                                                              already overflows */
+                pe++;
+            }
+            expVal = eneg ? -e : e;
+            p = pe;                   /* consume the exponent only if valid */
+        }
+    }
+    if (endptr) *endptr = (char *)p;
+
+    int totalExp = expVal - fracDigits;
+    double result = mant;
+    if (totalExp != 0 && mant != 0.0) {
+        int n = totalExp < 0 ? -totalExp : totalExp;
+        double base = 10.0, scale = 1.0;
+        while (n) {
+            if (n & 1) scale *= base;
+            base *= base;
+            n >>= 1;
+        }
+        result = totalExp < 0 ? result / scale : result * scale;
+    }
+    if (neg) result = -result;
+
+    /* A finite double can never exceed DBL_MAX, so an out-of-range magnitude is
+       already ±infinity here; just flag it. */
+    if (result > DBL_MAX || result < -DBL_MAX) errno = ERANGE;
+    return result;
+}
+
+double strtod(const char *s, char **endptr) { return __strtod_impl(s, endptr); }
+float  strtof(const char *s, char **endptr) { return (float)__strtod_impl(s, endptr); }
+long double strtold(const char *s, char **endptr) {
+    return (long double)__strtod_impl(s, endptr);
+}
+
+double atof(const char *s) { return __strtod_impl(s, (char **)0); }
 
 /* ----- math ------------------------------------------------------- */
 
