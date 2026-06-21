@@ -311,16 +311,16 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-time-types-01` | 7.27.1 | clock_t / time_t / struct tm / struct timespec / size_t | type | Time types defined | Positive | partial | static-assert | |
-| `LIBC-time-macros-01` | 7.27.1 | CLOCKS_PER_SEC / TIME_UTC / NULL | obj-macro | Defined | Positive | partial | static-assert | |
+| `LIBC-time-types-01` | 7.27.1 | clock_t / time_t / struct tm / struct timespec / size_t | type | Time types defined | Positive | partial | static-assert | types all defined (incl. `tv_nsec` as `long`); test blocked by a compiler bug — `_Static_assert(_Generic(ptr->member, …))` evaluates the (unevaluated) `_Generic` controlling expression as an ICE and rejects the member access |
+| `LIBC-time-macros-01` | 7.27.1 | CLOCKS_PER_SEC / TIME_UTC / NULL | obj-macro | Defined | Positive | supported | static-assert | |
 | `LIBC-time-time-01` | 7.27.2.4 | time | fn | Current calendar time | Positive | supported | exit | via `sys_proc.clock_gettime` |
-| `LIBC-time-clock-01` | 7.27.2.1 | clock | fn | Processor time | Positive | partial | exit | |
+| `LIBC-time-clock-01` | 7.27.2.1 | clock | fn | Processor time | Positive | supported | exit | microseconds via CLOCK_MONOTONIC; CLOCKS_PER_SEC == 1e6 |
 | `LIBC-time-difftime-01` | 7.27.2.2 | difftime | fn | Difference of two `time_t` in seconds | Positive | supported | exit | |
-| `LIBC-time-mktime-01` | 7.27.2.3 | mktime | fn | `struct tm` → `time_t` (normalizing) | Positive | partial | exit | |
-| `LIBC-time-timespec_get-01` | 7.27.2.5 | timespec_get | fn | Fills a `timespec` for a time base | Positive | partial | exit | |
-| `LIBC-time-gmtime-01` | 7.27.3.3,7.27.3.4 | gmtime / localtime | fn | `time_t` → broken-down time | Positive | partial | exit | |
-| `LIBC-time-asctime-01` | 7.27.3.1,7.27.3.2 | asctime / ctime | fn | Broken-down/`time_t` → string | Positive | partial | exit | |
-| `LIBC-time-strftime-01` | 7.27.3.5 | strftime | fn | Formats broken-down time per a format string | Positive | partial | exit | "C" locale |
+| `LIBC-time-mktime-01` | 7.27.2.3 | mktime | fn | `struct tm` → `time_t` (normalizing) | Positive | supported | exit | civil-calendar normalization (Hinnant) |
+| `LIBC-time-timespec_get-01` | 7.27.2.5 | timespec_get | fn | Fills a `timespec` for a time base | Positive | supported | exit | |
+| `LIBC-time-gmtime-01` | 7.27.3.3,7.27.3.4 | gmtime / localtime | fn | `time_t` → broken-down time | Positive | supported | exit | UTC; localtime == gmtime (no time zones) |
+| `LIBC-time-asctime-01` | 7.27.3.1,7.27.3.2 | asctime / ctime | fn | Broken-down/`time_t` → string | Positive | supported | exit | |
+| `LIBC-time-strftime-01` | 7.27.3.5 | strftime | fn | Formats broken-down time per a format string | Positive | supported | exit | "C" locale; %Y/%m/%d/%H/%M/%S/%% |
 
 ## `<inttypes.h>` (7.8)
 
