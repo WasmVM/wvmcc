@@ -283,7 +283,7 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-math-types-01` | 7.12p2 | float_t / double_t | type | Evaluation types defined | B-impl | partial | static-assert | `FLT_EVAL_METHOD` 0 → `float`/`double` |
+| `LIBC-math-types-01` | 7.12p2 | float_t / double_t | type | Evaluation types defined | B-impl | supported | static-assert | `FLT_EVAL_METHOD` 0 → `float_t`/`double_t` are `float`/`double` |
 | `LIBC-math-HUGE_VAL-01` | 7.12p3 | HUGE_VAL / HUGE_VALF / HUGE_VALL / INFINITY / NAN | obj-macro | Defined; `INFINITY`/`NAN` are IEEE values | Positive | supported | exit | |
 | `LIBC-math-FP_classes-01` | 7.12p6 | FP_INFINITE / FP_NAN / FP_NORMAL / FP_SUBNORMAL / FP_ZERO | obj-macro | Distinct ICE classification values | Positive | supported | static-assert | |
 | `LIBC-math-errhandling-01` | 7.12p9 | math_errhandling / MATH_ERRNO / MATH_ERREXCEPT | obj-macro | Defined; error-reporting mechanism | B-impl | supported | static-assert | `docs/spec.md`: errno-based → `math_errhandling == MATH_ERRNO` |
@@ -300,7 +300,7 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 | `LIBC-math-erf-01` | 7.12.8 | erf / erfc / lgamma / tgamma (+ f/l) | fn | Error and gamma functions | Positive | deferred | none | not implemented |
 | `LIBC-math-round-01` | 7.12.9 | ceil / floor / trunc / round / lround / llround / nearbyint / rint / lrint / llrint (+ f/l) | fn | Nearest-integer functions | Positive | supported | exit | pure-C bit-twiddling (no wasm rounding intrinsics); `round` halves away from zero, `rint`/`nearbyint` to-nearest-even |
 | `LIBC-math-fmod-01` | 7.12.10 | fmod / remainder / remquo (+ f/l) | fn | Remainder functions | Positive | partial | exit | |
-| `LIBC-math-manip-01` | 7.12.11 | copysign / nan / nextafter / nexttoward (+ f/l) | fn | Manipulation functions | Positive | partial | exit | |
+| `LIBC-math-manip-01` | 7.12.11 | copysign / nan / nextafter / nexttoward (+ f/l) | fn | Manipulation functions | Positive | supported | exit | bit-pattern stepping; `nexttoward` == `nextafter` (long double == double) |
 | `LIBC-math-fmax-01` | 7.12.12 | fdim / fmax / fmin (+ f/l) | fn | Max/min/positive-difference | Positive | supported | exit | NaN treated as missing data (F.10.9) |
 | `LIBC-math-fma-01` | 7.12.13 | fma (+ f/l) | fn | Fused multiply-add | Positive | partial | exit | |
 | `LIBC-math-compare-01` | 7.12.14 | isgreater / isgreaterequal / isless / islessequal / islessgreater / isunordered | fn-macro | Quiet comparison macros | Positive | supported | exit | |

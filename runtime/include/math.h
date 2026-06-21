@@ -9,6 +9,11 @@
 #define M_PI 3.14159265358979323846
 #define M_E  2.71828182845904523536
 
+// 7.12p2 — most-efficient evaluation types. wvmcc has FLT_EVAL_METHOD == 0, so
+// they are exactly float and double.
+typedef float  float_t;
+typedef double double_t;
+
 // NaN / Infinity helpers. wvmcc's constant folder doesn't currently
 // evaluate `0.0 / 0.0` (NaN) or `1.0 / 0.0` (+inf) at compile time, so
 // file-scope `const double` initializers using those expressions land as
@@ -78,5 +83,10 @@ double    nearbyint(double x);
 double    rint(double x);
 long      lrint(double x);
 long long llrint(double x);
+
+/* 7.12.11 — manipulation functions. */
+double nan(const char *tagp);
+double nextafter(double x, double y);
+double nexttoward(double x, long double y);
 
 #endif // _WVMCC_MATH_H

@@ -116,3 +116,21 @@ double rint(double x) {
 double nearbyint(double x) { return rint(x); }
 long      lrint(double x)  { return (long)rint(x); }
 long long llrint(double x) { return (long long)rint(x); }
+
+// 7.12.11 — manipulation. nan(tag) returns a quiet NaN (the tag content selects
+// the payload; wvmcc ignores it). nextafter steps one representable value of the
+// bit pattern toward y; nexttoward is the same (long double == double here).
+double nan(const char *tagp) { (void)tagp; return __wvmcc_nan(); }
+
+double nextafter(double x, double y) {
+    if (__isnan(x) || __isnan(y)) return __wvmcc_nan();
+    if (x == y) return y;                  // includes ±0 == ∓0
+    if (x == 0.0)                          // step to the smallest subnormal toward y
+        return double_of((bits_of(y) & 0x8000000000000000UL) | 1);
+    u64 a = bits_of(x);
+    // Incrementing the magnitude bits moves away from zero (toward ±inf).
+    if ((x > 0.0) == (y > x)) a += 1; else a -= 1;
+    return double_of(a);
+}
+
+double nexttoward(double x, long double y) { return nextafter(x, (double)y); }
