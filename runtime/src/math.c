@@ -134,3 +134,44 @@ double nextafter(double x, double y) {
 }
 
 double nexttoward(double x, long double y) { return nextafter(x, (double)y); }
+
+// 7.12.10 — fmod by exact shift-and-subtract: repeatedly subtract the largest
+// ay*2^k <= ax. Each step is exact (×2 and like-magnitude subtraction), so the
+// result is exact for all finite x, y (not just small ones).
+double fmod(double x, double y) {
+    if (__isnan(x) || __isnan(y) || __isinf(x) || y == 0.0) return __wvmcc_nan();
+    if (__isinf(y)) return x;
+    double ax = fabs(x), ay = fabs(y);
+    if (ax < ay) return x;
+    while (ax >= ay) {
+        double scaled = ay;
+        while (scaled + scaled <= ax) scaled += scaled;   // largest ay*2^k <= ax
+        ax -= scaled;
+    }
+    return copysign(ax, x);
+}
+
+double remainder(double x, double y) {
+    if (__isnan(x) || __isnan(y) || __isinf(x) || y == 0.0) return __wvmcc_nan();
+    if (__isinf(y)) return x;
+    double r  = fmod(x, y);
+    double ay = fabs(y);
+    double two_ar = fabs(r) + fabs(r);
+    if (two_ar > ay) {
+        r -= copysign(ay, r);
+    } else if (two_ar == ay) {
+        // exact tie: round to the even quotient.
+        long q = (long)((x - r) / y);
+        if (q & 1) r -= copysign(ay, r);
+    }
+    return r;
+}
+
+double remquo(double x, double y, int *quo) {
+    double r = remainder(x, y);
+    long n = (long)((x - r) / y);            // the integer quotient used
+    long mag = n < 0 ? -n : n;
+    int sign = ((x < 0.0) != (y < 0.0)) ? -1 : 1;
+    if (quo) *quo = sign * (int)(mag & 7);   // C: at least the low 3 bits, signed
+    return r;
+}

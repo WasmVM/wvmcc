@@ -89,4 +89,9 @@ double nan(const char *tagp);
 double nextafter(double x, double y);
 double nexttoward(double x, long double y);
 
+/* 7.12.10 — remainder functions. */
+double fmod(double x, double y);
+double remainder(double x, double y);
+double remquo(double x, double y, int *quo);
+
 #endif // _WVMCC_MATH_H

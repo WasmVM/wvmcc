@@ -39,7 +39,7 @@ add_standard_static_assert(libc-math-errhandling ${CMAKE_CURRENT_SOURCE_DIR}/lib
 add_standard_run_test(libc-math-exp ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/exp.c partial)
 add_standard_run_test(libc-math-fma ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fma.c partial)
 add_standard_run_test(libc-math-fmax ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fmax.c supported)
-add_standard_run_test(libc-math-fmod ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fmod.c partial)
+add_standard_run_test(libc-math-fmod ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fmod.c supported)
 add_standard_static_assert(libc-math-fp_classes ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fp_classes.c supported)
 add_standard_run_test(libc-math-fpclassify ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fpclassify.c supported)
 add_standard_run_test(libc-math-huge_val ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/huge_val.c supported)

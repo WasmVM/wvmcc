@@ -299,7 +299,7 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 | `LIBC-math-pow-01` | 7.12.7 | pow / sqrt / cbrt / hypot / fabs (+ f/l) | fn | Power and absolute-value functions | Positive | partial | exit | `sqrt`/`fabs` map to wasm ops; entity undeclared — not yet implemented |
 | `LIBC-math-erf-01` | 7.12.8 | erf / erfc / lgamma / tgamma (+ f/l) | fn | Error and gamma functions | Positive | deferred | none | not implemented |
 | `LIBC-math-round-01` | 7.12.9 | ceil / floor / trunc / round / lround / llround / nearbyint / rint / lrint / llrint (+ f/l) | fn | Nearest-integer functions | Positive | supported | exit | pure-C bit-twiddling (no wasm rounding intrinsics); `round` halves away from zero, `rint`/`nearbyint` to-nearest-even |
-| `LIBC-math-fmod-01` | 7.12.10 | fmod / remainder / remquo (+ f/l) | fn | Remainder functions | Positive | partial | exit | |
+| `LIBC-math-fmod-01` | 7.12.10 | fmod / remainder / remquo (+ f/l) | fn | Remainder functions | Positive | supported | exit | exact shift-and-subtract; `remainder` ties to even |
 | `LIBC-math-manip-01` | 7.12.11 | copysign / nan / nextafter / nexttoward (+ f/l) | fn | Manipulation functions | Positive | supported | exit | bit-pattern stepping; `nexttoward` == `nextafter` (long double == double) |
 | `LIBC-math-fmax-01` | 7.12.12 | fdim / fmax / fmin (+ f/l) | fn | Max/min/positive-difference | Positive | supported | exit | NaN treated as missing data (F.10.9) |
 | `LIBC-math-fma-01` | 7.12.13 | fma (+ f/l) | fn | Fused multiply-add | Positive | partial | exit | |
