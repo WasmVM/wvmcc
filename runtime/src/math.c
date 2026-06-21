@@ -63,3 +63,56 @@ double __wvmcc_nan(void)  { return double_of(0x7ff8000000000000UL); }
 
 __attribute__((visibility("default")))
 double __wvmcc_inf(void)  { return double_of(0x7ff0000000000000UL); }
+
+// 7.12.12 — fdim/fmax/fmin. A NaN argument is "missing data": fmax/fmin return
+// the other (numeric) operand.
+double fmax(double x, double y) {
+    if (__isnan(x)) return y;
+    if (__isnan(y)) return x;
+    return x > y ? x : y;
+}
+double fmin(double x, double y) {
+    if (__isnan(x)) return y;
+    if (__isnan(y)) return x;
+    return x < y ? x : y;
+}
+double fdim(double x, double y) {
+    if (__isnan(x) || __isnan(y)) return __wvmcc_nan();
+    return x > y ? x - y : 0.0;
+}
+
+// 7.12.9 — nearest-integer functions, computed with raw bit access (no Wasm
+// rounding intrinsics available). trunc clears the fractional mantissa bits
+// selected by the unbiased exponent; the rest derive from trunc.
+double trunc(double x) {
+    u64 b = bits_of(x);
+    int e = (int)((b >> 52) & 0x7ff) - 1023;   // unbiased exponent
+    if (e < 0)   return double_of(b & 0x8000000000000000UL);  // |x| < 1 → ±0
+    if (e >= 52) return x;                                    // already integral / inf / nan
+    u64 frac = 0x000fffffffffffffUL >> e;
+    if ((b & frac) == 0) return x;                           // already integral
+    return double_of(b & ~frac);
+}
+double floor(double x) { double t = trunc(x); return t > x ? t - 1.0 : t; }
+double ceil(double x)  { double t = trunc(x); return t < x ? t + 1.0 : t; }
+double round(double x) {
+    double t = trunc(x);
+    double d = x - t;
+    if (d >=  0.5) return t + 1.0;   // halfway away from zero
+    if (d <= -0.5) return t - 1.0;
+    return t;
+}
+long      lround(double x)  { return (long)round(x); }
+long long llround(double x) { return (long long)round(x); }
+
+// rint/nearbyint use the default to-nearest-even mode. The 2^52 trick rounds
+// via the hardware default: adding/subtracting 2^52 drops the fraction.
+double rint(double x) {
+    if (!__isfinite(x)) return x;
+    const double TWO52 = 4503599627370496.0;  // 2^52
+    if (fabs(x) >= TWO52) return x;            // already integral
+    return x >= 0.0 ? (x + TWO52) - TWO52 : (x - TWO52) + TWO52;
+}
+double nearbyint(double x) { return rint(x); }
+long      lrint(double x)  { return (long)rint(x); }
+long long llrint(double x) { return (long long)rint(x); }
