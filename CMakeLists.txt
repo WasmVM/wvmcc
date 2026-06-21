@@ -112,3 +112,27 @@ endif()
 # Tests
 enable_testing()
 add_subdirectory(tests)
+
+# Convenience targets for the C17 standard-conformance suite (need `wasmvm` on
+# PATH for the `run`/`stdout` rows).
+#
+#   check-supported — the GATE: every status-supported row must pass. Exits
+#                     non-zero on any failure, so it is usable as a hard check.
+#   check-partial   — INFORMATIONAL: runs the status-partial rows (intentionally
+#                     incomplete features) and never fails the build. A row that
+#                     now PASSES here is a promotion candidate — flip it to
+#                     `supported` in tests/standard/scaffold/*.cmake + docs/standard/.
+add_custom_target(check-supported
+    COMMAND ${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR}
+            -L status-supported --output-on-failure
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    USES_TERMINAL
+    VERBATIM
+    COMMENT "Running status-supported conformance tests (GATE — must be 100%)...")
+
+add_custom_target(check-partial
+    COMMAND sh -c "${CMAKE_CTEST_COMMAND} --test-dir ${CMAKE_BINARY_DIR} -L status-partial --output-on-failure; exit 0"
+    WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+    USES_TERMINAL
+    VERBATIM
+    COMMENT "status-partial tests (informational; never fails — a PASS here is a promotion candidate)...")

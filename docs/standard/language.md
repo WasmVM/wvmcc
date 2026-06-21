@@ -60,7 +60,7 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 | `LANG-5.1.2.2.3-03` | 5.1.2.2.3p1 | `main` whose return type is not compatible with `int` → termination status unspecified | B-unspec | by-design | none | wvmcc requires `int main` |
 | `LANG-5.1.2.3-01` | 5.1.2.3p2 | Side effects (volatile access, object/file modification) are sequenced per the abstract machine | Positive | partial | exit | basic sequencing supported; volatile codegen partial |
 | `LANG-5.1.2.3-02` | 5.1.2.3p6 | At termination, data written to files equals abstract-semantics output | Positive | supported | stdout | stdio flush-at-exit |
-| `LANG-5.1.2.3-03` | 5.1.2.3p6 | Unbuffered/line-buffered output appears promptly (7.21.3 dynamics) | Positive | partial | stdout | line-buffered stdout flush |
+| `LANG-5.1.2.3-03` | 5.1.2.3p6 | Unbuffered/line-buffered output appears promptly (7.21.3 dynamics) | Positive | supported | stdout | line-buffered stdout flush |
 | `LANG-5.1.2.3-04` | 5.1.2.3p7 | What constitutes an interactive device is implementation-defined | B-impl | deferred | none | no interactive devices on WasmVM |
 | `LANG-5.1.2.3-05` | 5.1.2.3p3 | Multiple unsequenced side effects on one scalar (`i = i++`) is undefined | B-undef | supported | none | documentation; see Annex C sequence points |
 | `LANG-5.1.2.4-01` | 5.1.2.4p1 | Whether a freestanding program may have >1 thread is implementation-defined | B-impl | by-design | none | `docs/spec.md`: single-threaded; `<threads.h>` deferred |
@@ -362,7 +362,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.5-01` | 6.5p1 | Operand value computations are sequenced before the operator's value computation | Positive | partial | exit | basic sequencing |
+| `LANG-6.5-01` | 6.5p1 | Operand value computations are sequenced before the operator's value computation | Positive | supported | exit | basic sequencing |
 | `LANG-6.5-02` | 6.5p2 | An unsequenced side effect with another side effect / value computation on the same scalar is undefined (`i = i++`, `a[i++] = i`) | B-undef | supported | none | documentation |
 | `LANG-6.5-03` | 6.5p4 | Bitwise operators (`~ << >> & ^ |`) have implementation-defined aspects for signed types | B-impl | supported | exit | two's complement; see 6.5.7/6.5.10–12 |
 | `LANG-6.5-04` | 6.5p5 | An exceptional condition (result not representable, e.g. signed overflow) is undefined | B-undef | supported | none | `docs/spec.md`: signed overflow wraps, no trap |
@@ -402,14 +402,14 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.5.2.3-01` | 6.5.2.3p3 | `.` member access yields the member value/lvalue with qualifier propagation | Positive | supported | exit | |
 | `LANG-6.5.2.3-02` | 6.5.2.3p4 | `->` member access through a pointer | Positive | supported | exit | |
 | `LANG-6.5.2.3-03` | 6.5.2.3p1,p2 | Constraints: `.` operand is struct/union; `->` operand is pointer-to-struct/union; second names a member | Negative | supported | compile-fail | |
-| `LANG-6.5.2.3-04` | 6.5.2.3p6 | Common-initial-sequence inspection of a union of structs (union visible) | Positive | partial | exit | |
+| `LANG-6.5.2.3-04` | 6.5.2.3p6 | Common-initial-sequence inspection of a union of structs (union visible) | Positive | supported | exit | |
 | `LANG-6.5.2.3-05` | 6.5.2.3p3 | Reading a union member other than the one last stored reinterprets the representation (type-punning) | B-impl | supported | exit | `docs/spec.md`: little-endian defined reinterpretation |
 | `LANG-6.5.2.3-06` | 6.5.2.3p5 | Accessing a member of an atomic struct/union object is undefined | B-undef | deferred | none | atomics deferred |
 | `LANG-6.5.2.4-01` | 6.5.2.4p2,p3 | Postfix `++`/`--` yields the old value and increments/decrements the object | Positive | supported | exit | |
 | `LANG-6.5.2.4-02` | 6.5.2.4p1 | Constraint: operand is a modifiable lvalue of real or pointer type | Negative | supported | compile-fail | |
 | `LANG-6.5.2.5-01` | 6.5.2.5p3,p5 | A compound literal yields an unnamed lvalue object initialized by the list | Positive | supported | exit | |
 | `LANG-6.5.2.5-02` | 6.5.2.5p5 | A file-scope compound literal has static storage; a block-scope one has automatic | Positive | supported | exit | |
-| `LANG-6.5.2.5-03` | 6.5.2.5p1 | Constraint: type-name is a complete object or unknown-size array, not a VLA | Negative | partial | compile-fail | |
+| `LANG-6.5.2.5-03` | 6.5.2.5p1 | Constraint: type-name is a complete object or unknown-size array, not a VLA | Negative | supported | compile-fail | |
 | `LANG-6.5.2.5-04` | 6.5.2.5p13 | `const`-qualified compound literals may share storage with equal string literals | B-unspec | partial | none | documentation |
 
 ### 6.5.3 Unary operators
@@ -667,9 +667,9 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.7.4-01` | 6.7.4p1,p6 | `inline` function specifier and inline-substitution suggestion | Positive | partial | exit | unit-xref `sema_inline_test` |
+| `LANG-6.7.4-01` | 6.7.4p1,p6 | `inline` function specifier and inline-substitution suggestion | Positive | supported | exit | unit-xref `sema_inline_test` |
 | `LANG-6.7.4-02` | 6.7.4p2 | Function specifiers appear only on function declarations | Negative | supported | compile-fail | |
-| `LANG-6.7.4-03` | 6.7.4p7 | Inline-definition vs external-definition rules (`extern` ⇒ external definition) | Positive | partial | exit | |
+| `LANG-6.7.4-03` | 6.7.4p7 | Inline-definition vs external-definition rules (`extern` ⇒ external definition) | Positive | supported | exit | |
 | `LANG-6.7.4-04` | 6.7.4p3 | An external-linkage inline definition must not define a static-duration modifiable object or reference an internal-linkage identifier | Negative | partial | compile-fail | |
 | `LANG-6.7.4-05` | 6.7.4p8 | A `_Noreturn` function does not return to its caller | Positive | supported | exit | emits trailing `unreachable` |
 | `LANG-6.7.4-06` | 6.7.4p8,p9 | A `_Noreturn` function that returns is undefined (recommended diagnostic) | B-undef | supported | none | documentation |
@@ -797,7 +797,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.9.1-08` | 6.9.1p9 | Parameter storage layout is unspecified | B-unspec | supported | none | documentation |
 | `LANG-6.9.2-01` | 6.9.2p1 | A file-scope object with an initializer is an external definition | Positive | supported | exit | |
 | `LANG-6.9.2-02` | 6.9.2p2 | Tentative definitions: a file-scope object without initializer/`static` collapses to one definition (init 0) | Positive | supported | exit | |
-| `LANG-6.9.2-03` | 6.9.2p2 | `int i[];` with only tentative definitions completes to one zero-initialized element | Positive | partial | exit | |
+| `LANG-6.9.2-03` | 6.9.2p2 | `int i[];` with only tentative definitions completes to one zero-initialized element | Positive | supported | exit | |
 | `LANG-6.9.2-04` | 6.9.2p3 | Constraint: an internal-linkage tentative definition's type must not remain incomplete | Negative | partial | compile-fail | |
 
 ---

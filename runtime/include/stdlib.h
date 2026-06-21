@@ -10,29 +10,39 @@
 
 /* Process control */
 _Noreturn void exit(int status);
+_Noreturn void _Exit(int status);
 _Noreturn void abort(void);
 int atexit(void (*func)(void));
+_Noreturn void quick_exit(int status);
+int at_quick_exit(void (*func)(void));
 
 /* Conversion */
-int      atoi(const char *s);
-long     atol(const char *s);
-double   atof(const char *s);
-long     strtol(const char *s, char **endptr, int base);
+int       atoi(const char *s);
+long      atol(const char *s);
+long long atoll(const char *s);
+double    atof(const char *s);
+long      strtol(const char *s, char **endptr, int base);
 unsigned long strtoul(const char *s, char **endptr, int base);
+long long strtoll(const char *s, char **endptr, int base);
+unsigned long long strtoull(const char *s, char **endptr, int base);
 double      strtod(const char *s, char **endptr);
 float       strtof(const char *s, char **endptr);
 long double strtold(const char *s, char **endptr);
 
 /* Integer arithmetic (7.22.6). div_t/ldiv_t/lldiv_t hold a quotient and
- * remainder of the corresponding signed integer type. The div/ldiv/lldiv and
- * llabs functions will be declared once their runtime implementations land. */
+ * remainder of the corresponding signed integer type. */
 typedef struct { int       quot, rem; } div_t;
 typedef struct { long      quot, rem; } ldiv_t;
 typedef struct { long long quot, rem; } lldiv_t;
 
+div_t   div(int numer, int denom);
+ldiv_t  ldiv(long numer, long denom);
+lldiv_t lldiv(long long numer, long long denom);
+
 /* Math */
-int  abs(int n);
-long labs(long n);
+int       abs(int n);
+long      labs(long n);
+long long llabs(long long n);
 
 /* Sort/search */
 void  qsort(void *base, size_t nmemb, size_t size,
@@ -47,6 +57,7 @@ void srand(unsigned int seed);
 
 /* Memory (defined in M2-11) */
 void *malloc(size_t size);
+void *aligned_alloc(size_t alignment, size_t size);
 void  free(void *ptr);
 void *calloc(size_t nmemb, size_t size);
 void *realloc(void *ptr, size_t size);

@@ -8,6 +8,7 @@
 
 #include <string.h>
 #include <stddef.h>
+#include <errno.h>
 
 extern void *malloc(size_t);
 
@@ -149,4 +150,63 @@ char *strdup(const char *s) {
     char *p = (char *)malloc(n);
     if (p) memcpy(p, s, n);
     return p;
+}
+
+/* Is the (non-NUL) byte `c` present in the NUL-terminated set? */
+static int char_in_set(char c, const char *set) {
+    for (; *set; set++) {
+        if (*set == c) return 1;
+    }
+    return 0;
+}
+
+size_t strspn(const char *s, const char *accept) {
+    const char *p = s;
+    while (*p && char_in_set(*p, accept)) p++;
+    return (size_t)(p - s);
+}
+
+size_t strcspn(const char *s, const char *reject) {
+    const char *p = s;
+    while (*p && !char_in_set(*p, reject)) p++;
+    return (size_t)(p - s);
+}
+
+char *strpbrk(const char *s, const char *accept) {
+    for (; *s; s++) {
+        if (char_in_set(*s, accept)) return (char *)s;
+    }
+    return (char *)0;
+}
+
+/* strtok keeps cross-call state in a file-scope pointer (not thread-safe — the
+   standard permits this; wvmcc is single-threaded by design). */
+static char *__strtok_save;
+
+char *strtok(char *s, const char *delim) {
+    if (s == (char *)0) s = __strtok_save;
+    if (s == (char *)0) return (char *)0;
+    /* skip leading delimiters */
+    while (*s && char_in_set(*s, delim)) s++;
+    if (*s == 0) { __strtok_save = (char *)0; return (char *)0; }
+    char *tok = s;
+    while (*s && !char_in_set(*s, delim)) s++;
+    if (*s) { *s = 0; __strtok_save = s + 1; }
+    else __strtok_save = (char *)0;
+    return tok;
+}
+
+char *strerror(int errnum) {
+    switch (errnum) {
+    case 0:      return "Success";
+    case EDOM:   return "Numerical argument out of domain";
+    case ERANGE: return "Numerical result out of range";
+    case EILSEQ: return "Illegal byte sequence";
+    case ENOMEM: return "Cannot allocate memory";
+    case EINVAL: return "Invalid argument";
+    case ENOENT: return "No such file or directory";
+    case EBADF:  return "Bad file descriptor";
+    case EACCES: return "Permission denied";
+    default:     return "Unknown error";
+    }
 }

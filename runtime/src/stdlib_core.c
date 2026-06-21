@@ -50,6 +50,29 @@ _Noreturn void exit(int status) {
 /* C: abort() does NOT flush — abnormal termination. */
 _Noreturn void abort(void)      { sys_proc_exit(134); }  /* 128 + SIGABRT */
 
+/* C: _Exit() terminates immediately — no atexit handlers, no stream flush. */
+_Noreturn void _Exit(int status) { sys_proc_exit(status); }
+
+/* C `at_quick_exit`/`quick_exit` (7.22.4.3, 7.22.4.7): a separate handler
+   registry run by quick_exit in reverse order, after which the program
+   terminates as if by _Exit (no atexit handlers, no stream flush). */
+#define _AT_QUICK_EXIT_MAX 32
+static void (*__at_quick_exit_funcs[_AT_QUICK_EXIT_MAX])(void);
+static int   __at_quick_exit_count;
+
+int at_quick_exit(void (*func)(void)) {
+    if (!func || __at_quick_exit_count >= _AT_QUICK_EXIT_MAX) return 1;
+    __at_quick_exit_funcs[__at_quick_exit_count++] = func;
+    return 0;
+}
+
+_Noreturn void quick_exit(int status) {
+    while (__at_quick_exit_count > 0) {
+        __at_quick_exit_funcs[--__at_quick_exit_count]();
+    }
+    sys_proc_exit(status);
+}
+
 /* ----- conversion ------------------------------------------------- */
 
 static int is_space(int c) {
@@ -154,8 +177,18 @@ unsigned long strtoul(const char *s, char **endptr, int base) {
     return neg ? (unsigned long)(-(long)acc) : acc;
 }
 
+/* LP64: `long` and `long long` are both 64-bit, so the long-long string
+   conversions share the `strtol`/`strtoul` accumulators exactly. */
+long long strtoll(const char *s, char **endptr, int base) {
+    return (long long)strtol(s, endptr, base);
+}
+unsigned long long strtoull(const char *s, char **endptr, int base) {
+    return (unsigned long long)strtoul(s, endptr, base);
+}
+
 int atoi(const char *s) { return (int)strtol(s, (char **)0, 10); }
 long atol(const char *s) { return strtol(s, (char **)0, 10); }
+long long atoll(const char *s) { return strtoll(s, (char **)0, 10); }
 
 /* C17 7.22.1.3: strtod/strtof/strtold. A shared double-precision decimal
    parser does the work; the float/long-double entry points narrow the result
@@ -247,6 +280,19 @@ double atof(const char *s) { return __strtod_impl(s, (char **)0); }
 
 int  abs(int n)  { return n < 0 ? -n : n; }
 long labs(long n) { return n < 0 ? -n : n; }
+long long llabs(long long n) { return n < 0 ? -n : n; }
+
+/* 7.22.6.2: quotient truncates toward zero; quot*denom + rem == numer. C's
+   integer division already truncates toward zero, so this is direct. */
+div_t   div(int numer, int denom) {
+    div_t r; r.quot = numer / denom; r.rem = numer % denom; return r;
+}
+ldiv_t  ldiv(long numer, long denom) {
+    ldiv_t r; r.quot = numer / denom; r.rem = numer % denom; return r;
+}
+lldiv_t lldiv(long long numer, long long denom) {
+    lldiv_t r; r.quot = numer / denom; r.rem = numer % denom; return r;
+}
 
 /* ----- qsort / bsearch -------------------------------------------- */
 

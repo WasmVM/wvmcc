@@ -157,9 +157,9 @@ LP64 (`docs/spec.md`).
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-errno-errno-01` | 7.5p2 | errno | obj-macro | A modifiable `int` lvalue, settable and readable | Positive | partial | exit | cross-TU via imported address-global (`reference_extern_data_globals`) |
+| `LIBC-errno-errno-01` | 7.5p2 | errno | obj-macro | A modifiable `int` lvalue, settable and readable | Positive | supported | exit | cross-TU via imported address-global (`reference_extern_data_globals`) |
 | `LIBC-errno-EDOM-01` | 7.5p2 | EDOM / EILSEQ / ERANGE | obj-macro | Distinct positive integer constant macros | Positive | supported | static-assert | |
-| `LIBC-errno-set-01` | 7.5p3 | errno | obj-macro | A library error sets `errno` (e.g. `strtol` → `ERANGE`); it is not cleared on success | Positive | partial | exit | |
+| `LIBC-errno-set-01` | 7.5p3 | errno | obj-macro | A library error sets `errno` (e.g. `strtol` → `ERANGE`); it is not cleared on success | Positive | supported | exit | |
 
 ## `<ctype.h>` (7.4)
 
@@ -203,44 +203,44 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-string-strxfrm-01` | 7.24.4.5 | strxfrm | fn | Locale transform such that `strcmp` of results matches `strcoll` | Positive | partial | exit | "C" locale only |
 | `LIBC-string-memchr-01` | 7.24.5.1 | memchr | fn | Finds a byte within `n` bytes | Positive | supported | exit | |
 | `LIBC-string-strchr-01` | 7.24.5.2 | strchr | fn | Finds the first occurrence of a char (incl. terminator) | Positive | supported | exit | |
-| `LIBC-string-strcspn-01` | 7.24.5.3 | strcspn | fn | Length of the initial span excluding a set | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-string-strpbrk-01` | 7.24.5.4 | strpbrk | fn | First char that is in a set | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-string-strcspn-01` | 7.24.5.3 | strcspn | fn | Length of the initial span excluding a set | Positive | supported | exit | |
+| `LIBC-string-strpbrk-01` | 7.24.5.4 | strpbrk | fn | First char that is in a set | Positive | supported | exit | |
 | `LIBC-string-strrchr-01` | 7.24.5.5 | strrchr | fn | Last occurrence of a char | Positive | supported | exit | |
-| `LIBC-string-strspn-01` | 7.24.5.6 | strspn | fn | Length of the initial span within a set | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-string-strspn-01` | 7.24.5.6 | strspn | fn | Length of the initial span within a set | Positive | supported | exit | |
 | `LIBC-string-strstr-01` | 7.24.5.7 | strstr | fn | Finds a substring | Positive | supported | exit | |
-| `LIBC-string-strtok-01` | 7.24.5.8 | strtok | fn | Tokenizes using a separator set (stateful) | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-string-strtok-01` | 7.24.5.8 | strtok | fn | Tokenizes using a separator set (stateful) | Positive | supported | exit | |
 | `LIBC-string-memset-01` | 7.24.6.1 | memset | fn | Fills `n` bytes with a value; returns destination | Positive | supported | exit | |
-| `LIBC-string-strerror-01` | 7.24.6.2 | strerror | fn | Maps an error number to a message string | Positive | partial | exit | |
+| `LIBC-string-strerror-01` | 7.24.6.2 | strerror | fn | Maps an error number to a message string | Positive | supported | exit | |
 | `LIBC-string-strlen-01` | 7.24.6.3 | strlen | fn | Length excluding the terminator | Positive | supported | exit | |
 
 ## `<stdlib.h>` (7.22)
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdlib-EXIT-01` | 7.22p3 | EXIT_SUCCESS / EXIT_FAILURE / NULL / RAND_MAX / MB_CUR_MAX | obj-macro | Defined with the required forms/values | Positive | partial | static-assert | `MB_CUR_MAX == 1` |
+| `LIBC-stdlib-EXIT-01` | 7.22p3 | EXIT_SUCCESS / EXIT_FAILURE / NULL / RAND_MAX / MB_CUR_MAX | obj-macro | Defined with the required forms/values | Positive | supported | static-assert | `MB_CUR_MAX == 1` |
 | `LIBC-stdlib-div_t-01` | 7.22p3 | div_t / ldiv_t / lldiv_t / size_t / wchar_t | type | Result/utility types defined | Positive | supported | static-assert | |
 | `LIBC-stdlib-atof-01` | 7.22.1.1 | atof | fn | Parses a `double` | Positive | supported | exit | |
-| `LIBC-stdlib-atoi-01` | 7.22.1.2 | atoi / atol / atoll | fn | Parse `int`/`long`/`long long` | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-stdlib-atoi-01` | 7.22.1.2 | atoi / atol / atoll | fn | Parse `int`/`long`/`long long` | Positive | supported | exit | |
 | `LIBC-stdlib-strtod-01` | 7.22.1.3 | strtod / strtof / strtold | fn | Parse floating with end pointer; over/underflow → `ERANGE` | Positive | supported | exit | |
 | `LIBC-stdlib-strtol-01` | 7.22.1.4 | strtol / strtoll / strtoul / strtoull | fn | Parse integer with base & end pointer; range → `ERANGE` | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdlib-rand-01` | 7.22.2.1 | rand / srand | fn | Pseudo-random in `[0, RAND_MAX]`; reproducible per seed | Positive | partial | exit | |
+| `LIBC-stdlib-rand-01` | 7.22.2.1 | rand / srand | fn | Pseudo-random in `[0, RAND_MAX]`; reproducible per seed | Positive | supported | exit | |
 | `LIBC-stdlib-malloc-01` | 7.22.3.4 | malloc | fn | Allocates uninitialized, suitably aligned storage | Positive | supported | exit | |
 | `LIBC-stdlib-calloc-01` | 7.22.3.2 | calloc | fn | Allocates zero-initialized array storage | Positive | supported | exit | |
 | `LIBC-stdlib-realloc-01` | 7.22.3.5 | realloc | fn | Resizes, preserving contents up to the lesser size | Positive | supported | exit | |
 | `LIBC-stdlib-free-01` | 7.22.3.3 | free | fn | Deallocates; `free(NULL)` is a no-op | Positive | supported | exit | |
-| `LIBC-stdlib-aligned_alloc-01` | 7.22.3.1 | aligned_alloc | fn | Allocates with a specified alignment | Positive | partial | exit | |
+| `LIBC-stdlib-aligned_alloc-01` | 7.22.3.1 | aligned_alloc | fn | Allocates with a specified alignment | Positive | supported | exit | bump allocator advances offset to the requested alignment |
 | `LIBC-stdlib-malloc-02` | 7.22.3p1 | malloc/realloc | fn | Using a pointer after `free`/`realloc` is undefined | B-undef | supported | none | documentation |
-| `LIBC-stdlib-abort-01` | 7.22.4.1 | abort | fn | Abnormal termination (nonzero status), no atexit/flush | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-stdlib-abort-01` | 7.22.4.1 | abort | fn | Abnormal termination (nonzero status), no atexit/flush | Positive | supported | exit | |
 | `LIBC-stdlib-atexit-01` | 7.22.4.2 | atexit | fn | Registers handlers run in reverse order at normal exit | Positive | supported | stdout | |
-| `LIBC-stdlib-exit-01` | 7.22.4.4 | exit | fn | Runs atexit handlers, flushes/closes streams, terminates with status | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdlib-_Exit-01` | 7.22.4.5 | _Exit | fn | Terminates without atexit handlers or flushing | Positive | partial | exit | |
-| `LIBC-stdlib-quick_exit-01` | 7.22.4.3,7.22.4.7 | quick_exit / at_quick_exit | fn | Quick-exit handler registration and termination | Positive | partial | exit | |
+| `LIBC-stdlib-exit-01` | 7.22.4.4 | exit | fn | Runs atexit handlers, flushes/closes streams, terminates with status | Positive | supported | exit | |
+| `LIBC-stdlib-_Exit-01` | 7.22.4.5 | _Exit | fn | Terminates without atexit handlers or flushing | Positive | supported | exit | |
+| `LIBC-stdlib-quick_exit-01` | 7.22.4.3,7.22.4.7 | quick_exit / at_quick_exit | fn | Quick-exit handler registration and termination | Positive | supported | exit | |
 | `LIBC-stdlib-getenv-01` | 7.22.4.6 | getenv | fn | Looks up an environment variable | Positive | partial | exit | via `sys_proc.getenv` |
 | `LIBC-stdlib-system-01` | 7.22.4.8 | system | fn | Executes a command via the host | Positive | by-design | none | no host process on WasmVM |
 | `LIBC-stdlib-bsearch-01` | 7.22.5.1 | bsearch | fn | Binary search of a sorted array | Positive | supported | exit | |
 | `LIBC-stdlib-qsort-01` | 7.22.5.2 | qsort | fn | Sorts via a comparator | Positive | supported | exit | |
-| `LIBC-stdlib-abs-01` | 7.22.6.1 | abs / labs / llabs | fn | Integer absolute value | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdlib-div-01` | 7.22.6.2 | div / ldiv / lldiv | fn | Quotient and remainder together | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-stdlib-abs-01` | 7.22.6.1 | abs / labs / llabs | fn | Integer absolute value | Positive | supported | exit | |
+| `LIBC-stdlib-div-01` | 7.22.6.2 | div / ldiv / lldiv | fn | Quotient and remainder together | Positive | supported | exit | |
 | `LIBC-stdlib-mb-01` | 7.22.7,7.22.8 | mblen / mbtowc / wctomb / mbstowcs / wcstombs | fn | Multibyte/wide conversions | Positive | partial | exit | "C" locale, UTF-8 |
 
 ## `<stdio.h>` (7.21)
@@ -257,7 +257,7 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-stdio-printf-conv-01` | 7.21.6.1 | printf (conversions) | fn | `%d %i %u %o %x %X %c %s %p %%` produce correct output | Positive | supported | stdout | |
 | `LIBC-stdio-printf-float-01` | 7.21.6.1 | printf (`%f %e %g %a`) | fn | Floating conversions, incl. `nan`/`inf` | Positive | supported | stdout | hand-rolled float formatting |
 | `LIBC-stdio-printf-flags-01` | 7.21.6.1 | printf (flags/width/precision/length) | fn | `-+ 0#`, width, precision, `l`/`ll`/`h`/`z` modifiers | Positive | partial | stdout | |
-| `LIBC-stdio-vprintf-01` | 7.21.6.8–7.21.6.14 | vprintf / vfprintf / vsprintf / vsnprintf | fn | `va_list` formatted-output variants | Positive | partial | stdout | |
+| `LIBC-stdio-vprintf-01` | 7.21.6.8–7.21.6.14 | vprintf / vfprintf / vsprintf / vsnprintf | fn | `va_list` formatted-output variants | Positive | supported | stdout | |
 | `LIBC-stdio-scanf-01` | 7.21.6.2,7.21.6.4,7.21.6.7 | scanf / fscanf / sscanf | fn | Formatted input | Positive | deferred | none | scanf family not implemented |
 | `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | partial | exit | via `sys_fs.open` |
 | `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | partial | exit | entity undeclared — not yet implemented |
@@ -313,9 +313,9 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-time-types-01` | 7.27.1 | clock_t / time_t / struct tm / struct timespec / size_t | type | Time types defined | Positive | partial | static-assert | |
 | `LIBC-time-macros-01` | 7.27.1 | CLOCKS_PER_SEC / TIME_UTC / NULL | obj-macro | Defined | Positive | partial | static-assert | |
-| `LIBC-time-time-01` | 7.27.2.4 | time | fn | Current calendar time | Positive | partial | exit | via `sys_proc.clock_gettime` |
+| `LIBC-time-time-01` | 7.27.2.4 | time | fn | Current calendar time | Positive | supported | exit | via `sys_proc.clock_gettime` |
 | `LIBC-time-clock-01` | 7.27.2.1 | clock | fn | Processor time | Positive | partial | exit | |
-| `LIBC-time-difftime-01` | 7.27.2.2 | difftime | fn | Difference of two `time_t` in seconds | Positive | partial | exit | |
+| `LIBC-time-difftime-01` | 7.27.2.2 | difftime | fn | Difference of two `time_t` in seconds | Positive | supported | exit | |
 | `LIBC-time-mktime-01` | 7.27.2.3 | mktime | fn | `struct tm` → `time_t` (normalizing) | Positive | partial | exit | |
 | `LIBC-time-timespec_get-01` | 7.27.2.5 | timespec_get | fn | Fills a `timespec` for a time base | Positive | partial | exit | |
 | `LIBC-time-gmtime-01` | 7.27.3.3,7.27.3.4 | gmtime / localtime | fn | `time_t` → broken-down time | Positive | partial | exit | |
@@ -330,7 +330,7 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 | `LIBC-inttypes-PRI-01` | 7.8.1 | PRIdN / PRIiN / PRIoN / PRIuN / PRIxN / PRIXN (+ LEAST/FAST/MAX/PTR) | obj-macro | `printf` format-specifier string macros | Positive | supported | static-assert | string literals concatenable |
 | `LIBC-inttypes-SCN-01` | 7.8.1 | SCNdN / SCNiN / SCNoN / SCNuN / SCNxN (+ LEAST/FAST/MAX/PTR) | obj-macro | `scanf` format-specifier string macros | Positive | partial | static-assert | scanf family deferred |
 | `LIBC-inttypes-imaxabs-01` | 7.8.2.1,7.8.2.2 | imaxabs / imaxdiv | fn | Greatest-width absolute value / division | Positive | supported | exit | |
-| `LIBC-inttypes-strtoimax-01` | 7.8.2.3 | strtoimax / strtoumax | fn | Parse greatest-width integers | Positive | partial | exit | |
+| `LIBC-inttypes-strtoimax-01` | 7.8.2.3 | strtoimax / strtoumax | fn | Parse greatest-width integers | Positive | supported | exit | |
 | `LIBC-inttypes-wcstoimax-01` | 7.8.2.4 | wcstoimax / wcstoumax | fn | Wide-string parse to greatest-width integers | Positive | deferred | none | wide strings deferred |
 
 ## `<complex.h>` (7.3)
@@ -385,7 +385,7 @@ No asynchronous signals on WasmVM; handler installation is deferred.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-signal-types-01` | 7.14 | sig_atomic_t / SIG_DFL / SIG_ERR / SIG_IGN / SIGABRT / SIGFPE / SIGILL / SIGINT / SIGSEGV / SIGTERM | type/obj-macro | Defined | Positive | partial | static-assert | values defined |
+| `LIBC-signal-types-01` | 7.14 | sig_atomic_t / SIG_DFL / SIG_ERR / SIG_IGN / SIGABRT / SIGFPE / SIGILL / SIGINT / SIGSEGV / SIGTERM | type/obj-macro | Defined | Positive | supported | static-assert | values defined |
 | `LIBC-signal-signal-01` | 7.14.1.1 | signal | fn | Install a signal handler | Positive | deferred | none | no async signals |
 | `LIBC-signal-raise-01` | 7.14.2.1 | raise | fn | Raise a signal | Positive | deferred | none | |
 
