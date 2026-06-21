@@ -143,6 +143,38 @@ test:
     expire_in: 1 day
     when: always
 
+# status-partial conformance rows — the intentionally-incomplete C17 features.
+# INFORMATIONAL (allow_failure): never gates the pipeline. A row shows red here
+# for one of two reasons: (a) the feature is genuinely unimplemented (the expected
+# conformance signal), or (b) #85 — wvmcc emits invalid wasm on x86-64, so every
+# `run`/`stdout` row fails for infra reasons until #85 lands (the `static-assert`
+# / `compile-fail` rows still give real signal). A row that *unexpectedly passes*
+# is a promotion candidate — flip it to `status-supported` in
+# tests/standard/scaffold/*.cmake + docs/standard/. Locally: `ninja check-partial`.
+#
+# The gate stays on the host/unit `test` job above. Once #85 is fixed, add a
+# gating `test-standard-supported` job (ctest -L status-supported, NO
+# allow_failure) — that suite is already 100% green locally (`ninja check-supported`).
+test-standard-partial:
+  stage: test
+  needs: ["build"]
+  allow_failure: true
+  cache:
+    - key: "wasmvm-$WASMVM_REF-$CACHE_NS"
+      paths:
+        - .wasmvm/
+    - key: "build-$CI_COMMIT_REF_SLUG-$CACHE_NS"
+      paths:
+        - build/
+  script:
+    - ctest --test-dir build -L status-partial
+        --output-on-failure --output-junit ctest-partial.xml
+  artifacts:
+    reports:
+      junit: build/ctest-partial.xml
+    expire_in: 1 day
+    when: always
+
 validate:
   stage: validate
   needs: ["build"]
