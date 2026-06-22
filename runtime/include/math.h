@@ -9,6 +9,11 @@
 #define M_PI 3.14159265358979323846
 #define M_E  2.71828182845904523536
 
+// 7.12p2 — most-efficient evaluation types. wvmcc has FLT_EVAL_METHOD == 0, so
+// they are exactly float and double.
+typedef float  float_t;
+typedef double double_t;
+
 // NaN / Infinity helpers. wvmcc's constant folder doesn't currently
 // evaluate `0.0 / 0.0` (NaN) or `1.0 / 0.0` (+inf) at compile time, so
 // file-scope `const double` initializers using those expressions land as
@@ -44,5 +49,49 @@ int __signbit(double);
 
 double copysign(double x, double y);
 double fabs(double x);
+
+/* 7.12.14 — quiet comparison macros: like the relational operators but never
+ * raise "invalid" on a NaN operand (every relation but isunordered is false
+ * when either argument is a NaN). */
+#define isunordered(x, y)    (isnan(x) || isnan(y))
+#define isgreater(x, y)      (!isunordered((x), (y)) && (x) >  (y))
+#define isgreaterequal(x, y) (!isunordered((x), (y)) && (x) >= (y))
+#define isless(x, y)         (!isunordered((x), (y)) && (x) <  (y))
+#define islessequal(x, y)    (!isunordered((x), (y)) && (x) <= (y))
+#define islessgreater(x, y)  (!isunordered((x), (y)) && ((x) < (y) || (x) > (y)))
+
+/* 7.12p9 — error-handling capabilities. wvmcc reports math errors via errno
+ * (`docs/spec.md`), so math_errhandling == MATH_ERRNO. */
+#define MATH_ERRNO       1
+#define MATH_ERREXCEPT   2
+#define math_errhandling MATH_ERRNO
+
+/* 7.12.12 — fdim/fmax/fmin (a NaN argument is treated as missing data, F.10.9). */
+double fmax(double x, double y);
+double fmin(double x, double y);
+double fdim(double x, double y);
+
+/* 7.12.9 — nearest-integer functions. round() rounds halfway cases away from
+ * zero; rint/nearbyint use the default round-to-nearest (ties to even). */
+double    ceil(double x);
+double    floor(double x);
+double    trunc(double x);
+double    round(double x);
+long      lround(double x);
+long long llround(double x);
+double    nearbyint(double x);
+double    rint(double x);
+long      lrint(double x);
+long long llrint(double x);
+
+/* 7.12.11 — manipulation functions. */
+double nan(const char *tagp);
+double nextafter(double x, double y);
+double nexttoward(double x, long double y);
+
+/* 7.12.10 — remainder functions. */
+double fmod(double x, double y);
+double remainder(double x, double y);
+double remquo(double x, double y, int *quo);
 
 #endif // _WVMCC_MATH_H
