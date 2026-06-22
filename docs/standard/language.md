@@ -586,7 +586,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7-02` | 6.7p3 | A no-linkage identifier is declared at most once per scope/name-space | Negative | supported | compile-fail | |
 | `LANG-6.7-03` | 6.7p3 | A typedef name may be redefined to the same type in the same scope | Positive | supported | exit | |
 | `LANG-6.7-04` | 6.7p4 | Same-scope declarations of the same object/function must have compatible types | Negative | supported | compile-fail | unit-xref `sema_decl_compat_test` |
-| `LANG-6.7-05` | 6.7p7 | A no-linkage object's type must be complete by the end of its declarator/init-declarator | Negative | partial | compile-fail | |
+| `LANG-6.7-05` | 6.7p7 | A no-linkage object's type must be complete by the end of its declarator/init-declarator | Negative | supported | compile-fail | |
 
 ### 6.7.1 Storage-class specifiers
 
@@ -655,7 +655,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.7.3-01` | 6.7.3p1,p6 | `const volatile restrict _Atomic` recognized; a repeated qualifier counts once | Positive | partial | exit | `_Atomic` deferred |
-| `LANG-6.7.3-02` | 6.7.3p2 | Constraint: only pointer-to-object types may be `restrict`-qualified | Negative | partial | compile-fail | unit-xref `sema_restrict_test` |
+| `LANG-6.7.3-02` | 6.7.3p2 | Constraint: only pointer-to-object types may be `restrict`-qualified | Negative | supported | compile-fail | unit-xref `sema_restrict_test` |
 | `LANG-6.7.3-03` | 6.7.3p7 | Modifying a `const`-qualified object through a non-const lvalue is undefined | B-undef | supported | none | documentation |
 | `LANG-6.7.3-04` | 6.7.3p7 | A `const` object as an assignment target is rejected | Negative | supported | compile-fail | unit-xref `sema_qualifiers_test` |
 | `LANG-6.7.3-05` | 6.7.3p8 | `volatile` accesses are evaluated strictly per the abstract machine | Positive | partial | exit | volatile codegen partial |
@@ -674,7 +674,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.4-05` | 6.7.4p8 | A `_Noreturn` function does not return to its caller | Positive | supported | exit | emits trailing `unreachable` |
 | `LANG-6.7.4-06` | 6.7.4p8,p9 | A `_Noreturn` function that returns is undefined (recommended diagnostic) | B-undef | supported | none | documentation |
 | `LANG-6.7.4-07` | 6.7.4p6 | The extent to which inline suggestions are effective is implementation-defined | B-impl | partial | none | `docs/spec.md` |
-| `LANG-6.7.4-08` | 6.7.4p4 | No function specifier on `main` (hosted) | Negative | partial | compile-fail | |
+| `LANG-6.7.4-08` | 6.7.4p4 | No function specifier on `main` (hosted) | Negative | supported | compile-fail | |
 | `LANG-6.7.4-09` | 6.7.4p7 | Whether a call uses the inline or external definition is unspecified | B-unspec | partial | none | documentation |
 
 ### 6.7.5 Alignment specifier
@@ -683,7 +683,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 |---|---|---|---|---|---|---|
 | `LANG-6.7.5-01` | 6.7.5p6,p7 | `_Alignas(type)` ≡ `_Alignas(_Alignof(type))`; `_Alignas(const-expr)`; strictest wins | Positive | partial | static-assert | unit-xref `sema_alignas_test` |
 | `LANG-6.7.5-02` | 6.7.5p2 | Constraint: `_Alignas` not with `typedef`/`register`, not on a function/bit-field | Negative | supported | compile-fail | |
-| `LANG-6.7.5-03` | 6.7.5p3–p5 | Constraint: a valid (supported) alignment, not weaker than required | Negative | partial | compile-fail | |
+| `LANG-6.7.5-03` | 6.7.5p3–p5 | Constraint: a valid (supported) alignment, not weaker than required | Negative | supported | compile-fail | |
 | `LANG-6.7.5-04` | 6.7.5p8 | Inconsistent `_Alignas` across declarations of one object is undefined | B-undef | partial | none | documentation |
 
 ### 6.7.6 Declarators
@@ -789,7 +789,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.9-03` | 6.9p5 | An unused external-linkage identifier needs no definition | Positive | supported | exit | |
 | `LANG-6.9.1-01` | 6.9.1p1,p11 | A function definition (declarator + body) executes its compound statement | Positive | supported | exit | |
 | `LANG-6.9.1-02` | 6.9.1p2,p3,p4 | Constraints: a function-type declarator; return type `void`/complete-non-array; only `extern`/`static` storage class | Negative | supported | compile-fail | |
-| `LANG-6.9.1-03` | 6.9.1p5,p6 | Constraints: prototype parameters each named (except `(void)`); identifier-list form rules | Negative | partial | compile-fail | |
+| `LANG-6.9.1-03` | 6.9.1p5,p6 | Constraints: prototype parameters each named (except `(void)`); identifier-list form rules | Negative | supported | compile-fail | |
 | `LANG-6.9.1-04` | 6.9.1p7 | A prototype definition also serves as a prototype for later calls; parameters are complete | Positive | supported | exit | |
 | `LANG-6.9.1-05` | 6.9.1p10 | On entry, VLA parameter size expressions are evaluated; args converted as by assignment | Positive | deferred | none | VLAs deferred |
 | `LANG-6.9.1-06` | 6.9.1p12 | Reaching the `}` of a non-`void` function whose return value is then used is undefined | B-undef | supported | none | documentation |

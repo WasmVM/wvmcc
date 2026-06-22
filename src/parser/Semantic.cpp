@@ -1263,6 +1263,43 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
     if (f->declarator) {
         // check compatibility with prior declarations
         std::string name = declaratorName(f->declarator);
+        // 6.7.4p4: a function specifier (inline / _Noreturn) shall not appear in
+        // a declaration of main.
+        if (name == "main"
+            && f->specifiers.funcSpecFlags != FunctionSpecifier::None
+            && curDiagnostics) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "function specifier may not appear on 'main'";
+            diag.span = f->declarator->span;
+            curDiagnostics->push_back(std::move(diag));
+        }
+        // 6.9.1p5: in a function *definition*, each parameter shall be named —
+        // except the lone `(void)` list, which denotes zero parameters.
+        if (curDiagnostics && !f->params.empty()) {
+            const auto &fps = f->params;
+            bool voidParams = fps.size() == 1 && !fps[0].declarator && [&] {
+                for (const auto &ts : fps[0].specifiers.typeSpecifiers)
+                    if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Simple
+                        && ts.simple.size() == 1
+                        && ts.simple[0] == DeclarationSpecifiers::SimpleTypeSpecifier::Void)
+                        return true;
+                return false;
+            }();
+            if (!voidParams) {
+                for (const auto &p : fps) {
+                    std::string pn = p.declarator ? declaratorName(p.declarator) : std::string();
+                    if (pn.empty()) {
+                        Diagnostic diag;
+                        diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "parameter name omitted in function definition";
+                        diag.span = f->declarator->span;
+                        curDiagnostics->push_back(std::move(diag));
+                        break;   // one diagnostic suffices
+                    }
+                }
+            }
+        }
         DeclarationPtr fake = std::make_shared<Declaration>();
         fake->specifiers = f->specifiers;
         fake->declarator = f->declarator;
@@ -1372,6 +1409,31 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
                 diag.message = "function with block scope shall have no explicit storage-class";
                 diag.span = d->span;
                 curDiagnostics->push_back(std::move(diag));
+            }
+            // 6.7p7: a declared object (other than via a pointer, or an extern
+            // declaration completed elsewhere) shall have a complete type. Reject
+            // a block-scope object whose named struct/union tag is never defined.
+            if (d->declarator && !isFunctionDeclarator(d->declarator)
+                && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)
+                && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern)) {
+                auto objTy = canonicalTypeRepr(d->specifiers, d->declarator);
+                if (!objTy) objTy = buildTypeFromDeclaration(d->specifiers, d->declarator, false, nullptr);
+                if (objTy && (objTy->kind == TypeNode::Kind::Struct
+                              || objTy->kind == TypeNode::Kind::Union)
+                    && objTy->su && objTy->su->name.has_value()) {
+                    bool complete = objTy->su->hasBody
+                        || structUnionTagDefs.count(*objTy->su->name) != 0;
+                    if (!complete) {
+                        Diagnostic diag;
+                        diag.severity = Diagnostic::Severity::Error;
+                        diag.message = "variable has incomplete type '"
+                            + (objTy->kind == TypeNode::Kind::Union ? std::string("union ")
+                                                                    : std::string("struct "))
+                            + *objTy->su->name + "'";
+                        diag.span = d->span;
+                        curDiagnostics->push_back(std::move(diag));
+                    }
+                }
             }
         }
         // Record the object in the current block scope and diagnose a
@@ -2311,6 +2373,42 @@ void Semantic::checkDeclaration(const DeclarationPtr &d, std::vector<wvmcc::Diag
         diag.message = "_Alignas may not be applied to a typedef, function, or register object";
         diag.span = d->span;
         diagnostics.push_back(std::move(diag));
+    }
+
+    // 6.7.3p2: `restrict` shall qualify a pointer to an object type. A leading
+    // `restrict` (in the declaration specifiers, e.g. `restrict int x`) qualifies
+    // the base type and is valid only when the declared object is itself a
+    // pointer (such as a `restrict`-qualified pointer typedef). Reject it when
+    // the object type is not a pointer.
+    if (d->specifiers.hasTypeQual(wvmcc::parser::TypeQualifier::Restrict)
+        && !isFunctionDeclarator(d->declarator)
+        && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Typedef)) {
+        auto ty = canonicalTypeRepr(d->specifiers, d->declarator);
+        if (!ty) ty = buildTypeFromDeclaration(d->specifiers, d->declarator, false, nullptr);
+        if (ty && ty->kind != TypeNode::Kind::Pointer) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "restrict requires a pointer type";
+            diag.span = d->span;
+            diagnostics.push_back(std::move(diag));
+        }
+    }
+
+    // 6.7.5p3: an alignment specifier's value shall be a valid alignment — a
+    // nonnegative integral power of two. `_Alignas(0)` has no effect; anything
+    // else that we can evaluate to a non-power-of-two is a constraint violation.
+    for (const auto &ae : d->specifiers.alignExprs) {
+        if (!ae) continue;
+        auto v = ConstExprEvaluator::evalIntegerConstantExpr(ae);
+        if (!v.has_value()) continue;                 // unevaluable: don't guess
+        long long a = *v;
+        if (a < 0 || (a > 0 && (a & (a - 1)) != 0)) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "requested alignment is not a positive power of two";
+            diag.span = d->span;
+            diagnostics.push_back(std::move(diag));
+        }
     }
 
     // 6.7.9p3: the type of an initialized object shall be a complete object
