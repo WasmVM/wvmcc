@@ -311,7 +311,7 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-time-types-01` | 7.27.1 | clock_t / time_t / struct tm / struct timespec / size_t | type | Time types defined | Positive | partial | static-assert | types all defined (incl. `tv_nsec` as `long`); test blocked by a compiler bug — `_Static_assert(_Generic(ptr->member, …))` evaluates the (unevaluated) `_Generic` controlling expression as an ICE and rejects the member access |
+| `LIBC-time-types-01` | 7.27.1 | clock_t / time_t / struct tm / struct timespec / size_t | type | Time types defined | Positive | supported | static-assert | `tv_nsec` is `long`; `_Generic`-in-`_Static_assert` now resolved |
 | `LIBC-time-macros-01` | 7.27.1 | CLOCKS_PER_SEC / TIME_UTC / NULL | obj-macro | Defined | Positive | supported | static-assert | |
 | `LIBC-time-time-01` | 7.27.2.4 | time | fn | Current calendar time | Positive | supported | exit | via `sys_proc.clock_gettime` |
 | `LIBC-time-clock-01` | 7.27.2.1 | clock | fn | Processor time | Positive | supported | exit | microseconds via CLOCK_MONOTONIC; CLOCKS_PER_SEC == 1e6 |
