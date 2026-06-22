@@ -64,7 +64,7 @@ add_standard_run_test(libc-stdarg-va_end ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdarg
 add_standard_run_test(libc-stdarg-va_list ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdarg/va_list.c partial)
 add_standard_run_test(libc-stdarg-va_start ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdarg/va_start.c partial)
 add_standard_static_assert(libc-stdbool-bool ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdbool_extra/bool_macro.c supported)
-add_standard_static_assert(libc-stddef-max_align_t ${CMAKE_CURRENT_SOURCE_DIR}/libc/stddef/max_align_t.c deferred)
+add_standard_static_assert(libc-stddef-max_align_t ${CMAKE_CURRENT_SOURCE_DIR}/libc/stddef/max_align_t.c supported)
 add_standard_run_test(libc-stddef-null ${CMAKE_CURRENT_SOURCE_DIR}/libc/stddef/null.c supported)
 add_standard_run_test(libc-stddef-offsetof ${CMAKE_CURRENT_SOURCE_DIR}/libc/stddef/offsetof.c supported)
 add_standard_static_assert(libc-stddef-ptrdiff_t ${CMAKE_CURRENT_SOURCE_DIR}/libc/stddef/ptrdiff_t.c supported)

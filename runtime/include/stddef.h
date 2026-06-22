@@ -12,6 +12,13 @@
 
 #define NULL ((void*)0)
 
+// max_align_t: a type whose alignment is the greatest fundamental alignment
+// (6.2.8, 7.19). Per docs/spec.md that is 8 (both `long long` and `long double`
+// — which aliases `double` — are 8-aligned). A typedef is safe here because
+// max_align_t is only ever used as a type-name in `_Alignof`, never as a scalar
+// lvalue that would hit the typedef→i32 value-type gap.
+typedef struct { long long __max_align_ll; long double __max_align_ld; } max_align_t;
+
 // `offsetof` yields a size_t integer *constant* (7.19), so it must be usable in
 // an ICE (_Static_assert, case labels, array bounds). wvmcc's `__builtin_offsetof`
 // computes the offset at translation time directly from the type's layout — the

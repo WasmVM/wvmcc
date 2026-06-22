@@ -115,7 +115,7 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-stddef-size_t-01` | 7.19p2 | size_t | type | Unsigned `sizeof` result type | B-impl | supported | static-assert | LP64: 64-bit. `#define` (typedef-gap workaround). Size check via `sizeof` **blocked on #81** |
 | `LIBC-stddef-ptrdiff_t-01` | 7.19p2 | ptrdiff_t | type | Signed pointer-difference type | B-impl | supported | static-assert | LP64: 64-bit signed. Size check **blocked on #81** |
-| `LIBC-stddef-max_align_t-01` | 7.19p2 | max_align_t | type | Type with the greatest fundamental alignment | B-impl | deferred | static-assert | **not yet in `runtime/include/stddef.h`**; intended `_Alignof == 8` |
+| `LIBC-stddef-max_align_t-01` | 7.19p2 | max_align_t | type | Type with the greatest fundamental alignment | B-impl | supported | static-assert | `typedef struct {…} max_align_t` in `<stddef.h>`, `_Alignof == 8` |
 | `LIBC-stddef-wchar_t-01` | 7.19p2 | wchar_t | type | Wide-character type | B-impl | partial | static-assert | wvmcc placeholder `int` (`#define`). Size check **blocked on #81** |
 | `LIBC-stddef-NULL-01` | 7.19p3 | NULL | obj-macro | A null pointer constant | Positive | supported | exit | `(void*)0`; verified at runtime (pointer comparison is not an ICE) |
 | `LIBC-stddef-offsetof-01` | 7.19p3 | offsetof | fn-macro | Byte offset of a member | Positive | supported | exit | wvmcc's `offsetof` is the null-pointer trick → address constant, **not an ICE**; verify at runtime, not via `_Static_assert` |
