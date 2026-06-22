@@ -42,7 +42,19 @@ extern FILE __wvmcc_stderr;
 #define stderr (&__wvmcc_stderr)
 
 FILE *fopen(const char *path, const char *mode);
+FILE *freopen(const char *path, const char *mode, FILE *stream);
 int   fclose(FILE *stream);
+int   remove(const char *path);
+int   rename(const char *oldpath, const char *newpath);
+// Spelled with the struct tag, not the `FILE` typedef: wvmcc miscounts the
+// arguments of a `(void)`-prototype function whose return type is a typedef'd
+// struct pointer (`FILE *tmpfile(void)` → "argument count does not match"). The
+// tag form `struct FILE *` is the identical type and sidesteps that bug.
+struct FILE *tmpfile(void);
+char *tmpnam(char *s);
+
+int   setvbuf(FILE *stream, char *buf, int mode, size_t size);
+void  setbuf(FILE *stream, char *buf);
 
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream);
 size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream);
@@ -64,7 +76,11 @@ int  puts(const char *s);
 int  fgetc(FILE *stream);
 int  getc(FILE *stream);
 int  getchar(void);
+int  ungetc(int c, FILE *stream);
 char *fgets(char *s, int n, FILE *stream);
+
+int  fgetpos(FILE *stream, fpos_t *pos);
+int  fsetpos(FILE *stream, const fpos_t *pos);
 
 void perror(const char *s);
 
@@ -74,6 +90,11 @@ void perror(const char *s);
 #define _IOLBF 1
 #define _IONBF 2
 #define BUFSIZ 256
+
+#define FOPEN_MAX    8
+#define FILENAME_MAX 4096
+#define TMP_MAX      25
+#define L_tmpnam     20
 
 #ifndef SEEK_SET
 #define SEEK_SET 0

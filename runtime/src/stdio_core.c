@@ -19,6 +19,7 @@
 #define _F_LINEBUF  16
 #define _F_UNBUF    32
 #define _F_INITED   64
+#define _F_USERBUF  128   // wbuf is caller-owned (setvbuf): do not free it
 
 // `struct FILE` is now defined in <stdio.h> (a complete, sizeable object type);
 // it is included above. The `_F_*` flag bits remain private to this file.
@@ -185,6 +186,19 @@ char *fgets(char *s, int n, FILE *f) {
     return s;
 }
 
+// 7.21.7.10: push one character back so the next read returns it. wvmcc keeps
+// the pushback in the read buffer (one guaranteed slot after any read), and
+// clears EOF per the standard.
+int ungetc(int c, FILE *f) {
+    if (!f || c == EOF) return EOF;
+    if (f->rbuf && f->rbuf_pos > 0) {
+        f->rbuf[--f->rbuf_pos] = (char)c;
+        f->flags &= ~_F_EOF;
+        return (unsigned char)c;
+    }
+    return EOF;   // no room (more than one pushback, or before any read)
+}
+
 size_t fread(void *ptr, size_t size, size_t nmemb, FILE *f) {
     if (!ptr || !f || size == 0 || nmemb == 0) return 0;
     size_t total = size * nmemb;
@@ -258,6 +272,19 @@ int feof(FILE *f)    { return f ? (f->flags & _F_EOF)  : 0; }
 int ferror(FILE *f)  { return f ? (f->flags & _F_ERR)  : 0; }
 void clearerr(FILE *f) { if (f) f->flags &= ~(_F_EOF | _F_ERR); }
 
+// 7.21.9: fpos_t is a byte offset for wvmcc's stream model.
+int fgetpos(FILE *f, fpos_t *pos) {
+    if (!f || !pos) return -1;
+    long p = ftell(f);
+    if (p < 0) return -1;
+    *pos = (fpos_t)p;
+    return 0;
+}
+int fsetpos(FILE *f, const fpos_t *pos) {
+    if (!f || !pos) return -1;
+    return fseek(f, (long)*pos, SEEK_SET);
+}
+
 static int parse_mode(const char *m, int *o_flags, int *f_flags) {
     if (!m || !*m) return -1;
     int oflag, fflag = 0;
@@ -301,16 +328,38 @@ FILE *fopen(const char *path, const char *mode) {
     return f;
 }
 
+int remove(const char *path) {
+    return unlink(path);   // 0 on success, -1 (errno set) on failure
+}
+
 int fclose(FILE *f) {
     if (!f) return EOF;
     int r = 0;
     if (flush_write_buf(f) < 0) r = EOF;
     if (close(f->fd) < 0) r = EOF;
     unregister_stream(f);
-    free(f->wbuf);
+    if (!(f->flags & _F_USERBUF)) free(f->wbuf);   // caller-owned buffers stay
     free(f->rbuf);
     free(f);
     return r;
+}
+
+// 7.21.5.4: redirect an existing stream to a new file. The old file is flushed
+// and closed first; the FILE object is reused so callers' FILE* stays valid.
+FILE *freopen(const char *path, const char *mode, FILE *f) {
+    if (!f) return (FILE *)0;
+    int oflag, fflag;
+    if (parse_mode(mode, &oflag, &fflag) < 0) { fclose(f); return (FILE *)0; }
+    flush_write_buf(f);
+    close(f->fd);
+    int fd = open(path, oflag, 0644);
+    if (fd < 0) { unregister_stream(f); if (!(f->flags & _F_USERBUF)) free(f->wbuf);
+                  free(f->rbuf); free(f); return (FILE *)0; }
+    f->fd = fd;
+    f->flags = fflag;          // clears EOF/ERR/INITED/buffering; re-inits lazily
+    f->wbuf_pos = 0;
+    f->rbuf_pos = f->rbuf_end = 0;
+    return f;
 }
 
 static void itoa10(int n, char *buf) {
@@ -336,4 +385,75 @@ void perror(const char *s) {
     fputs(buf, stderr);
     fputc('\n', stderr);
     fflush(stderr);
+}
+
+// 7.21.5.5/7.21.5.6: buffering control. Must be called before any I/O on the
+// stream. _IONBF makes the stream unbuffered; otherwise the caller's buffer
+// (if any) replaces the default one.
+int setvbuf(FILE *f, char *buf, int mode, size_t size) {
+    if (!f) return -1;
+    if (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) return -1;
+    lazy_init(f);                       // register at-exit flush; alloc default bufs
+    f->flags &= ~(_F_LINEBUF | _F_UNBUF);
+    if (mode == _IONBF) f->flags |= _F_UNBUF;
+    else if (mode == _IOLBF) f->flags |= _F_LINEBUF;
+    if (mode != _IONBF && buf && size > 0) {
+        if (f->wbuf && !(f->flags & _F_USERBUF)) free(f->wbuf);
+        f->wbuf = buf;
+        f->wbuf_size = (int)size;
+        f->wbuf_pos = 0;
+        f->flags |= _F_USERBUF;
+    }
+    return 0;
+}
+
+void setbuf(FILE *f, char *buf) {
+    if (buf) setvbuf(f, buf, _IOFBF, BUFSIZ);
+    else     setvbuf(f, (char *)0, _IONBF, 0);
+}
+
+// 7.21.4.2: no host rename, so copy old → new and unlink old. Not atomic, but it
+// satisfies the observable contract (new has old's bytes; old name is gone).
+int rename(const char *oldp, const char *newp) {
+    FILE *in = fopen(oldp, "rb");
+    if (!in) return -1;
+    FILE *out = fopen(newp, "wb");
+    if (!out) { fclose(in); return -1; }
+    int c, ok = 1;
+    while ((c = fgetc(in)) != EOF) {
+        if (fputc(c, out) == EOF) { ok = 0; break; }
+    }
+    fclose(in);
+    if (fclose(out) != 0) ok = 0;
+    if (!ok) { unlink(newp); return -1; }
+    return unlink(oldp);
+}
+
+// 7.21.4.4: a counter-based unique name. L_tmpnam (20) bounds the length.
+static unsigned __tmp_counter;
+char *tmpnam(char *s) {
+    static char buf[L_tmpnam];
+    char *d = s ? s : buf;
+    unsigned n = ++__tmp_counter;
+    // "tmpNNNNNNNN"
+    d[0] = 't'; d[1] = 'm'; d[2] = 'p';
+    char digits[10];
+    int i = 0;
+    if (n == 0) digits[i++] = '0';
+    while (n) { digits[i++] = (char)('0' + n % 10); n /= 10; }
+    int k = 3;
+    while (i > 0) d[k++] = digits[--i];
+    d[k] = '\0';
+    return d;
+}
+
+// 7.21.4.3: a temporary binary update stream. wvmcc names it via tmpnam and
+// opens "wb+"; it is unlinked at close so it does not outlive the program.
+struct FILE *tmpfile(void) {   // struct-tag form: see the note in <stdio.h>
+    char name[L_tmpnam];
+    tmpnam(name);
+    FILE *f = fopen(name, "wb+");
+    if (!f) return (FILE *)0;
+    unlink(name);   // remove the directory entry; the open fd keeps it usable
+    return f;
 }

@@ -170,7 +170,7 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-ctype-isalnum-01` | 7.4.1.1 | isalnum | fn | True iff letter or digit | Positive | supported | exit | |
 | `LIBC-ctype-isalpha-01` | 7.4.1.2 | isalpha | fn | True iff a letter | Positive | supported | exit | |
-| `LIBC-ctype-isblank-01` | 7.4.1.3 | isblank | fn | True for space and `\t` | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-ctype-isblank-01` | 7.4.1.3 | isblank | fn | True for space and `\t` | Positive | supported | exit | space/tab |
 | `LIBC-ctype-iscntrl-01` | 7.4.1.4 | iscntrl | fn | True for control characters | Positive | supported | exit | |
 | `LIBC-ctype-isdigit-01` | 7.4.1.5 | isdigit | fn | True iff `'0'`–`'9'` | Positive | supported | exit | |
 | `LIBC-ctype-isgraph-01` | 7.4.1.6 | isgraph | fn | Printable except space | Positive | supported | exit | |
@@ -199,8 +199,8 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-string-memcmp-01` | 7.24.4.1 | memcmp | fn | Compares `n` bytes; sign of the first differing byte pair | Positive | supported | exit | |
 | `LIBC-string-strcmp-01` | 7.24.4.2 | strcmp | fn | Lexicographic string comparison | Positive | supported | exit | |
 | `LIBC-string-strncmp-01` | 7.24.4.4 | strncmp | fn | Compares ≤ `n` chars | Positive | supported | exit | |
-| `LIBC-string-strcoll-01` | 7.24.4.3 | strcoll | fn | Locale-collated comparison (== `strcmp` in "C") | Positive | partial | exit | "C" locale only |
-| `LIBC-string-strxfrm-01` | 7.24.4.5 | strxfrm | fn | Locale transform such that `strcmp` of results matches `strcoll` | Positive | partial | exit | "C" locale only |
+| `LIBC-string-strcoll-01` | 7.24.4.3 | strcoll | fn | Locale-collated comparison (== `strcmp` in "C") | Positive | supported | exit | "C" locale: == strcmp |
+| `LIBC-string-strxfrm-01` | 7.24.4.5 | strxfrm | fn | Locale transform such that `strcmp` of results matches `strcoll` | Positive | supported | exit | "C" locale: identity copy |
 | `LIBC-string-memchr-01` | 7.24.5.1 | memchr | fn | Finds a byte within `n` bytes | Positive | supported | exit | |
 | `LIBC-string-strchr-01` | 7.24.5.2 | strchr | fn | Finds the first occurrence of a char (incl. terminator) | Positive | supported | exit | |
 | `LIBC-string-strcspn-01` | 7.24.5.3 | strcspn | fn | Length of the initial span excluding a set | Positive | supported | exit | |
@@ -248,7 +248,7 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-stdio-FILE-01` | 7.21.1 | FILE / fpos_t / size_t | type | Stream/position/size types defined | Positive | supported | static-assert | |
-| `LIBC-stdio-macros-01` | 7.21.1 | EOF / NULL / BUFSIZ / FOPEN_MAX / FILENAME_MAX / _IOFBF / _IOLBF / _IONBF / SEEK_SET / SEEK_CUR / SEEK_END / TMP_MAX / L_tmpnam | obj-macro | Defined with the required forms | Positive | partial | static-assert | |
+| `LIBC-stdio-macros-01` | 7.21.1 | EOF / NULL / BUFSIZ / FOPEN_MAX / FILENAME_MAX / _IOFBF / _IOLBF / _IONBF / SEEK_SET / SEEK_CUR / SEEK_END / TMP_MAX / L_tmpnam | obj-macro | Defined with the required forms | Positive | supported | static-assert | |
 | `LIBC-stdio-streams-01` | 7.21.1p3 | stdin / stdout / stderr | obj-macro | Predefined streams (fd 0/1/2) | Positive | supported | stdout | |
 | `LIBC-stdio-printf-01` | 7.21.6.3 | printf | fn | Formatted output to stdout; returns the count written | Positive | supported | stdout | |
 | `LIBC-stdio-fprintf-01` | 7.21.6.1 | fprintf | fn | Formatted output to a stream | Positive | supported | stdout | |
@@ -259,20 +259,20 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-stdio-printf-flags-01` | 7.21.6.1 | printf (flags/width/precision/length) | fn | `-+ 0#`, width, precision, `l`/`ll`/`h`/`z` modifiers | Positive | partial | stdout | |
 | `LIBC-stdio-vprintf-01` | 7.21.6.8–7.21.6.14 | vprintf / vfprintf / vsprintf / vsnprintf | fn | `va_list` formatted-output variants | Positive | supported | stdout | |
 | `LIBC-stdio-scanf-01` | 7.21.6.2,7.21.6.4,7.21.6.7 | scanf / fscanf / sscanf | fn | Formatted input | Positive | deferred | none | scanf family not implemented |
-| `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | partial | exit | via `sys_fs.open` |
-| `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-freopen-01` | 7.21.5.4 | freopen | fn | Reassociates a stream with a new file | Positive | partial | exit | |
+| `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | supported | exit | via `sys_fs.open` |
+| `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-freopen-01` | 7.21.5.4 | freopen | fn | Reassociates a stream with a new file | Positive | supported | exit | |
 | `LIBC-stdio-fflush-01` | 7.21.5.2 | fflush | fn | Flushes buffered output | Positive | supported | stdout | |
-| `LIBC-stdio-setvbuf-01` | 7.21.5.5,7.21.5.6 | setvbuf / setbuf | fn | Sets stream buffering mode | Positive | partial | stdout | |
-| `LIBC-stdio-fread-01` | 7.21.8.1 | fread | fn | Reads up to `nmemb` elements | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-fwrite-01` | 7.21.8.2 | fwrite | fn | Writes `nmemb` elements | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-fgetc-01` | 7.21.7 | fgetc / getc / getchar / ungetc | fn | Character input | Positive | partial | exit | |
+| `LIBC-stdio-setvbuf-01` | 7.21.5.5,7.21.5.6 | setvbuf / setbuf | fn | Sets stream buffering mode | Positive | supported | stdout | |
+| `LIBC-stdio-fread-01` | 7.21.8.1 | fread | fn | Reads up to `nmemb` elements | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-fwrite-01` | 7.21.8.2 | fwrite | fn | Writes `nmemb` elements | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-fgetc-01` | 7.21.7 | fgetc / getc / getchar / ungetc | fn | Character input | Positive | supported | exit | |
 | `LIBC-stdio-fputc-01` | 7.21.7 | fputc / putc / putchar | fn | Character output | Positive | supported | stdout | |
-| `LIBC-stdio-fgets-01` | 7.21.7.2 | fgets | fn | Reads a line (bounded) | Positive | partial | exit | |
+| `LIBC-stdio-fgets-01` | 7.21.7.2 | fgets | fn | Reads a line (bounded) | Positive | supported | exit | |
 | `LIBC-stdio-fputs-01` | 7.21.7.4 | fputs / puts | fn | Writes a string (`puts` appends newline) | Positive | supported | stdout | |
-| `LIBC-stdio-fseek-01` | 7.21.9 | fseek / ftell / rewind / fgetpos / fsetpos | fn | Stream positioning | Positive | partial | exit | |
-| `LIBC-stdio-remove-01` | 7.21.4 | remove / rename / tmpfile / tmpnam | fn | File-system operations | Positive | partial | exit | `tmpfile`/`tmpnam` partial |
-| `LIBC-stdio-error-01` | 7.21.10 | clearerr / feof / ferror / perror | fn | Stream error/EOF state | Positive | partial | exit | |
+| `LIBC-stdio-fseek-01` | 7.21.9 | fseek / ftell / rewind / fgetpos / fsetpos | fn | Stream positioning | Positive | supported | exit | |
+| `LIBC-stdio-remove-01` | 7.21.4 | remove / rename / tmpfile / tmpnam | fn | File-system operations | Positive | supported | exit | `tmpfile`/`tmpnam` partial |
+| `LIBC-stdio-error-01` | 7.21.10 | clearerr / feof / ferror / perror | fn | Stream error/EOF state | Positive | supported | exit | |
 | `LIBC-stdio-flush-exit-01` | 5.1.2.3p6 | (buffered streams) | fn | Line-buffered output flushes at normal termination / `exit()` | Positive | supported | stdout | atexit-routed flush |
 
 ## `<math.h>` (7.12)
@@ -365,8 +365,8 @@ Only the `"C"` locale is supported (`docs/spec.md`).
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-locale-lconv-01` | 7.11 | struct lconv / LC_ALL / LC_COLLATE / LC_CTYPE / LC_MONETARY / LC_NUMERIC / LC_TIME / NULL | type/obj-macro | Defined | Positive | partial | static-assert | struct lconv / LC_* assertions pass; `_Static_assert(NULL == 0)` is by-design not an ICE — wvmcc keeps `NULL` type-safe as `((void*)0)`, and a pointer cast is not an ICE operand (6.6p6) |
-| `LIBC-locale-setlocale-01` | 7.11.1.1 | setlocale | fn | Selects a locale; only `"C"`/`""` succeed | Positive | partial | exit | "C" locale only |
-| `LIBC-locale-localeconv-01` | 7.11.2.1 | localeconv | fn | Returns `"C"`-locale numeric formatting | Positive | partial | exit | |
+| `LIBC-locale-setlocale-01` | 7.11.1.1 | setlocale | fn | Selects a locale; only `"C"`/`""` succeed | Positive | supported | exit | "C"-only; "" honored as "C" |
+| `LIBC-locale-localeconv-01` | 7.11.2.1 | localeconv | fn | Returns `"C"`-locale numeric formatting | Positive | supported | exit | fixed "C"-locale lconv |
 | `LIBC-locale-other-01` | 7.11.1.1 | setlocale | fn | Locales other than `"C"` are implementation-defined | B-impl | by-design | none | only `"C"` |
 
 ## `<setjmp.h>` (7.13)

@@ -42,6 +42,7 @@ set(RUNTIME_SOURCES
     src/math.c
     src/stdio_core.c
     src/printf.c
+    src/locale.c
 )
 
 set(RUNTIME_OBJECTS)

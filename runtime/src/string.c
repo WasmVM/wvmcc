@@ -196,6 +196,22 @@ char *strtok(char *s, const char *delim) {
     return tok;
 }
 
+// wvmcc supports only the "C" locale (docs/spec.md), where LC_COLLATE ordering
+// is identical to strcmp and the collation transform (strxfrm) is the identity.
+int strcoll(const char *s1, const char *s2) {
+    return strcmp(s1, s2);
+}
+
+size_t strxfrm(char *dst, const char *src, size_t n) {
+    size_t len = strlen(src);
+    if (n > 0) {
+        size_t copy = len < n ? len : n - 1;
+        for (size_t i = 0; i < copy; i++) dst[i] = src[i];
+        dst[copy] = '\0';
+    }
+    return len;   // length of the transformed string (excl. NUL)
+}
+
 char *strerror(int errnum) {
     switch (errnum) {
     case 0:      return "Success";
