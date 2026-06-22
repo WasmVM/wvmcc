@@ -18,6 +18,7 @@ static inline int isspace(int c)  {
     return c == ' ' || c == '\t' || c == '\n'
         || c == '\v' || c == '\f' || c == '\r';
 }
+static inline int isblank(int c)  { return c == ' ' || c == '\t'; }
 static inline int iscntrl(int c)  { return (unsigned)c < 32 || c == 127; }
 static inline int isprint(int c)  { return c >= ' ' && c <= '~'; }
 static inline int isgraph(int c)  { return c > ' ' && c <= '~'; }

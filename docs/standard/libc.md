@@ -170,7 +170,7 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-ctype-isalnum-01` | 7.4.1.1 | isalnum | fn | True iff letter or digit | Positive | supported | exit | |
 | `LIBC-ctype-isalpha-01` | 7.4.1.2 | isalpha | fn | True iff a letter | Positive | supported | exit | |
-| `LIBC-ctype-isblank-01` | 7.4.1.3 | isblank | fn | True for space and `\t` | Positive | partial | exit | entity undeclared — not yet implemented |
+| `LIBC-ctype-isblank-01` | 7.4.1.3 | isblank | fn | True for space and `\t` | Positive | supported | exit | space/tab |
 | `LIBC-ctype-iscntrl-01` | 7.4.1.4 | iscntrl | fn | True for control characters | Positive | supported | exit | |
 | `LIBC-ctype-isdigit-01` | 7.4.1.5 | isdigit | fn | True iff `'0'`–`'9'` | Positive | supported | exit | |
 | `LIBC-ctype-isgraph-01` | 7.4.1.6 | isgraph | fn | Printable except space | Positive | supported | exit | |
@@ -199,8 +199,8 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-string-memcmp-01` | 7.24.4.1 | memcmp | fn | Compares `n` bytes; sign of the first differing byte pair | Positive | supported | exit | |
 | `LIBC-string-strcmp-01` | 7.24.4.2 | strcmp | fn | Lexicographic string comparison | Positive | supported | exit | |
 | `LIBC-string-strncmp-01` | 7.24.4.4 | strncmp | fn | Compares ≤ `n` chars | Positive | supported | exit | |
-| `LIBC-string-strcoll-01` | 7.24.4.3 | strcoll | fn | Locale-collated comparison (== `strcmp` in "C") | Positive | partial | exit | "C" locale only |
-| `LIBC-string-strxfrm-01` | 7.24.4.5 | strxfrm | fn | Locale transform such that `strcmp` of results matches `strcoll` | Positive | partial | exit | "C" locale only |
+| `LIBC-string-strcoll-01` | 7.24.4.3 | strcoll | fn | Locale-collated comparison (== `strcmp` in "C") | Positive | supported | exit | "C" locale: == strcmp |
+| `LIBC-string-strxfrm-01` | 7.24.4.5 | strxfrm | fn | Locale transform such that `strcmp` of results matches `strcoll` | Positive | supported | exit | "C" locale: identity copy |
 | `LIBC-string-memchr-01` | 7.24.5.1 | memchr | fn | Finds a byte within `n` bytes | Positive | supported | exit | |
 | `LIBC-string-strchr-01` | 7.24.5.2 | strchr | fn | Finds the first occurrence of a char (incl. terminator) | Positive | supported | exit | |
 | `LIBC-string-strcspn-01` | 7.24.5.3 | strcspn | fn | Length of the initial span excluding a set | Positive | supported | exit | |
@@ -365,8 +365,8 @@ Only the `"C"` locale is supported (`docs/spec.md`).
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-locale-lconv-01` | 7.11 | struct lconv / LC_ALL / LC_COLLATE / LC_CTYPE / LC_MONETARY / LC_NUMERIC / LC_TIME / NULL | type/obj-macro | Defined | Positive | partial | static-assert | struct lconv / LC_* assertions pass; `_Static_assert(NULL == 0)` is by-design not an ICE — wvmcc keeps `NULL` type-safe as `((void*)0)`, and a pointer cast is not an ICE operand (6.6p6) |
-| `LIBC-locale-setlocale-01` | 7.11.1.1 | setlocale | fn | Selects a locale; only `"C"`/`""` succeed | Positive | partial | exit | "C" locale only |
-| `LIBC-locale-localeconv-01` | 7.11.2.1 | localeconv | fn | Returns `"C"`-locale numeric formatting | Positive | partial | exit | |
+| `LIBC-locale-setlocale-01` | 7.11.1.1 | setlocale | fn | Selects a locale; only `"C"`/`""` succeed | Positive | supported | exit | "C"-only; "" honored as "C" |
+| `LIBC-locale-localeconv-01` | 7.11.2.1 | localeconv | fn | Returns `"C"`-locale numeric formatting | Positive | supported | exit | fixed "C"-locale lconv |
 | `LIBC-locale-other-01` | 7.11.1.1 | setlocale | fn | Locales other than `"C"` are implementation-defined | B-impl | by-design | none | only `"C"` |
 
 ## `<setjmp.h>` (7.13)

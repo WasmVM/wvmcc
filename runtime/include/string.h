@@ -33,4 +33,7 @@ char   *strpbrk(const char *s, const char *accept);
 char   *strtok(char *s, const char *delim);
 char   *strerror(int errnum);
 
+int     strcoll(const char *s1, const char *s2);
+size_t  strxfrm(char *dst, const char *src, size_t n);
+
 #endif // _WVMCC_STRING_H
