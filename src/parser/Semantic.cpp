@@ -2723,7 +2723,20 @@ void Semantic::onStaticAssert(const ExternalDecl::StaticAssertPtr &sa) {
     // member, or array element resolves — the standalone evaluator has no symbol
     // table, so these forms are deferred here from the parser.
     ConstExprEvaluator::ResolverScope resolver(
-        [this](const ExprPtr &e) -> TypeNodePtr { return typeOfExpr(e).type; });
+        [this](const ExprPtr &e) -> TypeNodePtr { return typeOfExpr(e).type; },
+        // #81: `_Alignof(obj)` reports the object's declared alignment, which
+        // _Alignas may raise above the type's natural alignment. File-scope
+        // objects record their computed _Alignas value in `seenAlign`; a hit
+        // with a value overrides, otherwise (nullopt) the type alignment is used.
+        [this](const ExprPtr &e) -> std::optional<long long> {
+            if (!e || e->kind != Expr::Kind::Ident) return std::nullopt;
+            auto id = std::dynamic_pointer_cast<IdentifierExpr>(e);
+            if (!id) return std::nullopt;
+            auto it = seenAlign.find(id->name);
+            if (it != seenAlign.end() && it->second.value.has_value())
+                return it->second.value;
+            return std::nullopt;
+        });
     auto val = ConstExprEvaluator::evalIntegerConstantExpr(sa->expr);
     if (!val.has_value()) {
         Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "_Static_assert requires an integer constant expression";

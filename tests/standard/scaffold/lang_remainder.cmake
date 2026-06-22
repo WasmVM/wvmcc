@@ -78,7 +78,7 @@ add_standard_compile_fail(lang-6.7.4-08 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7
 add_standard_compile_fail(lang-6.7.4-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.4_specifier_on_object.c supported)
 add_standard_compile_fail(lang-6.7.5-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.5_alignas_invalid_alignment.c supported)
 add_standard_compile_fail(lang-6.7.5-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.5_alignas_on_typedef.c supported)
-add_standard_static_assert(lang-6.7.5-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.5_alignas_strictest_wins.c partial)
+add_standard_static_assert(lang-6.7.5-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.5_alignas_strictest_wins.c supported)
 add_standard_run_test(lang-6.7.6.1-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.6.1_pointer_declarators.c supported)
 add_standard_run_test(lang-6.7.6.2-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.6.2_array_declarators.c supported)
 add_standard_compile_fail(lang-6.7.6.2-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.6.2_static_vla.c deferred)

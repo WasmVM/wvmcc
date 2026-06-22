@@ -22,6 +22,7 @@ using STS = DeclarationSpecifiers::SimpleTypeSpecifier;
 // via ResolverScope so `sizeof obj` can resolve the object's type). Single-
 // threaded compiler, so a plain file-scope pointer suffices.
 static ConstExprEvaluator::TypeResolver *g_typeResolver = nullptr;
+static ConstExprEvaluator::AlignResolver *g_alignResolver = nullptr;
 
 // Forward declarations for the mutually-recursive size/align helpers.
 static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, bool wantAlign);
@@ -144,11 +145,21 @@ static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, b
 
         if (sawBitfield) return -1;
 
+        // 6.7.5p6/p7: an _Alignas on this member raises its alignment to the
+        // strictest value specified (an explicit `_Alignas(0)` has no effect).
+        long long memberAlignas = 0;
+        for (const auto &ae : m.specifiers.alignExprs) {
+            if (!ae) continue;
+            auto av = ConstExprEvaluator::evalIntegerConstantExpr(ae);
+            if (av.has_value() && *av > memberAlignas) memberAlignas = *av;
+        }
+
         if (m.declarators.empty()) {
             // Anonymous member (e.g. anonymous struct/union): use base type.
             baseSize = typeNodeSize(baseType, false);
             baseAlign = typeNodeSize(baseType, true);
             if (baseSize < 0 || baseAlign < 0) return -1;
+            if (memberAlignas > baseAlign) baseAlign = memberAlignas;
             if (baseAlign > maxAlign) maxAlign = baseAlign;
             if (isUnion) { if (baseSize > maxSize) maxSize = baseSize; }
             else {
@@ -161,6 +172,7 @@ static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, b
         for (const auto &sd : m.declarators) {
             long long sz = -1, al = -1;
             if (!memberSizeAlign(sd, sz, al)) return -1;
+            if (memberAlignas > al) al = memberAlignas;
             if (al > maxAlign) maxAlign = al;
             if (isUnion) { if (sz > maxSize) maxSize = sz; }
             else {
@@ -637,6 +649,21 @@ static std::optional<ICEValue> evalICE(const ExprPtr &e) {
         }
         case Expr::Kind::AlignOf: {
             auto ao = std::static_pointer_cast<AlignOfExpr>(e);
+            // `_Alignof(expression)`: alignment of the operand's type. A named
+            // object may carry a stricter _Alignas, which the semantic pass
+            // reports via the align resolver; fall back to the type's natural
+            // alignment otherwise.
+            if (ao->expr) {
+                if (g_alignResolver) {
+                    auto av = (*g_alignResolver)(ao->expr);
+                    if (av.has_value()) return ICEValue{ *av, true };
+                }
+                TypeNodePtr t = inferExprType(ao->expr);
+                if (!t) return std::nullopt;
+                long long a = typeNodeSize(t, /*wantAlign=*/true);
+                if (a < 0) return std::nullopt;
+                return ICEValue{ a, true };
+            }
             TypeNodePtr opType;
             if (ao->typeSpecs.has_value()) {
                 opType = typeNodeFromSpecs(*ao->typeSpecs);
@@ -797,13 +824,21 @@ std::optional<long long> ConstExprEvaluator::evalIntegerConstantExpr(const ExprP
     return r->v;
 }
 
-ConstExprEvaluator::ResolverScope::ResolverScope(TypeResolver r) {
+ConstExprEvaluator::ResolverScope::ResolverScope(TypeResolver r, AlignResolver a) {
     static TypeResolver storage;
     storage = std::move(r);
     g_typeResolver = &storage;
+    static AlignResolver alignStorage;
+    if (a) {
+        alignStorage = std::move(a);
+        g_alignResolver = &alignStorage;
+    } else {
+        g_alignResolver = nullptr;
+    }
 }
 ConstExprEvaluator::ResolverScope::~ResolverScope() {
     g_typeResolver = nullptr;
+    g_alignResolver = nullptr;
 }
 
 std::optional<long long> ConstExprEvaluator::structMemberOffset(
@@ -907,9 +942,10 @@ bool ConstExprEvaluator::dependsOnUnresolvedSizeof(const ExprPtr &e) {
         }
         case K::AlignOf: {
             auto ao = std::static_pointer_cast<AlignOfExpr>(e);
-            // _Alignof always takes a type-name in C, so it resolves without
-            // symbols; nothing to defer.
-            (void)ao;
+            // A type-name operand (`_Alignof(int)`) resolves without symbols; an
+            // `_Alignof(expression)` operand (the GNU/clang extension) needs the
+            // symbol table, so defer it to the semantic pass.
+            if (ao->expr) return true;
             return false;
         }
         case K::Unary:
