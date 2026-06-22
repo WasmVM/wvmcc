@@ -206,7 +206,7 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.2.8-01` | 6.2.8p1 | Each complete object type has an implementation-defined alignment | B-impl | supported | static-assert | `docs/spec.md`: `char`1 `short`2 `int`/`float`4 `long`/`double`8 |
-| `LANG-6.2.8-02` | 6.2.8p2 | Fundamental alignments (≤ `_Alignof(max_align_t)`) are supported for all storage durations | Positive | partial | static-assert | `docs/spec.md`: `max_align_t` = 8, but it is **not yet in `<stddef.h>`** (see libc.md); `_Alignof` in an ICE also gated by #81 |
+| `LANG-6.2.8-02` | 6.2.8p2 | Fundamental alignments (≤ `_Alignof(max_align_t)`) are supported for all storage durations | Positive | supported | static-assert | `docs/spec.md`: `max_align_t` = 8; `_Alignof(type)` folds in an ICE |
 | `LANG-6.2.8-03` | 6.2.8p1 | `_Alignas` requests a stricter alignment | Positive | partial | static-assert | unit-xref `sema_alignas_test`; runtime over-alignment partial |
 | `LANG-6.2.8-04` | 6.2.8p3 | Extended (over-)alignment beyond `max_align_t` | B-impl | partial | static-assert | support for over-alignment partial |
 
