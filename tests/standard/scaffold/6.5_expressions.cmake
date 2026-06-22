@@ -71,7 +71,7 @@ add_standard_run_test(lang-6.5.5-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_exp
 add_standard_run_test(lang-6.5.5-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.5_remainder_identity.c supported)
 add_standard_compile_fail(lang-6.5.5-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.5_remainder_on_float.c supported)
 add_standard_compile_fail(lang-6.5.6-10 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.6_add_float_to_pointer.c supported)
-add_standard_compile_fail(lang-6.5.6-11 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.6_add_int_to_incomplete_pointer.c partial)
+add_standard_compile_fail(lang-6.5.6-11 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.6_add_int_to_incomplete_pointer.c supported)
 add_standard_compile_fail(lang-6.5.6-09 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.6_add_two_pointers.c supported)
 add_standard_run_test(lang-6.5.6-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.6_additive_int_difference.c supported)
 add_standard_run_test(lang-6.5.6-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.6_additive_int_sum.c supported)

@@ -3340,12 +3340,31 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                 break;
             }
 
+            // 6.5.6p2: a pointer operand of an additive operator shall point to a
+            // *complete* object type. Flag a pointer to a never-defined named
+            // struct/union tag (conservative: named tags only; void* arithmetic
+            // is a common extension we don't reject).
+            auto pointeeIncomplete = [this](const std::shared_ptr<TypeNode> &t) -> bool {
+                if (!t || t->kind != TypeNode::Kind::Pointer || !t->pointee) return false;
+                const auto &pe = t->pointee;
+                if ((pe->kind == TypeNode::Kind::Struct || pe->kind == TypeNode::Kind::Union)
+                    && pe->su && pe->su->name.has_value())
+                    return !(pe->su->hasBody
+                             || structUnionTagDefs.count(*pe->su->name) != 0);
+                return false;
+            };
             // Additive operators: C 6.5.6p2 — for '+', at most one operand may
             // be a pointer; adding two pointers is a constraint violation.
             if (op == "+") {
                 if (curDiagnostics && tcIsPointer(lhs.type) && tcIsPointer(rhs.type)) {
                     Diagnostic d; d.severity = Diagnostic::Severity::Error;
                     d.message = "invalid operands to binary '+' (two pointers)";
+                    d.span = e->span;
+                    curDiagnostics->push_back(std::move(d));
+                } else if (curDiagnostics
+                           && (pointeeIncomplete(lhs.type) || pointeeIncomplete(rhs.type))) {
+                    Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                    d.message = "arithmetic on a pointer to an incomplete type";
                     d.span = e->span;
                     curDiagnostics->push_back(std::move(d));
                 }
@@ -3374,6 +3393,12 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                     tn->simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Long);
                     res.type = tn;
                 } else if (tcIsPointer(lhs.type)) {
+                    if (curDiagnostics && pointeeIncomplete(lhs.type)) {
+                        Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.message = "arithmetic on a pointer to an incomplete type";
+                        d.span = e->span;
+                        curDiagnostics->push_back(std::move(d));
+                    }
                     res.type = lhs.type;
                 } else {
                     res.type = lhs.type ? lhs.type : rhs.type;

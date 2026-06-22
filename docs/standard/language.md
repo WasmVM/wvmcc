@@ -471,7 +471,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.5.6-08` | 6.5.6p9 | `ptr - ptr` (same array) yields the element-index difference | Positive | supported | exit | result has type `ptrdiff_t` |
 | `LANG-6.5.6-09` | 6.5.6p2 | Adding two pointers (`p + q`) is rejected | Negative | supported | compile-fail | constraint: not both arithmetic / ptr+int |
 | `LANG-6.5.6-10` | 6.5.6p2 | `ptr + ptr`/`ptr + float` — non-integer added to pointer is rejected | Negative | supported | compile-fail | operand must have integer type |
-| `LANG-6.5.6-11` | 6.5.6p2 | `ptr + int` where `ptr` is to an **incomplete** type (`void*`, incomplete struct) is rejected | Negative | partial | compile-fail | must point to *complete* object type |
+| `LANG-6.5.6-11` | 6.5.6p2 | `ptr + int` where `ptr` is to an **incomplete** type (`void*`, incomplete struct) is rejected | Negative | supported | compile-fail | must point to *complete* object type |
 | `LANG-6.5.6-12` | 6.5.6p3 | Subtracting pointers to **incompatible** object types is rejected | Negative | supported | compile-fail | |
 | `LANG-6.5.6-13` | 6.5.6p9 | Type of `ptr - ptr` is `ptrdiff_t` — a signed integer type | B-impl | supported | static-assert | `docs/spec.md`: `ptrdiff_t` = signed 64-bit (`i64`); assert via `_Generic`/`sizeof` |
 | `LANG-6.5.6-14` | 6.5.6p8 | Pointer arithmetic producing a result outside `[array, one-past-end]` | B-undef | supported | none | UB per p8. `docs/spec.md` UB policy: no trap; address computed in linear memory, wraps mod 2⁶⁴ |
