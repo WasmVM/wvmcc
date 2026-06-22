@@ -248,7 +248,7 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
 | `LIBC-stdio-FILE-01` | 7.21.1 | FILE / fpos_t / size_t | type | Stream/position/size types defined | Positive | supported | static-assert | |
-| `LIBC-stdio-macros-01` | 7.21.1 | EOF / NULL / BUFSIZ / FOPEN_MAX / FILENAME_MAX / _IOFBF / _IOLBF / _IONBF / SEEK_SET / SEEK_CUR / SEEK_END / TMP_MAX / L_tmpnam | obj-macro | Defined with the required forms | Positive | partial | static-assert | |
+| `LIBC-stdio-macros-01` | 7.21.1 | EOF / NULL / BUFSIZ / FOPEN_MAX / FILENAME_MAX / _IOFBF / _IOLBF / _IONBF / SEEK_SET / SEEK_CUR / SEEK_END / TMP_MAX / L_tmpnam | obj-macro | Defined with the required forms | Positive | supported | static-assert | |
 | `LIBC-stdio-streams-01` | 7.21.1p3 | stdin / stdout / stderr | obj-macro | Predefined streams (fd 0/1/2) | Positive | supported | stdout | |
 | `LIBC-stdio-printf-01` | 7.21.6.3 | printf | fn | Formatted output to stdout; returns the count written | Positive | supported | stdout | |
 | `LIBC-stdio-fprintf-01` | 7.21.6.1 | fprintf | fn | Formatted output to a stream | Positive | supported | stdout | |
@@ -259,20 +259,20 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-stdio-printf-flags-01` | 7.21.6.1 | printf (flags/width/precision/length) | fn | `-+ 0#`, width, precision, `l`/`ll`/`h`/`z` modifiers | Positive | partial | stdout | |
 | `LIBC-stdio-vprintf-01` | 7.21.6.8–7.21.6.14 | vprintf / vfprintf / vsprintf / vsnprintf | fn | `va_list` formatted-output variants | Positive | supported | stdout | |
 | `LIBC-stdio-scanf-01` | 7.21.6.2,7.21.6.4,7.21.6.7 | scanf / fscanf / sscanf | fn | Formatted input | Positive | deferred | none | scanf family not implemented |
-| `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | partial | exit | via `sys_fs.open` |
-| `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-freopen-01` | 7.21.5.4 | freopen | fn | Reassociates a stream with a new file | Positive | partial | exit | |
+| `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | supported | exit | via `sys_fs.open` |
+| `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-freopen-01` | 7.21.5.4 | freopen | fn | Reassociates a stream with a new file | Positive | supported | exit | |
 | `LIBC-stdio-fflush-01` | 7.21.5.2 | fflush | fn | Flushes buffered output | Positive | supported | stdout | |
-| `LIBC-stdio-setvbuf-01` | 7.21.5.5,7.21.5.6 | setvbuf / setbuf | fn | Sets stream buffering mode | Positive | partial | stdout | |
-| `LIBC-stdio-fread-01` | 7.21.8.1 | fread | fn | Reads up to `nmemb` elements | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-fwrite-01` | 7.21.8.2 | fwrite | fn | Writes `nmemb` elements | Positive | partial | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-fgetc-01` | 7.21.7 | fgetc / getc / getchar / ungetc | fn | Character input | Positive | partial | exit | |
+| `LIBC-stdio-setvbuf-01` | 7.21.5.5,7.21.5.6 | setvbuf / setbuf | fn | Sets stream buffering mode | Positive | supported | stdout | |
+| `LIBC-stdio-fread-01` | 7.21.8.1 | fread | fn | Reads up to `nmemb` elements | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-fwrite-01` | 7.21.8.2 | fwrite | fn | Writes `nmemb` elements | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-fgetc-01` | 7.21.7 | fgetc / getc / getchar / ungetc | fn | Character input | Positive | supported | exit | |
 | `LIBC-stdio-fputc-01` | 7.21.7 | fputc / putc / putchar | fn | Character output | Positive | supported | stdout | |
-| `LIBC-stdio-fgets-01` | 7.21.7.2 | fgets | fn | Reads a line (bounded) | Positive | partial | exit | |
+| `LIBC-stdio-fgets-01` | 7.21.7.2 | fgets | fn | Reads a line (bounded) | Positive | supported | exit | |
 | `LIBC-stdio-fputs-01` | 7.21.7.4 | fputs / puts | fn | Writes a string (`puts` appends newline) | Positive | supported | stdout | |
-| `LIBC-stdio-fseek-01` | 7.21.9 | fseek / ftell / rewind / fgetpos / fsetpos | fn | Stream positioning | Positive | partial | exit | |
-| `LIBC-stdio-remove-01` | 7.21.4 | remove / rename / tmpfile / tmpnam | fn | File-system operations | Positive | partial | exit | `tmpfile`/`tmpnam` partial |
-| `LIBC-stdio-error-01` | 7.21.10 | clearerr / feof / ferror / perror | fn | Stream error/EOF state | Positive | partial | exit | |
+| `LIBC-stdio-fseek-01` | 7.21.9 | fseek / ftell / rewind / fgetpos / fsetpos | fn | Stream positioning | Positive | supported | exit | |
+| `LIBC-stdio-remove-01` | 7.21.4 | remove / rename / tmpfile / tmpnam | fn | File-system operations | Positive | supported | exit | `tmpfile`/`tmpnam` partial |
+| `LIBC-stdio-error-01` | 7.21.10 | clearerr / feof / ferror / perror | fn | Stream error/EOF state | Positive | supported | exit | |
 | `LIBC-stdio-flush-exit-01` | 5.1.2.3p6 | (buffered streams) | fn | Line-buffered output flushes at normal termination / `exit()` | Positive | supported | stdout | atexit-routed flush |
 
 ## `<math.h>` (7.12)
