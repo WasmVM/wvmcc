@@ -926,6 +926,14 @@ bool ConstExprEvaluator::dependsOnUnresolvedSizeof(const ExprPtr &e) {
                 || dependsOnUnresolvedSizeof(te->thenExpr)
                 || dependsOnUnresolvedSizeof(te->elseExpr);
         }
+        case K::GenericSelection:
+            // A `_Generic` selection picks an association by the controlling
+            // expression's *type* (6.5.1.1), which for anything but a literal or
+            // cast needs the symbol table the parser-time evaluator lacks. Defer
+            // to the semantic pass (which installs a type resolver). Only reached
+            // when parse-time evaluation already failed, so this never hides a
+            // genuinely non-constant assertion — semantic re-checks and errors.
+            return true;
         default:
             return false;
     }

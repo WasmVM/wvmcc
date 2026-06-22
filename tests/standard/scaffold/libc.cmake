@@ -150,7 +150,7 @@ add_standard_run_test(libc-time-mktime ${CMAKE_CURRENT_SOURCE_DIR}/libc/time/mkt
 add_standard_run_test(libc-time-strftime ${CMAKE_CURRENT_SOURCE_DIR}/libc/time/strftime.c supported)
 add_standard_run_test(libc-time-time ${CMAKE_CURRENT_SOURCE_DIR}/libc/time/time.c supported)
 add_standard_run_test(libc-time-timespec_get ${CMAKE_CURRENT_SOURCE_DIR}/libc/time/timespec_get.c supported)
-add_standard_static_assert(libc-time-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/time/types.c partial)
+add_standard_static_assert(libc-time-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/time/types.c supported)
 add_standard_static_assert(libc-uchar-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/uchar/types.c partial)
 add_standard_static_assert(libc-wchar-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/wchar/types.c partial)
 add_standard_static_assert(libc-wctype-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/wctype/types.c partial)
