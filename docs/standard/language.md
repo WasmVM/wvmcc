@@ -620,9 +620,9 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.2.1-06` | 6.7.2.1p5 | A bit-field type is `_Bool`/`signed int`/`unsigned int`/an impl-defined type | Negative | supported | compile-fail | |
 | `LANG-6.7.2.1-07` | 6.7.2.1p10,p11 | Bit-field value semantics and packing into storage units | Positive | supported | exit | unit-xref `struct_union_test` |
 | `LANG-6.7.2.1-08` | 6.7.2.1p11 | Bit-field straddle/packing and allocation order are implementation-defined; unit alignment is unspecified | B-impl | supported | exit | `docs/spec.md`: LSB-first defined layout |
-| `LANG-6.7.2.1-09` | 6.7.2.1p13 | Anonymous struct/union members are members of the containing type | Positive | partial | exit | |
+| `LANG-6.7.2.1-09` | 6.7.2.1p13 | Anonymous struct/union members are members of the containing type | Positive | supported | exit | |
 | `LANG-6.7.2.1-10` | 6.7.2.1p14 | Each non-bit-field member is aligned in an implementation-defined manner | B-impl | supported | static-assert | `docs/spec.md`: natural alignment |
-| `LANG-6.7.2.1-11` | 6.7.2.1p18 | A flexible array member (last member of a multi-member struct, incomplete array) | Positive | partial | exit | |
+| `LANG-6.7.2.1-11` | 6.7.2.1p18 | A flexible array member (last member of a multi-member struct, incomplete array) | Positive | supported | exit | |
 | `LANG-6.7.2.1-12` | 6.7.2.1p18 | Accessing FAM elements beyond the allocation is undefined | B-undef | partial | none | documentation |
 | `LANG-6.7.2.1-13` | 6.7.2.1p8 | A struct/union with no named members is undefined | B-undef | supported | none | documentation |
 

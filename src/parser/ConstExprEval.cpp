@@ -110,7 +110,8 @@ static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, b
 
         // For each declarator, account for pointer/array adornments by walking
         // the declarator chain and wrapping the base TypeNode accordingly.
-        auto memberSizeAlign = [&](const StructDeclarator &sd, long long &sz, long long &al) -> bool {
+        auto memberSizeAlign = [&](const StructDeclarator &sd, long long &sz, long long &al,
+                                   bool isLastStructMember) -> bool {
             TypeNodePtr ty = baseType;
             DeclaratorPtr d = sd.declarator;
             bool sawArray = false, sawArrayUnsized = false;
@@ -137,7 +138,16 @@ static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, b
                 if (d->inner.has_value()) d = *d->inner; else break;
             }
             (void)sawArray;
-            if (sawArrayUnsized) return false; // flexible array member: not sizeable
+            if (sawArrayUnsized) {
+                // C 6.7.2.1p18: a flexible array member (last member of a struct)
+                // is ignored for sizeof, but its element alignment still applies.
+                if (isLastStructMember && !isUnion) {
+                    sz = 0;
+                    al = ty && ty->element ? typeNodeSize(ty->element, true) : 1;
+                    return al >= 0;
+                }
+                return false; // an unsized array elsewhere is not sizeable
+            }
             sz = typeNodeSize(ty, false);
             al = typeNodeSize(ty, true);
             return sz >= 0 && al >= 0;
@@ -169,9 +179,10 @@ static long long suByteSize(const std::shared_ptr<StructOrUnionSpecifier> &su, b
             continue;
         }
 
+        const bool isLastMember = (&m == &su->members.back());
         for (const auto &sd : m.declarators) {
             long long sz = -1, al = -1;
-            if (!memberSizeAlign(sd, sz, al)) return -1;
+            if (!memberSizeAlign(sd, sz, al, isLastMember)) return -1;
             if (memberAlignas > al) al = memberAlignas;
             if (al > maxAlign) maxAlign = al;
             if (isUnion) { if (sz > maxSize) maxSize = sz; }

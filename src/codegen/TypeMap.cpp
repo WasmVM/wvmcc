@@ -409,6 +409,22 @@ wvmcc::parser::TypeNodePtr TypeMap::getFieldType(const wvmcc::parser::TypeNodePt
             if (!baseType) return nullptr;
             return applyDeclaratorLayers(baseType, sd.declarator);
         }
+        // Anonymous struct/union member (no declarator): its members are members
+        // of the containing struct/union (C 6.7.2.1p13), so recurse to find the
+        // field. (LayoutEngine already flattens these for getFieldOffset.)
+        if (member.declarators.empty()) {
+            for (const auto& ts : member.specifiers.typeSpecifiers) {
+                if (ts.kind == wvmcc::parser::DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion
+                    && ts.su && !ts.su->name.has_value()) {
+                    auto anonType = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
+                    anonType->kind = (ts.su->kind == wvmcc::parser::StructOrUnionSpecifier::Kind::Struct)
+                                     ? wvmcc::parser::TypeNode::Kind::Struct
+                                     : wvmcc::parser::TypeNode::Kind::Union;
+                    anonType->su = ts.su;
+                    if (auto r = getFieldType(anonType, fieldName)) return r;
+                }
+            }
+        }
     }
     return nullptr;
 }
