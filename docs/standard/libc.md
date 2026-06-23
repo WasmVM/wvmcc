@@ -366,7 +366,7 @@ Only the `"C"` locale is supported (`docs/spec.md`).
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-locale-lconv-01` | 7.11 | struct lconv / LC_ALL / LC_COLLATE / LC_CTYPE / LC_MONETARY / LC_NUMERIC / LC_TIME / NULL | type/obj-macro | Defined | Positive | partial | static-assert | struct lconv / LC_* assertions pass; `_Static_assert(NULL == 0)` is by-design not an ICE — wvmcc keeps `NULL` type-safe as `((void*)0)`, and a pointer cast is not an ICE operand (6.6p6) |
+| `LIBC-locale-lconv-01` | 7.11 | struct lconv / LC_ALL / LC_COLLATE / LC_CTYPE / LC_MONETARY / LC_NUMERIC / LC_TIME / NULL | type/obj-macro | Defined | Positive | supported | static-assert | the `_Static_assert(NULL == 0)` ICE check is omitted by design (NULL is `((void*)0)`; a pointer cast is not an ICE operand, 6.6p6) — NULL is checked via a static initializer instead |
 | `LIBC-locale-setlocale-01` | 7.11.1.1 | setlocale | fn | Selects a locale; only `"C"`/`""` succeed | Positive | supported | exit | "C"-only; "" honored as "C" |
 | `LIBC-locale-localeconv-01` | 7.11.2.1 | localeconv | fn | Returns `"C"`-locale numeric formatting | Positive | supported | exit | fixed "C"-locale lconv |
 | `LIBC-locale-other-01` | 7.11.1.1 | setlocale | fn | Locales other than `"C"` are implementation-defined | B-impl | by-design | none | only `"C"` |

@@ -3,7 +3,7 @@
 
 add_standard_compile_fail(lang-4-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/4_conformance/4_error_directive_fails.c partial)
 add_standard_run_test(lang-4-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/4_conformance/4_error_in_skipped_group.c supported)
-add_standard_static_assert(lang-4-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/4_conformance/4_freestanding_headers.c partial)
+add_standard_static_assert(lang-4-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/4_conformance/4_freestanding_headers.c supported)
 add_standard_run_test(lang-5.1.1.2-08 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.1.1.2_phase8_external_reference_link.c supported)
 add_standard_run_test(lang-5.1.2.1-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.1.2.1_freestanding_startup_calls_main.c supported)
 add_standard_run_test(lang-5.1.2.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.1.2.1_termination_exit_code.c supported)
