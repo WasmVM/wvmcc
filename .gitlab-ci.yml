@@ -23,10 +23,15 @@ variables:
   WASMVM_PREFIX: "$CI_PROJECT_DIR/.wasmvm"
   DEBIAN_FRONTEND: "noninteractive"
   GIT_DEPTH: "0"
-  # Cache namespace — bump to discard caches built with an older toolchain/image.
-  # u2404 = ubuntu 24.04 / GCC 13. (GCC 11 on 22.04 miscompiled WasmVM's value-
-  # type serialization, so wvmcc emitted modules its own readwasm rejected.)
-  CACHE_NS: "u2404"
+  # Cache namespace — bump to discard caches built with an older WasmVM/toolchain.
+  # u2404 = ubuntu 24.04 / GCC 13. The "vm66f1db4" suffix forces a rebuild to pick
+  # up WasmVM master >= 66f1db4, which fixes an unspecified-argument-evaluation-
+  # order bug in its decoder: on x86-64 the locals run-length and ValueType reads
+  # were swapped, so every wvmcc module with a function-local failed validation
+  # with "invalid value type" (arm64 evaluated left-to-right and worked). This was
+  # NOT a GCC miscompile — GCC 13 also evaluates right-to-left; the cache simply
+  # held a WasmVM built before the source fix landed. Bump again to re-invalidate.
+  CACHE_NS: "u2404-vm66f1db4"
 
 # Run on: MRs targeting master, and pushes to parser / master. The middle rule
 # suppresses the redundant branch pipeline while an MR for that branch is open,
@@ -40,8 +45,10 @@ workflow:
     - if: '$CI_COMMIT_BRANCH == "master" && $CI_PIPELINE_SOURCE == "push"'
 
 default:
-  # GCC 13. Do NOT downgrade to ubuntu:22.04 — its GCC 11 miscompiles WasmVM's
-  # value-type encode/decode, so every wvmcc-emitted module fails validation.
+  # GCC 13 on ubuntu 24.04. The "invalid value type" failures once blamed on a
+  # GCC 11 miscompile were actually unspecified-eval-order UB in WasmVM's decoder
+  # (fixed upstream >= 66f1db4; see CACHE_NS above) — they reproduce on any
+  # right-to-left ABI, GCC 11 and 13 alike. Keep 24.04 as the supported baseline.
   image: ubuntu:24.04
   # The WasmVM install prefix is cached across pipelines, keyed on WASMVM_REF.
   # before_script rebuilds it on a cache miss, so the cache is purely a speedup
