@@ -2586,6 +2586,36 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 }
             }
 
+            // Infer an omitted array bound from its initializer (6.7.9p22):
+            // `int a[] = {1,2,3}` or `char s[] = "ab"`. Without this the slot is
+            // sized to a single element and the initializer stores out of bounds
+            // (LANG-6.3.2.1-03). The synthesized bound also feeds sizeof. Done
+            // before the static-local branch so block-scope statics are sized too.
+            if (typeNode && typeNode->kind == wvmcc::parser::TypeNode::Kind::Array
+                && !typeNode->sizeExpr && v->initializer && *v->initializer) {
+                using namespace wvmcc::parser;
+                const auto& ini = **v->initializer;
+                size_t count = 0;
+                if (ini.kind == Initializer::Kind::List) {
+                    size_t cur = 0;
+                    for (const auto& cl : ini.clauses) {
+                        if (!cl.designators.empty()
+                            && cl.designators[0].kind == Designator::Kind::Index
+                            && cl.designators[0].index.has_value()) {
+                            auto iv = ConstExprEvaluator::evalIntegerConstantExpr(
+                                *cl.designators[0].index);
+                            if (iv.has_value() && *iv >= 0) cur = (size_t)*iv;
+                        }
+                        ++cur;
+                        if (cur > count) count = cur;
+                    }
+                } else if (ini.kind == Initializer::Kind::Expr && ini.expr
+                           && ini.expr->kind == Expr::Kind::String) {
+                    count = static_cast<const StringLiteral&>(*ini.expr).value.size() + 1;
+                }
+                if (count > 0) typeNode->sizeExpr = makeIntLiteralExpr((std::int64_t)count);
+            }
+
             // Static local: allocate in mem[0] and emit a one-time init guard.
             bool isStatic = v->specifiers.hasStorage(wvmcc::parser::StorageClass::Static);
             if (isStatic && moduleCg_) {
@@ -2607,7 +2637,28 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                     emit(WasmVM::Instr::Global_get{guard});
                     emit(WasmVM::Instr::I32_eqz{});
                     emit(WasmVM::Instr::If{std::nullopt});
+                    bool isArrayInit = typeNode
+                        && typeNode->kind == wvmcc::parser::TypeNode::Kind::Array;
                     if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
+                        && (*v->initializer)->expr
+                        && isArrayInit
+                        && typeNode->element
+                        && typeMap_.byteSize(typeNode->element) == 1
+                        && (*v->initializer)->expr->kind == wvmcc::parser::Expr::Kind::String) {
+                        // `static char s[] = "abc"` (6.7.9p14): copy the literal's
+                        // bytes (incl. the terminating NUL) into the static storage,
+                        // zero-filling any trailing elements — a scalar makeStore
+                        // would otherwise store the decayed pointer, not the chars.
+                        const auto& sv = static_cast<const wvmcc::parser::StringLiteral&>(
+                            *(*v->initializer)->expr).value;
+                        size_t arrLen = typeMap_.byteSize(typeNode);
+                        for (size_t i = 0; i < arrLen; ++i) {
+                            std::uint8_t byte = i < sv.size() ? (std::uint8_t)sv[i] : 0;
+                            emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)(addr + i)});
+                            emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)byte});
+                            emit(typeMap_.makeStore(typeNode->element, 0));
+                        }
+                    } else if ((*v->initializer)->kind == wvmcc::parser::Initializer::Kind::Expr
                         && (*v->initializer)->expr) {
                         emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)addr});
                         emitExpr((*v->initializer)->expr);
@@ -2634,36 +2685,6 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
             if (isExtern && !(v->initializer && *v->initializer)
                 && symbolTable_.lookup(name).has_value()) {
                 return;
-            }
-
-            // Infer an omitted array bound from its initializer (6.7.9p22):
-            // `int a[] = {1,2,3}` or `char s[] = "ab"`. Without this the frame
-            // slot is sized to a single element and the initializer stores out
-            // of bounds (LANG-6.3.2.1-03). The synthesized bound also feeds
-            // sizeof.
-            if (typeNode && typeNode->kind == wvmcc::parser::TypeNode::Kind::Array
-                && !typeNode->sizeExpr && v->initializer && *v->initializer) {
-                using namespace wvmcc::parser;
-                const auto& ini = **v->initializer;
-                size_t count = 0;
-                if (ini.kind == Initializer::Kind::List) {
-                    size_t cur = 0;
-                    for (const auto& cl : ini.clauses) {
-                        if (!cl.designators.empty()
-                            && cl.designators[0].kind == Designator::Kind::Index
-                            && cl.designators[0].index.has_value()) {
-                            auto iv = ConstExprEvaluator::evalIntegerConstantExpr(
-                                *cl.designators[0].index);
-                            if (iv.has_value() && *iv >= 0) cur = (size_t)*iv;
-                        }
-                        ++cur;
-                        if (cur > count) count = cur;
-                    }
-                } else if (ini.kind == Initializer::Kind::Expr && ini.expr
-                           && ini.expr->kind == Expr::Kind::String) {
-                    count = static_cast<const StringLiteral&>(*ini.expr).value.size() + 1;
-                }
-                if (count > 0) typeNode->sizeExpr = makeIntLiteralExpr((std::int64_t)count);
             }
 
             bool isAddrTaken = addressTakenNames_.count(name) > 0;
