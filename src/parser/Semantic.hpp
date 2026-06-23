@@ -86,6 +86,20 @@ private:
     std::unordered_set<const void*> seenSuDefs_{};
     // recorded tag definitions: tag name -> span (for struct/union and enum definitions)
     std::unordered_map<std::string, wvmcc::SourceSpan> structUnionTagDefs{};
+    // File-scope internal-linkage (static) tentative definitions naming a
+    // struct/union tag (C 6.9.2p3). The tag may be completed later in the TU, so
+    // completeness is checked at end of translation unit (Semantic::run).
+    struct PendingTentativeType {
+        std::string tag;            // struct/union tag name
+        bool isUnion{false};
+        wvmcc::SourceSpan span{};
+    };
+    std::vector<PendingTentativeType> pendingStaticTentativeTypes_{};
+    // True while traversing the body of an inline definition with external
+    // linkage (declared `inline`, neither `static` nor `extern`). Such a
+    // definition shall not define a modifiable static-duration object
+    // (C 6.7.4p3).
+    bool inInlineExternalDef_{false};
     std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};
     // recorded tag *kind* per tag name for tag-kind-mismatch detection
     // (C 6.7.2.3p2): a tag may only be re-used with the same kind. Value is one

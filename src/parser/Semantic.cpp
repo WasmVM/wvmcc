@@ -325,6 +325,24 @@ bool Semantic::typeNodesEqual(const std::shared_ptr<TypeNode> &a, const std::sha
     }
     return false;
 }
+
+// Redeclaration compatibility (C 6.2.7, 6.7.6.3p14): like typeNodesEqual, but a
+// function type with no prototype (empty parameter list, `hasParamTypeList ==
+// false`) is compatible with a prototyped function type that has the same return
+// type — the composite type takes the prototype. Used only for redeclaration
+// checks, not the stricter type-identity used by `_Generic`.
+static bool redeclTypesCompatible(const std::shared_ptr<TypeNode> &a,
+                                  const std::shared_ptr<TypeNode> &b) {
+    if (a && b && a->kind == TypeNode::Kind::Function
+        && b->kind == TypeNode::Kind::Function
+        && (a->hasParamTypeList == false || b->hasParamTypeList == false)) {
+        // Compatible iff the return types are compatible; the unprototyped side
+        // imposes no parameter constraints.
+        return Semantic::typeNodesEqual(a->element, b->element);
+    }
+    return Semantic::typeNodesEqual(a, b);
+}
+
 // Helper: determine whether an initializer is a constant (or composed of constants).
 // Whether an expression is a valid constant for an object with static storage
 // duration (6.6p7-9): an arithmetic constant expression, a null pointer
@@ -1326,7 +1344,7 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
             } else {
                         // fallback: if structural type representations differ, report incompatible declaration
                         auto itype = declaredTypeRepr.find(name);
-                        if (itype != declaredTypeRepr.end() && !Semantic::typeNodesEqual(itype->second, canonRepr)) {
+                        if (itype != declaredTypeRepr.end() && !redeclTypesCompatible(itype->second, canonRepr)) {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
                     diag.message = "incompatible declaration for '" + name + "': type mismatch" + (prevLine > 0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
@@ -1394,6 +1412,21 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
                 diag.message = "declaration at block scope with external linkage shall not have an initializer";
+                diag.span = d->span;
+                curDiagnostics->push_back(std::move(diag));
+            }
+            // C 6.7.4p3: an inline definition with external linkage shall not
+            // contain a definition of a modifiable object with static storage
+            // duration. (A `const` static object is not modifiable → allowed.)
+            if (inInlineExternalDef_
+                && d->declarator
+                && !isFunctionDeclarator(d->declarator)
+                && d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+                && !specsDeclObjectIsConst(d->specifiers, d->declarator)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "inline definition with external linkage shall not "
+                               "define a modifiable static-duration object";
                 diag.span = d->span;
                 curDiagnostics->push_back(std::move(diag));
             }
@@ -1502,27 +1535,38 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             int prevLine = -1;
             auto itspan = declaredSignatureSpan.find(name);
             if (itspan != declaredSignatureSpan.end()) prevLine = itspan->second.begin.line;
-            if (stripQualParts(prev) == stripQualParts(sig)) {
+            auto itype = declaredTypeRepr.find(name);
+            bool typesCompatible = itype != declaredTypeRepr.end()
+                && redeclTypesCompatible(itype->second, canonRepr);
+            if (typesCompatible) {
+                // Signature strings differ but the types are compatible — e.g. an
+                // unprototyped `int f()` beside a prototype `int f(int,int)`
+                // (C 6.2.7, 6.7.6.3p14). No diagnostic; adopt the prototyped form
+                // as the composite type so a later definition matches it.
+                if (canonRepr && canonRepr->kind == TypeNode::Kind::Function
+                    && canonRepr->hasParamTypeList) {
+                    declaredSignatures[name] = sig;
+                    if (d->declarator) declaredSignatureSpan[name] = d->declarator->span;
+                    declaredTypeRepr[name] = canonRepr;
+                }
+            } else if (stripQualParts(prev) == stripQualParts(sig)) {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
                 diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = d->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
-                } else {
-                    auto itype = declaredTypeRepr.find(name);
-                    if (itype != declaredTypeRepr.end() && !Semantic::typeNodesEqual(itype->second, canonRepr)) {
+            } else if (itype != declaredTypeRepr.end()) {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
                     diag.message = "incompatible declaration for '" + name + "': type mismatch" + (prevLine > 0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                     diag.span = d->declarator->span;
                     curDiagnostics->push_back(std::move(diag));
-                } else {
+            } else {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
                     diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                     diag.span = d->declarator->span;
                     curDiagnostics->push_back(std::move(diag));
-                }
             }
         } else {
             declaredSignatures[name] = sig;
@@ -1562,6 +1606,23 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             if (isDef && !d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
                 if (isTentative) tentativeDefs.insert(rname);
                 else recordDef(rname, d->declarator->span);
+            }
+
+            // C 6.9.2p3: a tentative definition with internal linkage (a
+            // file-scope `static` object with no initializer) shall not have an
+            // incomplete type. The named tag may be completed later in this TU,
+            // so defer the completeness check to end of translation unit.
+            if (d->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+                && !d->initializer.has_value()
+                && d->declarator->kind != Declarator::Kind::Function) {
+                auto objTy = canonicalTypeRepr(d->specifiers, d->declarator);
+                if (!objTy) objTy = buildTypeFromDeclaration(d->specifiers, d->declarator, false, nullptr);
+                if (objTy && (objTy->kind == TypeNode::Kind::Struct
+                              || objTy->kind == TypeNode::Kind::Union)
+                    && objTy->su && objTy->su->name.has_value() && !objTy->su->hasBody) {
+                    pendingStaticTentativeTypes_.push_back(
+                        {*objTy->su->name, objTy->kind == TypeNode::Kind::Union, d->span});
+                }
             }
 
             if (!rname.empty()) {
@@ -1789,6 +1850,14 @@ static bool declarationObjectIsConst(const DeclarationPtr &d) {
 
 void Semantic::onEnterFunction(const FunctionDefPtr &f) {
     functionDepth++;
+    // C 6.7.4p7: a definition is an *inline definition* when every file-scope
+    // declaration is `inline` without `extern`; such a definition has external
+    // linkage unless `static`. We approximate from this definition's own
+    // specifiers: inline, and neither static nor extern.
+    inInlineExternalDef_ = f
+        && f->specifiers.hasFuncSpec(wvmcc::parser::FunctionSpecifier::Inline)
+        && !f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)
+        && !f->specifiers.hasStorage(wvmcc::parser::StorageClass::Extern);
     // Open a scope for the function's parameters and record their types so
     // typeOfExpr can resolve parameter identifiers used in the body.
     localScopes.emplace_back();
@@ -1810,6 +1879,7 @@ void Semantic::onEnterFunction(const FunctionDefPtr &f) {
 
 void Semantic::onExitFunction(const FunctionDefPtr &f) {
     (void)f;
+    inInlineExternalDef_ = false;
     if (functionDepth > 0) --functionDepth;
     if (!localScopes.empty()) localScopes.pop_back();
 }
@@ -1938,6 +2008,20 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
             diag.severity = Diagnostic::Severity::Error;
             diag.message = "multiple external definitions for '" + name + "'";
             diag.span = firstDefSpan[name];
+            diagnostics.push_back(std::move(diag));
+        }
+    }
+
+    // C 6.9.2p3: a file-scope `static` tentative definition must not name an
+    // incomplete type. Now that the whole TU has been traversed, a tag still
+    // absent from structUnionTagDefs is never completed → diagnose.
+    for (const auto &p : pendingStaticTentativeTypes_) {
+        if (structUnionTagDefs.count(p.tag) == 0) {
+            Diagnostic diag;
+            diag.severity = Diagnostic::Severity::Error;
+            diag.message = "tentative definition has incomplete type '"
+                + std::string(p.isUnion ? "union " : "struct ") + p.tag + "'";
+            diag.span = p.span;
             diagnostics.push_back(std::move(diag));
         }
     }
