@@ -295,16 +295,16 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 | `LIBC-math-isfinite-01` | 7.12.3.2 | isfinite | fn-macro | True for finite values | Positive | supported | exit | |
 | `LIBC-math-isnormal-01` | 7.12.3.5 | isnormal | fn-macro | True for normal values | Positive | supported | exit | |
 | `LIBC-math-signbit-01` | 7.12.3.6 | signbit | fn-macro | Sign bit (incl. signed zero) | Positive | supported | exit | |
-| `LIBC-math-trig-01` | 7.12.4 | sin / cos / tan / asin / acos / atan / atan2 (+ f/l) | fn | Trigonometric functions | Positive | partial | exit | accuracy impl-defined |
-| `LIBC-math-hyper-01` | 7.12.5 | sinh / cosh / tanh / asinh / acosh / atanh (+ f/l) | fn | Hyperbolic functions | Positive | partial | exit | |
-| `LIBC-math-exp-01` | 7.12.6 | exp / exp2 / expm1 / log / log2 / log10 / log1p / frexp / ldexp / ilogb / logb / modf / scalbn / scalbln (+ f/l) | fn | Exponential/logarithmic functions | Positive | partial | exit | |
-| `LIBC-math-pow-01` | 7.12.7 | pow / sqrt / cbrt / hypot / fabs (+ f/l) | fn | Power and absolute-value functions | Positive | partial | exit | `sqrt`/`fabs` map to wasm ops; entity undeclared — not yet implemented |
+| `LIBC-math-trig-01` | 7.12.4 | sin / cos / tan / asin / acos / atan / atan2 (+ f/l) | fn | Trigonometric functions | Positive | supported | exit | software impl; accuracy impl-defined (7.12p1/F.10) |
+| `LIBC-math-hyper-01` | 7.12.5 | sinh / cosh / tanh / asinh / acosh / atanh (+ f/l) | fn | Hyperbolic functions | Positive | supported | exit | software impl atop exp/log |
+| `LIBC-math-exp-01` | 7.12.6 | exp / exp2 / expm1 / log / log2 / log10 / log1p / frexp / ldexp / ilogb / logb / modf / scalbn / scalbln (+ f/l) | fn | Exponential/logarithmic functions | Positive | supported | exit | software impl; exact cases (frexp/ldexp/scalbn/modf/exp2-of-int) exact |
+| `LIBC-math-pow-01` | 7.12.7 | pow / sqrt / cbrt / hypot / fabs (+ f/l) | fn | Power and absolute-value functions | Positive | supported | exit | software `sqrt`/`cbrt` (no f64.sqrt intrinsic); integer-exponent `pow` is exact |
 | `LIBC-math-erf-01` | 7.12.8 | erf / erfc / lgamma / tgamma (+ f/l) | fn | Error and gamma functions | Positive | deferred | none | not implemented |
 | `LIBC-math-round-01` | 7.12.9 | ceil / floor / trunc / round / lround / llround / nearbyint / rint / lrint / llrint (+ f/l) | fn | Nearest-integer functions | Positive | supported | exit | pure-C bit-twiddling (no wasm rounding intrinsics); `round` halves away from zero, `rint`/`nearbyint` to-nearest-even |
 | `LIBC-math-fmod-01` | 7.12.10 | fmod / remainder / remquo (+ f/l) | fn | Remainder functions | Positive | supported | exit | exact shift-and-subtract; `remainder` ties to even |
 | `LIBC-math-manip-01` | 7.12.11 | copysign / nan / nextafter / nexttoward (+ f/l) | fn | Manipulation functions | Positive | supported | exit | bit-pattern stepping; `nexttoward` == `nextafter` (long double == double) |
 | `LIBC-math-fmax-01` | 7.12.12 | fdim / fmax / fmin (+ f/l) | fn | Max/min/positive-difference | Positive | supported | exit | NaN treated as missing data (F.10.9) |
-| `LIBC-math-fma-01` | 7.12.13 | fma (+ f/l) | fn | Fused multiply-add | Positive | partial | exit | |
+| `LIBC-math-fma-01` | 7.12.13 | fma (+ f/l) | fn | Fused multiply-add | Positive | supported | exit | scaled double-double; single-rounding holds incl. the subnormal tie case |
 | `LIBC-math-compare-01` | 7.12.14 | isgreater / isgreaterequal / isless / islessequal / islessgreater / isunordered | fn-macro | Quiet comparison macros | Positive | supported | exit | |
 | `LIBC-math-errno-01` | 7.12.1 | (all) | fn | Domain/range errors set `errno`/raise FE exceptions per `math_errhandling` | B-impl | partial | none | `docs/spec.md`: errno-based; **accuracy gap** |
 | `LIBC-math-FP_CONTRACT-01` | 7.12.2 | FP_CONTRACT | pragma | Controls expression contraction | B-impl | deferred | none | `docs/spec.md`: no contraction |

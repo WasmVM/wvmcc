@@ -94,4 +94,47 @@ double fmod(double x, double y);
 double remainder(double x, double y);
 double remquo(double x, double y, int *quo);
 
+/* 7.12.7 — power & roots. */
+double sqrt(double x);
+double cbrt(double x);
+double pow(double x, double y);
+double hypot(double x, double y);
+
+/* 7.12.6 — exponential & logarithmic. */
+double exp(double x);
+double exp2(double x);
+double expm1(double x);
+double log(double x);
+double log2(double x);
+double log10(double x);
+double log1p(double x);
+double frexp(double x, int *exp);
+double ldexp(double x, int n);
+double modf(double x, double *iptr);
+double scalbn(double x, int n);
+double scalbln(double x, long n);
+int    ilogb(double x);
+double logb(double x);
+
+/* 7.12.4 — trigonometric. */
+double sin(double x);
+double cos(double x);
+double tan(double x);
+double asin(double x);
+double acos(double x);
+double atan(double x);
+double atan2(double y, double x);
+
+/* 7.12.5 — hyperbolic. */
+double sinh(double x);
+double cosh(double x);
+double tanh(double x);
+double asinh(double x);
+double acosh(double x);
+double atanh(double x);
+
+/* 7.12.13 — fused multiply-add. */
+double fma(double x, double y, double z);
+float  fmaf(float x, float y, float z);
+
 #endif // _WVMCC_MATH_H
