@@ -3193,15 +3193,34 @@ void FunctionCodegen::emitCompoundStmt(const wvmcc::parser::CompoundStmt& stmt) 
     symbolTable_.popScope();
 }
 
-void FunctionCodegen::emitIfStmt(const wvmcc::parser::IfStmt& stmt) {
-    emitExpr(stmt.cond);
-    // Wasm's `if` consumes an i32 condition. If the C condition is an i64
-    // (pointer, long), collapse it to a 0/1 i32 via two `eqz`s — simpler
-    // than emitting an explicit compare-with-zero and reads the same way.
-    if (getExprType(stmt.cond) == WasmVM::ValueType::i64) {
-        emit(WasmVM::Instr::I64_eqz{});
-        emit(WasmVM::Instr::I32_eqz{});
+// Emit a controlling expression (6.8.4.1/6.8.5: compared unequal to 0) and
+// leave an i32 on the stack that is nonzero iff the condition holds. Wasm's
+// `if`/`br_if` consume an i32, so a wide (i64/pointer) or floating condition
+// must be reduced here — emitting the raw value would leave the wrong type on
+// the operand stack and fail module validation. Used by `if` and every loop.
+void FunctionCodegen::emitConditionI32(const wvmcc::parser::ExprPtr& cond) {
+    emitExpr(cond);
+    switch (getExprType(cond)) {
+        case WasmVM::ValueType::i64:
+            // (m != 0) as a 0/1 i32, via two eqz's.
+            emit(WasmVM::Instr::I64_eqz{});
+            emit(WasmVM::Instr::I32_eqz{});
+            break;
+        case WasmVM::ValueType::f32:
+            emit(WasmVM::Instr::F32_const{0.0f});
+            emit(WasmVM::Instr::F32_ne{});
+            break;
+        case WasmVM::ValueType::f64:
+            emit(WasmVM::Instr::F64_const{0.0});
+            emit(WasmVM::Instr::F64_ne{});
+            break;
+        default:
+            break; // i32 is already a valid condition operand
     }
+}
+
+void FunctionCodegen::emitIfStmt(const wvmcc::parser::IfStmt& stmt) {
+    emitConditionI32(stmt.cond);
     emit(WasmVM::Instr::If{std::nullopt});
     emitStmt(stmt.thenStmt);
     if (stmt.elseStmt) {
@@ -3224,7 +3243,7 @@ void FunctionCodegen::emitWhileStmt(const wvmcc::parser::WhileStmt& stmt) {
     emit(WasmVM::Instr::Loop{std::nullopt});
     int contD = currentBlockDepth_;
     pushLoop(breakD, contD);
-    emitExpr(stmt.cond);
+    emitConditionI32(stmt.cond);
     emit(WasmVM::Instr::I32_eqz{});
     emit(WasmVM::Instr::Br_if{breakDepth()});
     emitStmt(stmt.body);
@@ -3258,7 +3277,7 @@ void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
     emit(WasmVM::Instr::Loop{std::nullopt});
     int loopD = currentBlockDepth_;
     if (stmt.cond) {
-        emitExpr(*stmt.cond);
+        emitConditionI32(*stmt.cond);
         emit(WasmVM::Instr::I32_eqz{});
         emit(WasmVM::Instr::Br_if{(WasmVM::index_t)(currentBlockDepth_ - breakD)});
     }
@@ -3293,7 +3312,7 @@ void FunctionCodegen::emitDoWhileStmt(const wvmcc::parser::DoWhileStmt& stmt) {
     int contD = currentBlockDepth_;
     pushLoop(breakD, contD);
     emitStmt(stmt.body);
-    emitExpr(stmt.cond);
+    emitConditionI32(stmt.cond);
     emit(WasmVM::Instr::Br_if{continueDepth()});
     popControlFlow();
     emit(WasmVM::Instr::End{});
@@ -3697,9 +3716,22 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         auto lvt = lt ? typeMap_.toWasmType(lt) : WasmVM::ValueType::i32;
         auto rvt = rt ? typeMap_.toWasmType(rt) : WasmVM::ValueType::i32;
         auto common = arithCommonType(lvt, rvt);
+        // Preserve unsignedness (6.3.1.8): for integer commons, the result is
+        // unsigned when an operand *at the common width* is unsigned. (When only
+        // the narrower operand is unsigned, the wider signed type represents all
+        // its values and the result stays signed.) Dropping this made e.g.
+        // `unsigned long + unsigned long` report signed `long`, so a following
+        // `>>` wrongly chose an arithmetic (shr_s) shift.
+        bool resultUnsigned = false;
+        if (common == WasmVM::ValueType::i32 || common == WasmVM::ValueType::i64) {
+            bool lUns = lt && typeMap_.isUnsignedScalarInteger(lt);
+            bool rUns = rt && typeMap_.isUnsignedScalarInteger(rt);
+            resultUnsigned = (lvt == common && lUns) || (rvt == common && rUns);
+        }
         auto tn = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
         tn->kind = wvmcc::parser::TypeNode::Kind::Builtin;
         using STS = wvmcc::parser::DeclarationSpecifiers::SimpleTypeSpecifier;
+        if (resultUnsigned) tn->simple.push_back(STS::Unsigned);
         switch (common) {
             case WasmVM::ValueType::f64: tn->simple.push_back(STS::Double); break;
             case WasmVM::ValueType::f32: tn->simple.push_back(STS::Float);  break;
