@@ -52,7 +52,7 @@ ones are `#if`-usable. Values follow IEEE-754 binary32/binary64 with `long doubl
 | `LIBC-float-FLT_MAX-01` | 5.2.4.2.2p12 | FLT_MAX / DBL_MAX / LDBL_MAX | obj-macro | Max finite value (≥ 1E37) | B-impl | supported | static-assert | |
 | `LIBC-float-FLT_MIN-01` | 5.2.4.2.2p13 | FLT_MIN / DBL_MIN / LDBL_MIN | obj-macro | Min normalized value (≤ 1E-37) | B-impl | supported | static-assert | |
 | `LIBC-float-FLT_EPSILON-01` | 5.2.4.2.2p13 | FLT_EPSILON / DBL_EPSILON / LDBL_EPSILON | obj-macro | Difference 1 → next representable | B-impl | supported | static-assert | |
-| `LIBC-float-FLT_TRUE_MIN-01` | 5.2.4.2.2p13 | FLT_TRUE_MIN / *_TRUE_MIN | obj-macro | Min positive (subnormal) value | B-impl | partial | static-assert | |
+| `LIBC-float-FLT_TRUE_MIN-01` | 5.2.4.2.2p13 | FLT_TRUE_MIN / *_TRUE_MIN | obj-macro | Min positive (subnormal) value | B-impl | supported | static-assert | subnormal literals now lex via strtod (no underflow-to-0) |
 | `LIBC-float-FLT_HAS_SUBNORM-01` | 5.2.4.2.2p10 | FLT_HAS_SUBNORM / *_HAS_SUBNORM | obj-macro | Subnormal support flag | B-impl | partial | static-assert | IEEE-754 → 1 |
 
 ## `<iso646.h>` (7.9)

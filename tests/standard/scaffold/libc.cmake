@@ -24,7 +24,7 @@ add_standard_static_assert(libc-float-flt_min_10_exp ${CMAKE_CURRENT_SOURCE_DIR}
 add_standard_static_assert(libc-float-flt_min_exp ${CMAKE_CURRENT_SOURCE_DIR}/libc/float/flt_min_exp.c supported)
 add_standard_static_assert(libc-float-flt_radix ${CMAKE_CURRENT_SOURCE_DIR}/libc/float/flt_radix.c supported)
 add_standard_static_assert(libc-float-flt_rounds ${CMAKE_CURRENT_SOURCE_DIR}/libc/float/flt_rounds.c partial)
-add_standard_static_assert(libc-float-flt_true_min ${CMAKE_CURRENT_SOURCE_DIR}/libc/float/flt_true_min.c partial)
+add_standard_static_assert(libc-float-flt_true_min ${CMAKE_CURRENT_SOURCE_DIR}/libc/float/flt_true_min.c supported)
 add_standard_run_test(libc-inttypes-imaxabs ${CMAKE_CURRENT_SOURCE_DIR}/libc/inttypes/imaxabs.c supported)
 add_standard_static_assert(libc-inttypes-imaxdiv_t ${CMAKE_CURRENT_SOURCE_DIR}/libc/inttypes/imaxdiv_t.c supported)
 add_standard_static_assert(libc-inttypes-pri-macros ${CMAKE_CURRENT_SOURCE_DIR}/libc/inttypes/pri_macros.c supported)
