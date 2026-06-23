@@ -99,7 +99,7 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 | `LIBC-stdarg-va_arg-01` | 7.16.1.1 | va_arg | fn-macro | Yields the next argument with the given type (post-default-promotion) | Positive | supported | exit | |
 | `LIBC-stdarg-va_copy-01` | 7.16.1.2 | va_copy | fn-macro | Copies a `va_list` state | Positive | supported | exit | |
 | `LIBC-stdarg-va_end-01` | 7.16.1.3 | va_end | fn-macro | Ends traversal | Positive | supported | exit | |
-| `LIBC-stdarg-va_arg-02` | 7.16.1.1p2 | va_arg | fn-macro | A type mismatch or reading past the last argument is undefined | B-undef | partial | none | documentation |
+| `LIBC-stdarg-va_arg-02` | 7.16.1.1p2 | va_arg | fn-macro | A type mismatch or reading past the last argument is undefined | B-undef | by-design | none | documentation |
 
 ## `<stdbool.h>` (7.18)
 

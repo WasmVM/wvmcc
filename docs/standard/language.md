@@ -95,7 +95,7 @@ and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-5.2.4.1-01` | 5.2.4.1p1 | Translate+run a program exercising the minimum limits (127 block nesting, 63 cond-incl, 1023 case labels, 4095 external idents, …) | Positive | supported | exit | passes. The last blocker was the function-local `static const char s4095[]` string: block-scope statics were initialized by a runtime store-loop with no data segment, so the linker under-reported the object's extent and desynced its read/write addresses across TUs (worked `-ffreestanding`, trapped `length too long` once libc was linked). Fixed by emitting block-scope static initializers as active data segments like file-scope objects (`ModuleCodegen::emitStaticInitSegment`). (Unrelated: a separate 1-page `mem[1]` stack-overflow bug for frames > 64 KB remains — reference_stack_mem1_one_page.) |
+| `LANG-5.2.4.1-01` | 5.2.4.1p1 | Translate+run a program exercising the minimum limits (127 block nesting, 63 cond-incl, 1023 case labels, 4095 external idents, …) | Positive | supported | exit | passes. The last blocker was the function-local `static const char s4095[]` string: block-scope statics were initialized by a runtime store-loop with no data segment, so the linker under-reported the object's extent and desynced its read/write addresses across TUs (worked `-ffreestanding`, trapped `length too long` once libc was linked). Fixed by emitting block-scope static initializers as active data segments like file-scope objects (`ModuleCodegen::emitStaticInitSegment`). (Unrelated: a separate 1-page `mem[1]` stack-overflow bug for frames > 64 KB remains — #98 / reference_stack_mem1_one_page; and a `.bss`-sizing gap, #99.) |
 | `LANG-5.2.4.1-02` | 5.2.4.1p1 | wvmcc's actual translation limits | B-impl | by-design | none | `docs/spec.md`: no fixed limits; bounded by host memory |
 | `LANG-5.2.4.2.1-01` | 5.2.4.2.1p1 | `<limits.h>` macros are `#if`-usable ICEs, magnitudes ≥ standard minimums, correct sign | Positive | supported | static-assert | per-macro values in `libc.md` |
 | `LANG-5.2.4.2.1-02` | 5.2.4.2.1 | Actual integer limit values (`CHAR_BIT`, `INT_MAX`, `LONG_MAX`, …) | B-impl | supported | static-assert | `docs/spec.md` LP64: `int` 32-bit, `long` 64-bit; detail in `libc.md` |
@@ -152,7 +152,7 @@ and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 | `LANG-6.2.4-05` | 6.2.4p4 | `_Thread_local` gives thread storage duration | Positive | deferred | none | threads deferred (`docs/spec.md`) |
 | `LANG-6.2.4-06` | 6.2.4p4 | Indirect access to a thread-duration object from another thread is implementation-defined | B-impl | deferred | none | threads deferred |
 | `LANG-6.2.4-07` | 6.2.4p7 | A VLA object's lifetime runs from its declaration to leaving the scope | Positive | deferred | none | VLAs deferred (`docs/spec.md`) |
-| `LANG-6.2.4-08` | 6.2.4p8 | Modifying an object with temporary lifetime is undefined | B-undef | partial | none | documentation |
+| `LANG-6.2.4-08` | 6.2.4p8 | Modifying an object with temporary lifetime is undefined | B-undef | by-design | none | documentation |
 
 ### 6.2.5 Types
 
@@ -165,7 +165,7 @@ and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 | `LANG-6.2.5-05` | 6.2.5p4 | The five standard signed integer types have wvmcc's LP64 sizes | Positive | supported | static-assert | `docs/spec.md`: `char`1 `short`2 `int`4 `long`8 `long long`8 |
 | `LANG-6.2.5-06` | 6.2.5p4 | Implementation-defined extended integer types | B-impl | by-design | none | none provided |
 | `LANG-6.2.5-07` | 6.2.5p9 | Unsigned arithmetic wraps modulo 2ᴺ (cannot overflow) | Positive | supported | exit | |
-| `LANG-6.2.5-08` | 6.2.5p10 | Three real floating types; value sets `float ⊆ double ⊆ long double` | Positive | partial | static-assert | `docs/spec.md`: `long double` aliases `double` |
+| `LANG-6.2.5-08` | 6.2.5p10 | Three real floating types; value sets `float ⊆ double ⊆ long double` | Positive | by-design | static-assert | `docs/spec.md`: `long double` aliases `double` |
 | `LANG-6.2.5-09` | 6.2.5p11 | `_Complex` types are a conditional feature (need not be supported) | B-impl | by-design | none | `docs/spec.md`: `_Complex` deferred; `__STDC_NO_COMPLEX__` |
 | `LANG-6.2.5-10` | 6.2.5p15 | `char`, `signed char`, `unsigned char` are three distinct types; `char` behaves as one of the other two | B-impl | supported | static-assert | `docs/spec.md`: signed `char` default |
 | `LANG-6.2.5-11` | 6.2.5p16 | An enumeration's constants are integer constant values; each enum is a distinct type | Positive | supported | static-assert | |
@@ -232,7 +232,7 @@ and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 | `LANG-6.3.1.5-02` | 6.3.1.5p1 | A floating conversion of an out-of-range value is undefined | B-undef | supported | none | documentation |
 | `LANG-6.3.1.6-01` | 6.3.1.6p1 | Complex → complex converts real and imaginary parts | Positive | by-design | none | `_Complex` unsupported (`docs/spec.md`) |
 | `LANG-6.3.1.7-01` | 6.3.1.7 | Real ↔ complex conversions | Positive | by-design | none | `_Complex` unsupported |
-| `LANG-6.3.1.8-01` | 6.3.1.8p1 | UAC: if one operand is `long double`/`double`/`float`, the other converts to it | Positive | partial | exit | `docs/spec.md`: `long double` aliases `double` |
+| `LANG-6.3.1.8-01` | 6.3.1.8p1 | UAC: if one operand is `long double`/`double`/`float`, the other converts to it | Positive | by-design | exit | `docs/spec.md`: `long double` aliases `double` |
 | `LANG-6.3.1.8-02` | 6.3.1.8p1 | UAC, same signedness: lesser-rank operand converts to the greater rank (`int + long → long`) | Positive | supported | exit | |
 | `LANG-6.3.1.8-03` | 6.3.1.8p1 | UAC, unsigned rank ≥ signed rank: signed converts to unsigned (`int + unsigned → unsigned`) | Positive | supported | exit | |
 | `LANG-6.3.1.8-04` | 6.3.1.8p1 | UAC, signed type represents all unsigned values: unsigned converts to signed (`long + unsigned int → long`) | Positive | supported | exit | LP64: 64-bit `long` holds 32-bit `unsigned` |
@@ -288,7 +288,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.4.2-04` | 6.4.2.1p4 | A pp-token convertible to keyword-or-identifier becomes the keyword | Positive | supported | unit-xref | `lexer_keyword_test` |
 | `LANG-6.4.2-05` | 6.4.2.1p5,p6 | Number of significant initial characters is implementation-defined | B-impl | supported | none | `docs/spec.md`/wvmcc: no limit (all significant) |
 | `LANG-6.4.2-06` | 6.4.2.1p6 | Identifiers differing only in non-significant characters is undefined | B-undef | by-design | none | all characters significant → N/A |
-| `LANG-6.4.2-07` | 6.4.2.1p3 | Which extended (multibyte) characters are permitted in identifiers is implementation-defined | B-impl | partial | none | UTF-8 |
+| `LANG-6.4.2-07` | 6.4.2.1p3 | Which extended (multibyte) characters are permitted in identifiers is implementation-defined | B-impl | by-design | none | UTF-8 |
 | `LANG-6.4.2.2-01` | 6.4.2.2p1 | `__func__` is implicitly declared as the enclosing function's name | Positive | supported | stdout | `std-lang-6.4.2.2-01`: prints the enclosing function name |
 
 ### 6.4.3 Universal character names
@@ -324,7 +324,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.4.5-03` | 6.4.5p2 | Adjacent literals mixing a wide and a UTF-8 literal are rejected | Negative | supported | unit-xref | `pp_concat_tests` (incompatible prefix) |
 | `LANG-6.4.5-04` | 6.4.5p6 | A string literal initializes a static array with an appended zero terminator | Positive | supported | exit | |
 | `LANG-6.4.5-05` | 6.4.5p7 | Whether identical string literals are distinct is unspecified; modifying one is undefined | B-undef | supported | none | documentation |
-| `LANG-6.4.5-06` | 6.4.5p5 | Concatenability/treatment of differently-prefixed wide literals is implementation-defined | B-impl | partial | none | |
+| `LANG-6.4.5-06` | 6.4.5p5 | Concatenability/treatment of differently-prefixed wide literals is implementation-defined | B-impl | by-design | none | |
 
 ### 6.4.6 Punctuators
 
@@ -410,7 +410,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.5.2.5-01` | 6.5.2.5p3,p5 | A compound literal yields an unnamed lvalue object initialized by the list | Positive | supported | exit | |
 | `LANG-6.5.2.5-02` | 6.5.2.5p5 | A file-scope compound literal has static storage; a block-scope one has automatic | Positive | supported | exit | |
 | `LANG-6.5.2.5-03` | 6.5.2.5p1 | Constraint: type-name is a complete object or unknown-size array, not a VLA | Negative | supported | compile-fail | |
-| `LANG-6.5.2.5-04` | 6.5.2.5p13 | `const`-qualified compound literals may share storage with equal string literals | B-unspec | partial | none | documentation |
+| `LANG-6.5.2.5-04` | 6.5.2.5p13 | `const`-qualified compound literals may share storage with equal string literals | B-unspec | by-design | none | documentation |
 
 ### 6.5.3 Unary operators
 
@@ -571,7 +571,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.6-04` | 6.6p6 | ICE operand rules: only integer/enum/char constants, `sizeof`/`_Alignof`, and float constants as immediate cast operands | Negative | supported | compile-fail | unit-xref `sema_enum_test`, `static_assert_test` |
 | `LANG-6.6-05` | 6.6p7,p8 | Arithmetic constant expressions are accepted in initializers | Positive | supported | static-assert | |
 | `LANG-6.6-06` | 6.6p9 | Address constants (`&` of a static-duration object, a function designator, array/function decay) | Positive | supported | exit | |
-| `LANG-6.6-07` | 6.6p10 | The implementation may accept other forms of constant expressions | B-impl | partial | none | `docs/spec.md`: ICE-evaluator scope |
+| `LANG-6.6-07` | 6.6p10 | The implementation may accept other forms of constant expressions | B-impl | by-design | none | `docs/spec.md`: ICE-evaluator scope |
 | `LANG-6.6-08` | 6.6p11 | Short-circuit makes `2 || 1/0` a valid ICE with value 1 (no division by zero) | Positive | supported | static-assert | |
 
 ---
@@ -606,7 +606,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.2-01` | 6.7.2p2 | Every valid type-specifier multiset denotes the right type (`unsigned long int`, `signed char`, …) | Positive | supported | static-assert | |
 | `LANG-6.7.2-02` | 6.7.2p2 | At least one type specifier per declaration; an invalid multiset is rejected | Negative | supported | compile-fail | |
 | `LANG-6.7.2-03` | 6.7.2p3 | `_Complex` cannot be used when complex types are unsupported | Negative | by-design | compile-fail | `__STDC_NO_COMPLEX__` |
-| `LANG-6.7.2-04` | 6.7.2p5 | Whether a bit-field `int` is signed or unsigned is implementation-defined | B-impl | partial | static-assert | `docs/spec.md`: signed |
+| `LANG-6.7.2-04` | 6.7.2p5 | Whether a bit-field `int` is signed or unsigned is implementation-defined | B-impl | by-design | static-assert | `docs/spec.md`: signed |
 
 ### 6.7.2.1 Structure and union specifiers
 
@@ -623,7 +623,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.2.1-09` | 6.7.2.1p13 | Anonymous struct/union members are members of the containing type | Positive | supported | exit | |
 | `LANG-6.7.2.1-10` | 6.7.2.1p14 | Each non-bit-field member is aligned in an implementation-defined manner | B-impl | supported | static-assert | `docs/spec.md`: natural alignment |
 | `LANG-6.7.2.1-11` | 6.7.2.1p18 | A flexible array member (last member of a multi-member struct, incomplete array) | Positive | supported | exit | |
-| `LANG-6.7.2.1-12` | 6.7.2.1p18 | Accessing FAM elements beyond the allocation is undefined | B-undef | partial | none | documentation |
+| `LANG-6.7.2.1-12` | 6.7.2.1p18 | Accessing FAM elements beyond the allocation is undefined | B-undef | by-design | none | documentation |
 | `LANG-6.7.2.1-13` | 6.7.2.1p8 | A struct/union with no named members is undefined | B-undef | supported | none | documentation |
 
 ### 6.7.2.2 Enumeration specifiers
@@ -659,9 +659,9 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.3-03` | 6.7.3p7 | Modifying a `const`-qualified object through a non-const lvalue is undefined | B-undef | supported | none | documentation |
 | `LANG-6.7.3-04` | 6.7.3p7 | A `const` object as an assignment target is rejected | Negative | supported | compile-fail | unit-xref `sema_qualifiers_test` |
 | `LANG-6.7.3-05` | 6.7.3p8 | `volatile` accesses are evaluated strictly per the abstract machine | Positive | supported | exit | volatile codegen partial |
-| `LANG-6.7.3-06` | 6.7.3p8 | What constitutes a `volatile` access is implementation-defined | B-impl | partial | none | `docs/spec.md`: each load/store |
+| `LANG-6.7.3-06` | 6.7.3p8 | What constitutes a `volatile` access is implementation-defined | B-impl | by-design | none | `docs/spec.md`: each load/store |
 | `LANG-6.7.3-07` | 6.7.3p10 | Array qualifiers qualify the element type; qualifying a function type is undefined | B-undef | supported | none | documentation |
-| `LANG-6.7.3.1-01` | 6.7.3.1 | `restrict` aliasing contract: accessing a restrict object via another pointer is undefined | B-undef | partial | none | documentation; wvmcc may ignore `restrict` (permitted) |
+| `LANG-6.7.3.1-01` | 6.7.3.1 | `restrict` aliasing contract: accessing a restrict object via another pointer is undefined | B-undef | by-design | none | documentation; wvmcc may ignore `restrict` (permitted) |
 
 ### 6.7.4 Function specifiers
 
@@ -673,9 +673,9 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.4-04` | 6.7.4p3 | An external-linkage inline definition must not define a static-duration modifiable object or reference an internal-linkage identifier | Negative | supported | compile-fail | |
 | `LANG-6.7.4-05` | 6.7.4p8 | A `_Noreturn` function does not return to its caller | Positive | supported | exit | emits trailing `unreachable` |
 | `LANG-6.7.4-06` | 6.7.4p8,p9 | A `_Noreturn` function that returns is undefined (recommended diagnostic) | B-undef | supported | none | documentation |
-| `LANG-6.7.4-07` | 6.7.4p6 | The extent to which inline suggestions are effective is implementation-defined | B-impl | partial | none | `docs/spec.md` |
+| `LANG-6.7.4-07` | 6.7.4p6 | The extent to which inline suggestions are effective is implementation-defined | B-impl | by-design | none | `docs/spec.md` |
 | `LANG-6.7.4-08` | 6.7.4p4 | No function specifier on `main` (hosted) | Negative | supported | compile-fail | |
-| `LANG-6.7.4-09` | 6.7.4p7 | Whether a call uses the inline or external definition is unspecified | B-unspec | partial | none | documentation |
+| `LANG-6.7.4-09` | 6.7.4p7 | Whether a call uses the inline or external definition is unspecified | B-unspec | by-design | none | documentation |
 
 ### 6.7.5 Alignment specifier
 
@@ -684,7 +684,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.5-01` | 6.7.5p6,p7 | `_Alignas(type)` ≡ `_Alignas(_Alignof(type))`; `_Alignas(const-expr)`; strictest wins | Positive | supported | static-assert | `_Alignas(type-name)` + member `_Alignas`→struct alignment in ICE (#81) |
 | `LANG-6.7.5-02` | 6.7.5p2 | Constraint: `_Alignas` not with `typedef`/`register`, not on a function/bit-field | Negative | supported | compile-fail | |
 | `LANG-6.7.5-03` | 6.7.5p3–p5 | Constraint: a valid (supported) alignment, not weaker than required | Negative | supported | compile-fail | |
-| `LANG-6.7.5-04` | 6.7.5p8 | Inconsistent `_Alignas` across declarations of one object is undefined | B-undef | partial | none | documentation |
+| `LANG-6.7.5-04` | 6.7.5p8 | Inconsistent `_Alignas` across declarations of one object is undefined | B-undef | by-design | none | documentation |
 
 ### 6.7.6 Declarators
 
@@ -770,7 +770,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.8.5.3-01` | 6.8.5.3p1,p2 | `for(clause-1; e2; e3)`: init, pre-test `e2`, post-body `e3`; omitted `e2` is nonzero | Positive | supported | exit | |
 | `LANG-6.8.5-01` | 6.8.5p2 | Constraint: an iteration controlling expression has scalar type | Negative | supported | compile-fail | |
 | `LANG-6.8.5-02` | 6.8.5p3 | Constraint: a `for` declaration declares only `auto`/`register` objects | Negative | supported | compile-fail | |
-| `LANG-6.8.5-03` | 6.8.5p6 | A non-constant-controlled loop with no I/O/volatile/sync may be assumed to terminate | B-impl | partial | none | `docs/spec.md`/wvmcc: no forced-progress transform |
+| `LANG-6.8.5-03` | 6.8.5p6 | A non-constant-controlled loop with no I/O/volatile/sync may be assumed to terminate | B-impl | by-design | none | `docs/spec.md`/wvmcc: no forced-progress transform |
 | `LANG-6.8.6.1-01` | 6.8.6.1p2 | `goto label` jumps to the labeled statement in the enclosing function | Positive | supported | exit | |
 | `LANG-6.8.6.1-02` | 6.8.6.1p1 | Constraint: `goto` targets a label in the enclosing function; no jump into a VLA scope | Negative | partial | compile-fail | VLA part deferred |
 | `LANG-6.8.6.2-01` | 6.8.6.2p2 | `continue` jumps to the loop-continuation of the smallest enclosing loop (a `for` runs `e3`) | Positive | supported | exit | |
@@ -829,7 +829,7 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | supported | exit | `std-lang-6.10.6-01`: unknown pragma warns and the TU runs |
 | `LANG-6.10.6-02` | 6.10.6 | `#pragma once` prevents re-inclusion (extension) | Positive | supported | unit-xref | `pp_pragma_once_test` |
 | `LANG-6.10.6-03` | 6.10.6p2 | Standard `STDC` pragmas (`FP_CONTRACT`, `FENV_ACCESS`, `CX_LIMITED_RANGE`) | Positive | deferred | none | STDC pragmas not implemented |
-| `LANG-6.10.6-04` | 6.10.6p1 | The behavior of an unrecognized pragma is implementation-defined (ignored) | B-impl | partial | none | `docs/spec.md` |
+| `LANG-6.10.6-04` | 6.10.6p1 | The behavior of an unrecognized pragma is implementation-defined (ignored) | B-impl | by-design | none | `docs/spec.md` |
 | `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | supported | exit | `std-lang-6.10.7-01`: `#` alone compiles and runs |
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |

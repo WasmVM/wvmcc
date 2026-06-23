@@ -23,7 +23,7 @@ add_standard_static_assert(lang-6.2.5-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.
 add_standard_static_assert(lang-6.2.5-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_signed_char_storage_int_range.c supported)
 add_standard_static_assert(lang-6.2.5-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_standard_signed_integer_sizes.c supported)
 add_standard_run_test(lang-6.2.5-07 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_unsigned_wraps_modulo.c supported)
-add_standard_static_assert(lang-6.2.5-08 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_real_floating_value_sets.c partial)
+add_standard_static_assert(lang-6.2.5-08 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_real_floating_value_sets.c by-design)
 add_standard_static_assert(lang-6.2.5-10 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_three_char_types.c supported)
 add_standard_static_assert(lang-6.2.5-11 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_enum_constants_and_type.c supported)
 add_standard_compile_fail(lang-6.2.5-12 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_sizeof_void_rejected.c supported)

@@ -64,7 +64,7 @@ add_standard_run_test(lang-6.7.2.3-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_d
 add_standard_compile_fail(lang-6.7.2.3-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2.3_tag_keyword_mismatch.c supported)
 add_standard_run_test(lang-6.7.2.3-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2.3_tag_scoping.c supported)
 add_standard_compile_fail(lang-6.7.2-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2_invalid_type_specifier_multiset.c supported)
-add_standard_static_assert(lang-6.7.2-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2_plain_int_bitfield_signed.c partial)
+add_standard_static_assert(lang-6.7.2-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2_plain_int_bitfield_signed.c by-design)
 add_standard_static_assert(lang-6.7.2-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.2_type_specifier_multisets.c supported)
 add_standard_compile_fail(lang-6.7.3-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.3_const_assignment_target.c supported)
 add_standard_compile_fail(lang-6.7.3-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.3_restrict_non_pointer.c supported)
