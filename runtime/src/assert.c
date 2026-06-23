@@ -12,6 +12,17 @@ static void emit(const char *s) {
     if (s) write(2, s, strlen(s));
 }
 
+// Minimal int→decimal (printf is not a dependency of <assert.h>).
+static void emit_int(int v) {
+    char buf[12];
+    int i = (int)sizeof buf;
+    unsigned u = v < 0 ? (unsigned)(-(long)v) : (unsigned)v;
+    buf[--i] = '\0';
+    do { buf[--i] = (char)('0' + u % 10); u /= 10; } while (u);
+    if (v < 0) buf[--i] = '-';
+    emit(&buf[i]);
+}
+
 _Noreturn void __wvmcc_assert_fail(const char *expr, const char *file, int line, const char *func) {
     emit("Assertion failed: ");
     emit(expr);
@@ -19,10 +30,8 @@ _Noreturn void __wvmcc_assert_fail(const char *expr, const char *file, int line,
     emit(func);
     emit(", file ");
     emit(file);
-    /* line number is left out for now — printf isn't available yet
-       (M2-13). A follow-up will swap this for fprintf and include the
-       line. */
-    (void)line;
+    emit(", line ");
+    emit_int(line);
     emit("\n");
     abort();
 }

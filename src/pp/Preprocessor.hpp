@@ -192,6 +192,10 @@ private:
     std::vector<FileCtx> fileStack;
     std::deque<PPToken> outBuffer;
     bool atLineStart{true};
+    // #line presumed-line offset (6.10.4): added to a token's physical line to
+    // yield the value __LINE__ expands to. Set by a #line directive; __FILE__ is
+    // updated separately (by redefining its macro).
+    long lineOffset_{0};
 
     bool pushFile(const std::string& path);
     std::optional<PPToken> readRawToken();

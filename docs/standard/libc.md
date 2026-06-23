@@ -152,7 +152,7 @@ LP64 (`docs/spec.md`).
 | `LIBC-assert-NDEBUG-01` | 7.2p1 | NDEBUG | obj-macro | With `NDEBUG` defined before inclusion, `assert` expands to a no-op | Positive | supported | exit | |
 | `LIBC-assert-assert-01` | 7.2.1.1p2 | assert | fn-macro | A nonzero argument takes no action and yields a `void` expression | Positive | supported | exit | |
 | `LIBC-assert-assert-02` | 7.2.1.1p2 | assert | fn-macro | A zero argument writes diagnostic info to stderr and calls `abort` (nonzero termination) | Positive | supported | exit | test expects nonzero exit |
-| `LIBC-assert-assert-03` | 7.2.1.1p2 | assert | fn-macro | The diagnostic includes the expression text, `__FILE__`, `__LINE__`, `__func__` | B-impl | partial | stdout | |
+| `LIBC-assert-assert-03` | 7.2.1.1p2 | assert | fn-macro | The diagnostic includes the expression text, `__FILE__`, `__LINE__`, `__func__` | B-impl | supported | stdout | needs `#` (spacing), `#line`, and assert's line number — all now correct (verified via 2>&1 stderr capture) |
 | `LIBC-assert-static_assert-01` | 7.2p3 | static_assert | obj-macro | Expands to `_Static_assert` | Positive | supported | static-assert | |
 
 ## `<errno.h>` (7.5)
