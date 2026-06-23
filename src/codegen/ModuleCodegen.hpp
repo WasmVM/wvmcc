@@ -66,6 +66,16 @@ public:
     WasmVM::index_t allocateGuardGlobal();
     // Allocate space in mem[0] for a static local; return its address.
     size_t allocateStaticStorage(size_t size, size_t align);
+    // Emit a block-scope static's constant initializer as an active data
+    // segment at `addr` (mem `memidx`), exactly like a file-scope object — so
+    // the object participates in the linker's data-extent tracking and rebasing
+    // (a runtime store-loop init does not, and breaks across TUs). Returns true
+    // if a segment was emitted or the init is all-zero (no segment needed);
+    // false if the initializer is not a compile-time constant we can encode, in
+    // which case the caller should fall back to a runtime store init.
+    bool emitStaticInitSegment(size_t addr, size_t size, uint8_t memidx,
+                               const wvmcc::parser::TypeNodePtr& type,
+                               const wvmcc::parser::InitializerPtr& init);
     // Intern a function type into module_.types (deduplicates).
     WasmVM::index_t internFuncType(const WasmVM::FuncType& ft);
 

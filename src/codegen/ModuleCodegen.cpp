@@ -145,6 +145,38 @@ void ModuleCodegen::finalizeFreestandingHeapBase() {
     }
 }
 
+bool ModuleCodegen::emitStaticInitSegment(size_t addr, size_t size, uint8_t memidx,
+                                          const wvmcc::parser::TypeNodePtr& type,
+                                          const wvmcc::parser::InitializerPtr& init) {
+    // Mirrors the file-scope object path (registerGlobalVar): encode the
+    // constant initializer into bytes and emit an active data segment. C
+    // requires static-storage-duration initializers to be constant (6.7.9p4),
+    // so a load-time data segment is always observably correct and lets the
+    // linker rebase/size the object like any other static datum.
+    if (!init) return false;
+    std::vector<std::byte> bytes(size, std::byte{0});
+    pendingAddrSites_.clear();
+    if (!encodeConstInit(type, init, 0, bytes)) { pendingAddrSites_.clear(); return false; }
+    // All-zero: linear memory starts zeroed, so no segment is needed.
+    bool allZero = true;
+    for (auto b : bytes) if (b != std::byte{0}) { allZero = false; break; }
+    if (allZero) { pendingAddrSites_.clear(); return true; }
+
+    WasmVM::WasmData seg;
+    seg.mode.type = WasmVM::WasmData::DataMode::Mode::active;
+    seg.mode.memidx = memidx;
+    seg.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)addr};
+    seg.init = std::move(bytes);
+    size_t dataIdx = module_.datas.size();
+    module_.datas.push_back(std::move(seg));
+    for (const auto& [boff, isFunc] : pendingAddrSites_) {
+        if (isFunc) dataSegFuncPtrRelocs_.push_back({dataIdx, boff});
+        else        dataSegDataRelocs_.push_back({dataIdx, boff});
+    }
+    pendingAddrSites_.clear();
+    return true;
+}
+
 void ModuleCodegen::setupMemory() {
     WasmVM::MemType memTy;
     memTy.min = 1;

@@ -2632,6 +2632,19 @@ void FunctionCodegen::emitBlockItem(const wvmcc::parser::BlockItemPtr& item) {
                 symbolTable_.define(name, gm);
 
                 if (v->initializer && *v->initializer) {
+                    // Prefer a load-time active data segment — exactly how a
+                    // file-scope object is emitted. A block-scope static's
+                    // initializer must be constant (6.7.9p4), so this is always
+                    // observably correct, and unlike a runtime store-loop the
+                    // object is then tracked and rebased by the linker (the loop
+                    // form under-reports the object's extent and desyncs its
+                    // read/write addresses across TUs — breaking e.g. a 4 KiB
+                    // `static char s[]` once libc is linked). Fall back to the
+                    // runtime init only when the initializer is not encodable.
+                    if (moduleCg_->emitStaticInitSegment(addr, size, /*memidx=*/0,
+                                                         typeNode, *v->initializer)) {
+                        return;
+                    }
                     WasmVM::index_t guard = moduleCg_->allocateGuardGlobal();
                     // if (!guard) { <init>; guard = 1; }
                     emit(WasmVM::Instr::Global_get{guard});
