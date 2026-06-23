@@ -1337,7 +1337,15 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
             auto itype = declaredTypeRepr.find(name);
             bool typesCompatible = itype != declaredTypeRepr.end()
                 && redeclTypesCompatible(itype->second, canonRepr);
-            if (typesCompatible) {
+            // Qualifier-only differences first (redeclTypesCompatible ignores
+            // top-level qualifiers, so it must not mask a qualifier mismatch).
+            if (stripQualParts(prev) == stripQualParts(sig)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
+                diag.span = f->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            } else if (typesCompatible) {
                 // Signature strings differ but the types are compatible — e.g. a
                 // prototyped definition completing an unprototyped declaration
                 // `int f();` (C 6.2.7, 6.7.6.3p14). Adopt the prototyped form.
@@ -1347,12 +1355,6 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
                     if (f->declarator) declaredSignatureSpan[name] = f->declarator->span;
                     declaredTypeRepr[name] = canonRepr;
                 }
-            } else if (stripQualParts(prev) == stripQualParts(sig)) {
-                Diagnostic diag;
-                diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
-                diag.span = f->declarator->span;
-                curDiagnostics->push_back(std::move(diag));
             } else if (itype != declaredTypeRepr.end()) {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
@@ -1546,7 +1548,16 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
             auto itype = declaredTypeRepr.find(name);
             bool typesCompatible = itype != declaredTypeRepr.end()
                 && redeclTypesCompatible(itype->second, canonRepr);
-            if (typesCompatible) {
+            // Qualifier-only differences are checked first: redeclTypesCompatible
+            // (like typeNodesEqual) ignores top-level qualifiers, so it must not
+            // be allowed to mask a genuine `int x;` vs `const int x;` mismatch.
+            if (stripQualParts(prev) == stripQualParts(sig)) {
+                Diagnostic diag;
+                diag.severity = Diagnostic::Severity::Error;
+                diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
+                diag.span = d->declarator->span;
+                curDiagnostics->push_back(std::move(diag));
+            } else if (typesCompatible) {
                 // Signature strings differ but the types are compatible — e.g. an
                 // unprototyped `int f()` beside a prototype `int f(int,int)`
                 // (C 6.2.7, 6.7.6.3p14). No diagnostic; adopt the prototyped form
@@ -1557,12 +1568,6 @@ void Semantic::onDeclaration(const DeclarationPtr &d) {
                     if (d->declarator) declaredSignatureSpan[name] = d->declarator->span;
                     declaredTypeRepr[name] = canonRepr;
                 }
-            } else if (stripQualParts(prev) == stripQualParts(sig)) {
-                Diagnostic diag;
-                diag.severity = Diagnostic::Severity::Error;
-                diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
-                diag.span = d->declarator->span;
-                curDiagnostics->push_back(std::move(diag));
             } else if (itype != declaredTypeRepr.end()) {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
