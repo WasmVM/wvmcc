@@ -153,6 +153,28 @@ function(add_standard_stdout_test name source expected)
         LABELS "standard;stdout;status-${status}" TIMEOUT 15)
 endfunction()
 
+# add_standard_stderr_test(<name> <source> <expected> [status]) — like
+# add_standard_stdout_test but diffs the program's *combined* output (2>&1) and
+# ignores its exit status. For diagnostics the standard sends to stderr that
+# also terminate abnormally (e.g. a failed `assert` calling abort).
+function(add_standard_stderr_test name source expected)
+    if(NOT WASMVM_EXECUTABLE)
+        return()
+    endif()
+    set(status supported)
+    if(ARGC GREATER 3)
+        set(status "${ARGV3}")
+    endif()
+    set(out ${CMAKE_CURRENT_BINARY_DIR}/${name}.wasm)
+    add_test(
+        NAME std-${name}
+        COMMAND ${CMAKE_COMMAND} -E env sh -c
+            "$<TARGET_FILE:wvmcc> -isystem '${RUNTIME_INCDIR}' '${source}' -L '${RUNTIME_LIBDIR}' -lc -o '${out}' && sh '${CMAKE_CURRENT_SOURCE_DIR}/run_standard_stderr.sh' '${WASMVM_EXECUTABLE}' '${out}' '${expected}'"
+    )
+    set_tests_properties(std-${name} PROPERTIES
+        LABELS "standard;stdout;status-${status}" TIMEOUT 15)
+endfunction()
+
 # §7.21 <stdio.h> — formatted/character output (LIBC-stdio-*). printf/puts use
 # small, wasmvm-safe call graphs.
 set(STDIO_DIR ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdio)
