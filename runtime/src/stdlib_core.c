@@ -371,3 +371,63 @@ int rand(void) {
 }
 
 void srand(unsigned int seed) { __rand_state = seed; }
+
+/* ----- environment (7.22.4.6) ------------------------------------- */
+
+// Host lookup: getenv(name_ptr, name_len, buf_ptr, buf_len) -> i32; writes the
+// value (NUL-terminated) into buf and returns its length, or a negative errno
+// (-ENOENT not found, -ERANGE buffer too small).
+__attribute__((import_module("sys_proc"), import_name("getenv")))
+int __sys_getenv(const char *name, unsigned long name_len, char *buf, unsigned long buf_len);
+
+char *getenv(const char *name) {
+    static char __getenv_buf[256];
+    int r = __sys_getenv(name, strlen(name), __getenv_buf, sizeof __getenv_buf);
+    if (r < 0) return (char *)0;          // not found (or value too long)
+    return __getenv_buf;
+}
+
+/* ----- multibyte / wide conversion (7.22.7, 7.22.8) --------------- */
+// "C" locale only: the single-byte encoding is the identity on 0..255, so each
+// multibyte character is exactly one byte and there is no shift state.
+
+int mblen(const char *s, size_t n) {
+    if (!s) return 0;                     // no state-dependent encodings
+    if (n == 0) return -1;
+    return *s ? 1 : 0;                    // NUL maps to 0
+}
+
+int mbtowc(wchar_t *pwc, const char *s, size_t n) {
+    if (!s) return 0;
+    if (n == 0) return -1;
+    unsigned char c = (unsigned char)*s;
+    if (pwc) *pwc = (wchar_t)c;
+    return c ? 1 : 0;
+}
+
+int wctomb(char *s, wchar_t wc) {
+    if (!s) return 0;                     // no state-dependent encodings
+    if ((unsigned long)wc > 255) return -1;   // not representable in one byte
+    *s = (char)wc;
+    return 1;
+}
+
+size_t mbstowcs(wchar_t *dst, const char *src, size_t n) {
+    size_t i = 0;
+    for (; i < n; i++) {
+        unsigned char c = (unsigned char)src[i];
+        if (dst) dst[i] = (wchar_t)c;
+        if (c == 0) return i;             // terminating NUL is not counted
+    }
+    return i;
+}
+
+size_t wcstombs(char *dst, const wchar_t *src, size_t n) {
+    size_t i = 0;
+    for (; i < n; i++) {
+        wchar_t wc = src[i];
+        if (dst) dst[i] = (char)wc;
+        if (wc == 0) return i;
+    }
+    return i;
+}
