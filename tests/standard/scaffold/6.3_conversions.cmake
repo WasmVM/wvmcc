@@ -11,7 +11,7 @@ add_standard_run_test(lang-6.3.1.3-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_c
 add_standard_run_test(lang-6.3.1.4-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.4_float_to_int_truncates_toward_zero.c supported)
 add_standard_run_test(lang-6.3.1.4-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.4_int_to_float_exact_when_representable.c supported)
 add_standard_run_test(lang-6.3.1.5-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.5_double_to_float_round_nearest.c supported)
-add_standard_run_test(lang-6.3.1.8-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.8_uac_float_operand_wins.c partial)
+add_standard_run_test(lang-6.3.1.8-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.8_uac_float_operand_wins.c by-design)
 add_standard_run_test(lang-6.3.1.8-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.8_uac_otherwise_unsigned_of_signed.c supported)
 add_standard_run_test(lang-6.3.1.8-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.8_uac_same_signedness_greater_rank.c supported)
 add_standard_run_test(lang-6.3.1.8-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.3_conversions/6.3.1.8_uac_signed_holds_all_unsigned.c supported)
