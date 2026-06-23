@@ -331,7 +331,7 @@ bool Preprocessor::consumeOptionalWhitespaceBeforeOpenParen() {
 
 void Preprocessor::emitTokenOrLineExpansion(const PPToken& tok) {
     if (tok.kind == PPTokenKind::Identifier && tok.lexeme == "__LINE__") {
-    std::string lineStr = std::to_string(tok.span.begin.line);
+    std::string lineStr = std::to_string((long)tok.span.begin.line + lineOffset_);
         PPToken numTok{
             .kind = PPTokenKind::PPNumber,
             .span = tok.span,
@@ -934,35 +934,26 @@ bool Preprocessor::handleUndefDirective(Tokenizer& tokenizer) {
 }
 
 std::string Preprocessor::stringifyTokens(const std::vector<PPToken>& tokens) {
+    // 6.10.3.2p2: white space before the first and after the last token is
+    // deleted; every other white-space sequence between tokens becomes a single
+    // space. (The previous logic suppressed the space whenever a neighbor was
+    // punctuation, so `flag == 1` stringized to `flag==1`.)
     std::string result = "\"";
-    
-    for (size_t i = 0; i < tokens.size(); ++i) {
-        const auto& tok = tokens[i];
-        
-        // Skip leading whitespace
-        if (i == 0 && tok.kind == PPTokenKind::Whitespace) continue;
-        
-        // Skip whitespace unless needed for separation
+    bool pendingSpace = false;
+    bool emittedAny = false;
+    for (const auto& tok : tokens) {
         if (tok.kind == PPTokenKind::Whitespace) {
-            // Only add space if previous token was not punctuation and next is not punctuation
-            if (i > 0 && i + 1 < tokens.size() &&
-                tokens[i-1].kind != PPTokenKind::Punctuator &&
-                tokens[i+1].kind != PPTokenKind::Punctuator) {
-                result += " ";
-            }
-            continue;
+            if (emittedAny) pendingSpace = true;   // internal run → one space (deferred)
+            continue;                               // leading run dropped (emittedAny false)
         }
-        
-        // Escape quotes and backslashes in the stringified content
-        std::string lexeme = tok.lexeme;
-        for (char c : lexeme) {
-            if (c == '"' || c == '\\') {
-                result += '\\';
-            }
+        if (pendingSpace) { result += ' '; pendingSpace = false; }
+        // Escape " and \ so the result is a well-formed string literal.
+        for (char c : tok.lexeme) {
+            if (c == '"' || c == '\\') result += '\\';
             result += c;
         }
+        emittedAny = true;                          // trailing ws never flushes pendingSpace
     }
-    
     result += "\"";
     return result;
 }
@@ -1087,7 +1078,7 @@ bool Preprocessor::tryProcessStringification(const Macro* m, size_t& rIdx,
     
     auto argToStringify = getArgumentToStringify(m, paramIdx, isVarargs, args);
     std::string stringified = stringifyTokens(argToStringify);
-    
+
     PPToken strToken{
         .kind = PPTokenKind::StringLiteral,
         .span = repl.span,
@@ -1098,6 +1089,25 @@ bool Preprocessor::tryProcessStringification(const Macro* m, size_t& rIdx,
     // Mark stringification-generated tokens so Phase-5 normalization does not
     // decode their escape sequences (stringification supplies its own escaping).
     strToken.paint("__STRINGIFIED__");
+    // Because normalization is skipped, set the decoded runtime value here:
+    // strip the surrounding quotes and undo the `\"`/`\\` escaping stringifyTokens
+    // added. Otherwise the lexer falls back to the raw lexeme (quotes included),
+    // so `#expr` reached the program as `"expr"` rather than `expr`.
+    {
+        std::string decoded;
+        if (stringified.size() >= 2) {
+            const std::string inner = stringified.substr(1, stringified.size() - 2);
+            for (size_t k = 0; k < inner.size(); ++k) {
+                if (inner[k] == '\\' && k + 1 < inner.size() &&
+                    (inner[k + 1] == '"' || inner[k + 1] == '\\')) {
+                    decoded += inner[++k];
+                } else {
+                    decoded += inner[k];
+                }
+            }
+        }
+        strToken.decodedString = decoded;
+    }
     substituted.push_back(strToken);
     rIdx = nextIdx;
     return true;
@@ -1298,7 +1308,7 @@ std::vector<PPToken> Preprocessor::expandMacros(const std::vector<PPToken>& toke
 
         // Special handling for __LINE__ macro (dynamic expansion)
         if (t.lexeme == "__LINE__") {
-            std::string lineStr = std::to_string(t.span.begin.line);
+            std::string lineStr = std::to_string((long)t.span.begin.line + lineOffset_);
             result.push_back(PPToken{
                 .kind = PPTokenKind::PPNumber,
                 .span = t.span,
@@ -1642,6 +1652,15 @@ bool Preprocessor::handleLineDirective(const std::vector<PPToken>& tokens) {
         idx++;
     }
     
+    // The number token is on the same physical line as the directive; the line
+    // that *follows* the directive is renumbered to `n` (6.10.4p1).
+    size_t numIdx = idx - 1;
+    while (numIdx > 0 && tokens[numIdx].kind == PPTokenKind::Whitespace) numIdx--;
+    long n = 0;
+    try { n = std::stol(tokens[numIdx].lexeme); } catch (...) { n = 0; }
+    long directiveLine = (long)tokens[numIdx].span.begin.line;
+    lineOffset_ = n - directiveLine - 1;            // physicalLine + offset == presumed
+
     if (idx < tokens.size()) {
         if (tokens[idx].kind != PPTokenKind::StringLiteral) {
             diagnostics.push_back(Diagnostic{
@@ -1651,10 +1670,16 @@ bool Preprocessor::handleLineDirective(const std::vector<PPToken>& tokens) {
             });
             return false;
         }
+        // Redefine __FILE__ to the presumed filename. Mirror the initial
+        // definition: a StringLiteral token whose lexeme keeps its quotes
+        // (normalization later decodes it for use).
+        std::vector<PPToken> replacement;
+        replacement.push_back(PPToken{ .kind = PPTokenKind::StringLiteral,
+                                       .span = tokens[idx].span,
+                                       .lexeme = tokens[idx].lexeme,
+                                       .paintedMacros = {} });
+        macroTable.defineObjectMacro("__FILE__", replacement);
     }
-    
-    // Note: Full implementation would update line/file tracking here
-    // For now, we just validate the syntax
     return true;
 }
 
