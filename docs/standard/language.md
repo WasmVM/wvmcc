@@ -700,7 +700,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.6.3-01` | 6.7.6.3p5,p10 | Function declarators/prototypes; `(void)` means no parameters | Positive | supported | exit | |
 | `LANG-6.7.6.3-02` | 6.7.6.3p1–p4 | Constraints: no function/array return type; only `register` parameter storage; non-defining identifier list empty; complete param types in a definition | Negative | supported | compile-fail | |
 | `LANG-6.7.6.3-03` | 6.7.6.3p7,p8 | A parameter "array of T" adjusts to "pointer to T"; "function returning T" to "pointer to function" | Positive | supported | exit | |
-| `LANG-6.7.6.3-04` | 6.7.6.3p14,p15 | Old-style (identifier-list/empty) vs prototype declarator compatibility | Positive | partial | exit | |
+| `LANG-6.7.6.3-04` | 6.7.6.3p14,p15 | Old-style (identifier-list/empty) vs prototype declarator compatibility | Positive | supported | exit | |
 
 ### 6.7.7 Type names
 
@@ -843,7 +843,7 @@ Clause 6.11 is informative. wvmcc targets C17 exactly; these are recorded for co
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.11-01` | 6.11.6,6.11.7 | Obsolescent non-prototype (old-style) function declarators/definitions are still accepted | Positive | partial | exit | informative; wvmcc accepts old-style |
+| `LANG-6.11-01` | 6.11.6,6.11.7 | Obsolescent non-prototype (old-style) function declarators/definitions are still accepted | Positive | supported | exit | informative; wvmcc accepts old-style |
 | `LANG-6.11-02` | 6.11.1–6.11.5,6.11.8,6.11.9 | Remaining future-direction items are informative — no normative test | B-impl | by-design | none | informative clause; documented, not tested |
 
 <!-- language.md complete: Clause 4, Clause 5, 6.2–6.11. -->

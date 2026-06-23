@@ -1217,6 +1217,81 @@ ExternalDeclPtr Parser::parseExternalDecl() {
             }
 
             return ext;
+        } else if ([&]{
+                // Old-style (K&R) function definition (C 6.11.7): a function
+                // declarator with an identifier-list, followed by parameter
+                // declarations and a body.
+                DeclaratorPtr knrFn = nullptr;
+                for (auto cur = decl; cur; cur = cur->inner.has_value() ? *cur->inner : nullptr)
+                    if (cur->kind == Declarator::Kind::Function
+                        && !cur->function.identifierList.empty()) { knrFn = cur; break; }
+                if (!knrFn) return false;
+                auto u = lex.peek();
+                if (!u) return false;
+                static const std::unordered_set<std::string> declStart = {
+                    "void","char","short","int","long","float","double","signed",
+                    "unsigned","_Bool","struct","union","enum","const","volatile",
+                    "restrict","register","auto","_Atomic"};
+                if (u->kind() == TokenKind::Keyword) return declStart.count(u->lexeme()) != 0;
+                if (u->kind() == TokenKind::Identifier) return typedef_names.count(u->lexeme()) != 0;
+                return false;
+            }()) {
+            // Locate the identifier-list function declarator.
+            DeclaratorPtr knrFn;
+            for (auto cur = decl; cur; cur = cur->inner.has_value() ? *cur->inner : nullptr)
+                if (cur->kind == Declarator::Kind::Function
+                    && !cur->function.identifierList.empty()) { knrFn = cur; break; }
+            // Parse the parameter declaration list (`int a; int b;`) → name -> type.
+            std::unordered_map<std::string, Parameter> knrTypes;
+            auto startsDecl = [&]() -> bool {
+                auto u = lex.peek();
+                if (!u) return false;
+                static const std::unordered_set<std::string> ks = {
+                    "void","char","short","int","long","float","double","signed",
+                    "unsigned","_Bool","struct","union","enum","const","volatile",
+                    "restrict","register","auto","_Atomic"};
+                if (u->kind() == TokenKind::Keyword) return ks.count(u->lexeme()) != 0;
+                if (u->kind() == TokenKind::Identifier) return typedef_names.count(u->lexeme()) != 0;
+                return false;
+            };
+            while (startsDecl()) {
+                auto pspecs = parseDeclarationSpecifiers();
+                while (true) {
+                    auto pdecl = parseDeclarator();
+                    std::string pname;
+                    for (auto c = pdecl; c; c = c->inner.has_value() ? *c->inner : nullptr)
+                        if (c->kind == Declarator::Kind::Identifier && !c->id.name.empty()) { pname = c->id.name; break; }
+                    if (!pname.empty()) { Parameter p; p.specifiers = pspecs; p.declarator = pdecl; knrTypes[pname] = p; }
+                    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ",") { lex.next(); continue; }
+                    break;
+                }
+                acceptPunct(";");
+            }
+            // Build the parameter list from the identifier-list; an undeclared
+            // identifier defaults to int (old-style rules).
+            std::vector<Parameter> params;
+            for (const auto& id : knrFn->function.identifierList) {
+                auto it = knrTypes.find(id);
+                if (it != knrTypes.end()) { params.push_back(it->second); continue; }
+                Parameter p;
+                DeclarationSpecifiers::TypeSpecifier ts;
+                ts.kind = DeclarationSpecifiers::TypeSpecifier::Kind::Simple;
+                ts.simple.push_back(DeclarationSpecifiers::SimpleTypeSpecifier::Int);
+                p.specifiers.typeSpecifiers.push_back(ts);
+                auto idd = make_ast<Declarator>();
+                idd->kind = Declarator::Kind::Identifier;
+                idd->id.name = id;
+                p.declarator = idd;
+                params.push_back(p);
+            }
+            knrFn->function.params = params;
+            knrFn->function.hasParamTypeList = true;
+            auto f = parseFunctionDef(specs, decl);
+            if (!f) return nullptr;
+            f->gnuAttributes = std::move(gnuAttrs);
+            auto ext = make_ast_with_span<ExternalDecl>(f->span);
+            ext->decl = f;
+            return ext;
         } else {
                 // Function declarator not followed by '{' → prototype/declaration.
                 // Still an init-declarator-list (`int f(void), x;`), so emit one

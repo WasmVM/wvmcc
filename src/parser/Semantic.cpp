@@ -1334,29 +1334,37 @@ void Semantic::onFunctionDef(const FunctionDefPtr &f) {
             int prevLine = -1;
             auto itspan = declaredSignatureSpan.find(name);
             if (itspan != declaredSignatureSpan.end()) prevLine = itspan->second.begin.line;
-            // check if qualifiers-only differ
-            if (stripQualParts(prev) == stripQualParts(sig)) {
+            auto itype = declaredTypeRepr.find(name);
+            bool typesCompatible = itype != declaredTypeRepr.end()
+                && redeclTypesCompatible(itype->second, canonRepr);
+            if (typesCompatible) {
+                // Signature strings differ but the types are compatible — e.g. a
+                // prototyped definition completing an unprototyped declaration
+                // `int f();` (C 6.2.7, 6.7.6.3p14). Adopt the prototyped form.
+                if (canonRepr && canonRepr->kind == TypeNode::Kind::Function
+                    && canonRepr->hasParamTypeList) {
+                    declaredSignatures[name] = sig;
+                    if (f->declarator) declaredSignatureSpan[name] = f->declarator->span;
+                    declaredTypeRepr[name] = canonRepr;
+                }
+            } else if (stripQualParts(prev) == stripQualParts(sig)) {
                 Diagnostic diag;
                 diag.severity = Diagnostic::Severity::Error;
                 diag.message = "incompatible declaration for '" + name + "': qualifiers differ" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                 diag.span = f->declarator->span;
                 curDiagnostics->push_back(std::move(diag));
-            } else {
-                        // fallback: if structural type representations differ, report incompatible declaration
-                        auto itype = declaredTypeRepr.find(name);
-                        if (itype != declaredTypeRepr.end() && !redeclTypesCompatible(itype->second, canonRepr)) {
+            } else if (itype != declaredTypeRepr.end()) {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
                     diag.message = "incompatible declaration for '" + name + "': type mismatch" + (prevLine > 0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                     diag.span = f->declarator->span;
                     curDiagnostics->push_back(std::move(diag));
-                } else {
+            } else {
                     Diagnostic diag;
                     diag.severity = Diagnostic::Severity::Error;
                     diag.message = "incompatible declaration for '" + name + "'" + (prevLine>0 ? (" (previous at line " + std::to_string(prevLine) + ")") : std::string());
                     diag.span = f->declarator->span;
                     curDiagnostics->push_back(std::move(diag));
-                }
             }
         } else {
             declaredSignatures[name] = sig;
