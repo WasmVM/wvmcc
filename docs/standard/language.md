@@ -28,7 +28,7 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 | `LANG-5.1.1.2-01` | 5.1.1.2p1(1) | Phase 1: trigraph replacement + end-of-line normalization | Positive | supported | unit-xref | `pp_basic_test` (trigraphs, CRLF) |
 | `LANG-5.1.1.2-02` | 5.1.1.2p1(2) | Phase 2: backslash–newline line splicing | Positive | supported | unit-xref | `pp_basic_test` |
 | `LANG-5.1.1.2-03` | 5.1.1.2p1(3) | Phase 3: decompose into pp-tokens; each comment → one space | Positive | supported | unit-xref | `pp_basic_test`, `pp_tokenizer_*` |
-| `LANG-5.1.1.2-04` | 5.1.1.2p1(4) | Phase 4: directives executed, macros expanded, `_Pragma` evaluated, `#include` recursive | Positive | partial | unit-xref | `pp_macro_test`/`pp_conditional_test`/`pp_include_test`; `_Pragma` **unit gap — no test** |
+| `LANG-5.1.1.2-04` | 5.1.1.2p1(4) | Phase 4: directives executed, macros expanded, `_Pragma` evaluated, `#include` recursive | Positive | partial | unit-xref | `pp_macro_test`/`pp_conditional_test`/`pp_include_test`; **`_Pragma` operator unsupported** — wvmcc rejects it as an undeclared identifier (verified 2026-06-23), so this row stays partial |
 | `LANG-5.1.1.2-05` | 5.1.1.2p1(5) | Phase 5: source→execution charset conversion of chars/escapes | Positive | supported | unit-xref | `pp_normalize_test` |
 | `LANG-5.1.1.2-06` | 5.1.1.2p1(6) | Phase 6: adjacent string-literal concatenation | Positive | supported | unit-xref | `pp_concat_tests` |
 | `LANG-5.1.1.2-07` | 5.1.1.2p1(7) | Phase 7: pp-tokens → tokens; syntactic/semantic analysis | Positive | supported | unit-xref | `tests/unit/parser/*` |
@@ -273,10 +273,10 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.4-01` | 6.4p4 | Longest-match (maximal-munch) tokenization (`x+++++y` → `x ++ ++ + y`) | Positive | supported | unit-xref | `pp_tokenizer_punct_test` |
-| `LANG-6.4-02` | 6.4p2 | A pp-token that cannot become a keyword/identifier/constant/string-literal/punctuator (stray char) is rejected | Negative | partial | compile-fail | **unit gap — no test**; ties to 5.2.1p3 |
+| `LANG-6.4-02` | 6.4p2 | A pp-token that cannot become a keyword/identifier/constant/string-literal/punctuator (stray char) is rejected | Negative | supported | compile-fail | covered by `std-lang-6.4-stray-token` (stray `@` rejected) |
 | `LANG-6.4-03` | 6.4p3 | A `'` or `"` matching only the "single non-white-space character" category is undefined | B-undef | supported | none | documentation |
 | `LANG-6.4.1-01` | 6.4.1p1,p2 | All C17 keywords are recognized and reserved | Positive | supported | unit-xref | `lexer_keyword_test` |
-| `LANG-6.4.1-02` | 6.4.1p2 | `_Imaginary` is reserved | Positive | partial | unit-xref | recognized; imaginary types unsupported |
+| `LANG-6.4.1-02` | 6.4.1p2 | `_Imaginary` is reserved | Positive | supported | compile-fail | keyword recognized; use as identifier rejected (`std-lang-6.4.1-02`). Imaginary *types* remain unsupported (separate) |
 
 ### 6.4.2 Identifiers
 
@@ -289,7 +289,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.4.2-05` | 6.4.2.1p5,p6 | Number of significant initial characters is implementation-defined | B-impl | supported | none | `docs/spec.md`/wvmcc: no limit (all significant) |
 | `LANG-6.4.2-06` | 6.4.2.1p6 | Identifiers differing only in non-significant characters is undefined | B-undef | by-design | none | all characters significant → N/A |
 | `LANG-6.4.2-07` | 6.4.2.1p3 | Which extended (multibyte) characters are permitted in identifiers is implementation-defined | B-impl | partial | none | UTF-8 |
-| `LANG-6.4.2.2-01` | 6.4.2.2p1 | `__func__` is implicitly declared as the enclosing function's name | Positive | partial | stdout | **unit gap — no test** |
+| `LANG-6.4.2.2-01` | 6.4.2.2p1 | `__func__` is implicitly declared as the enclosing function's name | Positive | supported | stdout | `std-lang-6.4.2.2-01`: prints the enclosing function name |
 
 ### 6.4.3 Universal character names
 
@@ -785,7 +785,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.9-01` | 6.9p2 | Constraint: `auto`/`register` may not appear in an external declaration | Negative | supported | compile-fail | |
-| `LANG-6.9-02` | 6.9p3,p5 | At most one external definition per identifier; exactly one if it is used | Negative | partial | compile-fail | cross-TU resolution at link time |
+| `LANG-6.9-02` | 6.9p3,p5 | At most one external definition per identifier; exactly one if it is used | Negative | supported | compile-fail | single-TU duplicate external definition rejected (`std-lang-6.9.1-redefine-func`); cross-TU resolution at link time |
 | `LANG-6.9-03` | 6.9p5 | An unused external-linkage identifier needs no definition | Positive | supported | exit | |
 | `LANG-6.9.1-01` | 6.9.1p1,p11 | A function definition (declarator + body) executes its compound statement | Positive | supported | exit | |
 | `LANG-6.9.1-02` | 6.9.1p2,p3,p4 | Constraints: a function-type declarator; return type `void`/complete-non-array; only `extern`/`static` storage class | Negative | supported | compile-fail | |
@@ -812,7 +812,7 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.1-01` | 6.10.1 | `#if`/`#elif` ICE conditions; `#ifdef`/`#ifndef`; `#else`/`#endif`; nesting | Positive | supported | unit-xref | `pp_conditional_test` |
 | `LANG-6.10.1-02` | 6.10.1p1 | The `defined(X)` / `defined X` operator | Positive | supported | unit-xref | `pp_conditional_test` |
 | `LANG-6.10.1-03` | 6.10.1p4 | Identifiers surviving macro expansion in `#if` are replaced by 0 | Positive | supported | unit-xref | `pp_conditional_test` |
-| `LANG-6.10.1-04` | 6.10.1p1 | Constraint: the controlling expression must be an integer constant expression | Negative | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.1-04` | 6.10.1p1 | Constraint: the controlling expression must be an integer constant expression | Negative | supported | compile-fail | `std-lang-6.10.1-04`: `#if 1.5` rejected |
 | `LANG-6.10.2-01` | 6.10.2 | `#include <...>` and `"..."`; nested; macro-expanded include | Positive | supported | unit-xref | `pp_include_test` |
 | `LANG-6.10.2-02` | 6.10.2 | Include search-path order and quote→angle fallback are implementation-defined | B-impl | supported | none | `docs/spec.md`; `pp_include_test` |
 | `LANG-6.10.3-01` | 6.10.3 | Object-like and function-like macro replacement with argument substitution | Positive | supported | unit-xref | `pp_macro_test` |
@@ -824,13 +824,13 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.3-07` | 6.10.3.2p1 | Constraint: `#` in a function-like macro must be followed by a parameter | Negative | partial | unit-xref | **unit gap — no test** |
 | `LANG-6.10.3-08` | 6.10.3.3p3 | A `##` result that is not a valid preprocessing token is undefined | B-undef | supported | none | documentation |
 | `LANG-6.10.3-09` | 6.10.3p2 | Constraint: a macro redefinition must be identical | Negative | partial | unit-xref | **unit gap — no test** |
-| `LANG-6.10.4-01` | 6.10.4 | `#line N` and `#line N "file"` set the line/file for diagnostics | Positive | partial | unit-xref | `pp_directives_test` (syntax; tracking unverified) |
-| `LANG-6.10.5-01` | 6.10.5 | `#error` produces a diagnostic and fails translation | Negative | partial | unit-xref | `pp_directives_test`; `#error` diagnoses with non-zero exit (verified) — standard `compile-fail` row pending |
-| `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | partial | unit-xref | `pp_directives_test` |
+| `LANG-6.10.4-01` | 6.10.4 | `#line N` and `#line N "file"` set the line/file for diagnostics | Positive | supported | exit | `std-lang-6.10.4-01`: `#line` drives `__LINE__` (runtime-verified; wvmcc diagnostics carry no line numbers) |
+| `LANG-6.10.5-01` | 6.10.5 | `#error` produces a diagnostic and fails translation | Negative | supported | compile-fail | `std-lang-6.10.5-01`: `#error` rejected with a diagnostic + non-zero exit (verified) |
+| `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | supported | exit | `std-lang-6.10.6-01`: unknown pragma warns and the TU runs |
 | `LANG-6.10.6-02` | 6.10.6 | `#pragma once` prevents re-inclusion (extension) | Positive | supported | unit-xref | `pp_pragma_once_test` |
 | `LANG-6.10.6-03` | 6.10.6p2 | Standard `STDC` pragmas (`FP_CONTRACT`, `FENV_ACCESS`, `CX_LIMITED_RANGE`) | Positive | deferred | none | STDC pragmas not implemented |
 | `LANG-6.10.6-04` | 6.10.6p1 | The behavior of an unrecognized pragma is implementation-defined (ignored) | B-impl | partial | none | `docs/spec.md` |
-| `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | supported | exit | `std-lang-6.10.7-01`: `#` alone compiles and runs |
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |
 | `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | partial | static-assert | reflect deferred/by-design features |

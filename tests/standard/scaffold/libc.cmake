@@ -154,3 +154,8 @@ add_standard_static_assert(libc-time-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/time
 add_standard_static_assert(libc-uchar-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/uchar/types.c supported)
 add_standard_static_assert(libc-wchar-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/wchar/types.c supported)
 add_standard_static_assert(libc-wctype-types ${CMAKE_CURRENT_SOURCE_DIR}/libc/wctype/types.c supported)
+
+# Promoted from partial after verifying behavior (partial audit 2026-06-23):
+# stdint "other" limit macros (#81 now lets sizeof/limits evaluate in a
+# _Static_assert). (printf-flags was already registered above.)
+add_standard_static_assert(libc-stdint-other-limits ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdint_extra/other_limits.c)

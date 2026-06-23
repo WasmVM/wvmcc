@@ -140,3 +140,14 @@ add_standard_run_test(lang-6.9.2-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.9_ext
 add_standard_compile_fail(lang-6.9.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.9_external/typedef_function_definition.c supported)
 add_standard_compile_fail(lang-6.9.1-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.9_external/unnamed_prototype_param_in_definition.c supported)
 add_standard_run_test(lang-6.9-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.9_external/unused_extern_no_definition.c supported)
+
+# Preprocessor + lexical rows promoted from partial after verifying behavior
+# (partial audit 2026-06-23): #error/#if-ICE/_Imaginary rejection,
+# #pragma/null-directive/#line acceptance, and __func__.
+add_standard_compile_fail(lang-6.10.5-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.5_error_directive.c)
+add_standard_compile_fail(lang-6.10.1-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.1_if_requires_ice.c)
+add_standard_compile_fail(lang-6.4.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.1_imaginary_reserved.c)
+add_standard_run_test(lang-6.10.6-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.6_pragma_recognized.c)
+add_standard_run_test(lang-6.10.7-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.7_null_directive.c)
+add_standard_run_test(lang-6.10.4-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.4_line_directive.c)
+add_standard_stdout_test(lang-6.4.2.2-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.2.2_func_name.c ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.2.2_func_name.expected)

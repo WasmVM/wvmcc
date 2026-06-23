@@ -134,7 +134,7 @@ LP64 (`docs/spec.md`).
 | `LIBC-stdint-intmax_t-01` | 7.20.1.5 | intmax_t / uintmax_t | type | Greatest-width integer types | B-impl | supported | static-assert | 64-bit; width via `sizeof` verified (#81 fixed) |
 | `LIBC-stdint-INTN_limits-01` | 7.20.2.1 | INT8_MIN … INT64_MAX / UINTN_MAX | obj-macro | Exact-width limit macros; `#if`-usable | Positive | supported | static-assert | |
 | `LIBC-stdint-INT_LEAST/FAST-01` | 7.20.2.2,7.20.2.3 | INT_LEASTN_* / INT_FASTN_* limit macros | obj-macro | Least/fast-width limit macros | Positive | supported | static-assert | |
-| `LIBC-stdint-other-limits-01` | 7.20.2.4,7.20.2.5 | INTPTR_* / INTMAX_* / PTRDIFF_* / SIZE_MAX / SIG_ATOMIC_* / WCHAR_* / WINT_* | obj-macro | Other-type limit macros (`SIZE_MAX`, `PTRDIFF_MAX`, …) | B-impl | partial | static-assert | LP64 values |
+| `LIBC-stdint-other-limits-01` | 7.20.2.4,7.20.2.5 | INTPTR_* / INTMAX_* / PTRDIFF_* / SIZE_MAX / SIG_ATOMIC_* / WCHAR_* / WINT_* | obj-macro | Other-type limit macros (`SIZE_MAX`, `PTRDIFF_MAX`, …) | B-impl | supported | static-assert | LP64 values |
 | `LIBC-stdint-INTN_C-01` | 7.20.4 | INT8_C … INTMAX_C / UINTN_C | fn-macro | Integer-constant builder macros yield the right type/value | Positive | supported | static-assert | value landed; type/width via `sizeof` verified (#81 fixed) |
 
 ## `<stdnoreturn.h>` (7.23)
@@ -256,7 +256,7 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-stdio-snprintf-01` | 7.21.6.5 | snprintf | fn | Bounded formatted output; returns the would-be length | Positive | supported | exit | |
 | `LIBC-stdio-printf-conv-01` | 7.21.6.1 | printf (conversions) | fn | `%d %i %u %o %x %X %c %s %p %%` produce correct output | Positive | supported | stdout | |
 | `LIBC-stdio-printf-float-01` | 7.21.6.1 | printf (`%f %e %g %a`) | fn | Floating conversions, incl. `nan`/`inf` | Positive | supported | stdout | hand-rolled float formatting |
-| `LIBC-stdio-printf-flags-01` | 7.21.6.1 | printf (flags/width/precision/length) | fn | `-+ 0#`, width, precision, `l`/`ll`/`h`/`z` modifiers | Positive | partial | stdout | |
+| `LIBC-stdio-printf-flags-01` | 7.21.6.1 | printf (flags/width/precision/length) | fn | `-+ 0#`, width, precision, `l`/`ll`/`h`/`z` modifiers | Positive | supported | stdout | |
 | `LIBC-stdio-vprintf-01` | 7.21.6.8–7.21.6.14 | vprintf / vfprintf / vsprintf / vsnprintf | fn | `va_list` formatted-output variants | Positive | supported | stdout | |
 | `LIBC-stdio-scanf-01` | 7.21.6.2,7.21.6.4,7.21.6.7 | scanf / fscanf / sscanf | fn | Formatted input | Positive | deferred | none | scanf family not implemented |
 | `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | supported | exit | via `sys_fs.open` |
