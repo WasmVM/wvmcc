@@ -198,7 +198,7 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 | `LANG-6.2.7-01` | 6.2.7p1 | Identical types are compatible; cross-TU struct/union/enum compatibility by tag + members | Positive | supported | exit | two-TU link test |
 | `LANG-6.2.7-02` | 6.2.7p2 | An incompatible redeclaration of one identifier within a TU is rejected | Negative | supported | compile-fail | unit-xref `sema_decl_compat_test` |
 | `LANG-6.2.7-03` | 6.2.7p2 | Two declarations of the same object/function with incompatible type across TUs is undefined | B-undef | supported | none | documentation |
-| `LANG-6.2.7-04` | 6.2.7p3 | The composite type of two compatible types (array size from the sized one; merged prototype) | Positive | partial | exit | |
+| `LANG-6.2.7-04` | 6.2.7p3 | The composite type of two compatible types (array size from the sized one; merged prototype) | Positive | supported | exit | |
 | `LANG-6.2.7-05` | 6.2.7p3 | Composite of VLA-sized array types | Positive | deferred | none | VLAs deferred |
 
 ### 6.2.8 Alignment of objects
@@ -567,7 +567,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 |---|---|---|---|---|---|---|
 | `LANG-6.6-01` | 6.6p2,p6 | Integer constant expressions evaluate at translation time (array size, enum value, bit-field width, `case` label) | Positive | supported | static-assert | |
 | `LANG-6.6-02` | 6.6p3 | Constraint: no assignment/`++`/`--`/function-call/comma operators (except in an unevaluated subexpression) | Negative | supported | compile-fail | |
-| `LANG-6.6-03` | 6.6p4 | Constraint: a constant expression's value must be in range for its type | Negative | partial | compile-fail | |
+| `LANG-6.6-03` | 6.6p4 | Constraint: a constant expression's value must be in range for its type | Negative | supported | compile-fail | |
 | `LANG-6.6-04` | 6.6p6 | ICE operand rules: only integer/enum/char constants, `sizeof`/`_Alignof`, and float constants as immediate cast operands | Negative | supported | compile-fail | unit-xref `sema_enum_test`, `static_assert_test` |
 | `LANG-6.6-05` | 6.6p7,p8 | Arithmetic constant expressions are accepted in initializers | Positive | supported | static-assert | |
 | `LANG-6.6-06` | 6.6p9 | Address constants (`&` of a static-duration object, a function designator, array/function decay) | Positive | supported | exit | |
@@ -620,9 +620,9 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.2.1-06` | 6.7.2.1p5 | A bit-field type is `_Bool`/`signed int`/`unsigned int`/an impl-defined type | Negative | supported | compile-fail | |
 | `LANG-6.7.2.1-07` | 6.7.2.1p10,p11 | Bit-field value semantics and packing into storage units | Positive | supported | exit | unit-xref `struct_union_test` |
 | `LANG-6.7.2.1-08` | 6.7.2.1p11 | Bit-field straddle/packing and allocation order are implementation-defined; unit alignment is unspecified | B-impl | supported | exit | `docs/spec.md`: LSB-first defined layout |
-| `LANG-6.7.2.1-09` | 6.7.2.1p13 | Anonymous struct/union members are members of the containing type | Positive | partial | exit | |
+| `LANG-6.7.2.1-09` | 6.7.2.1p13 | Anonymous struct/union members are members of the containing type | Positive | supported | exit | |
 | `LANG-6.7.2.1-10` | 6.7.2.1p14 | Each non-bit-field member is aligned in an implementation-defined manner | B-impl | supported | static-assert | `docs/spec.md`: natural alignment |
-| `LANG-6.7.2.1-11` | 6.7.2.1p18 | A flexible array member (last member of a multi-member struct, incomplete array) | Positive | partial | exit | |
+| `LANG-6.7.2.1-11` | 6.7.2.1p18 | A flexible array member (last member of a multi-member struct, incomplete array) | Positive | supported | exit | |
 | `LANG-6.7.2.1-12` | 6.7.2.1p18 | Accessing FAM elements beyond the allocation is undefined | B-undef | partial | none | documentation |
 | `LANG-6.7.2.1-13` | 6.7.2.1p8 | A struct/union with no named members is undefined | B-undef | supported | none | documentation |
 
@@ -670,7 +670,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.4-01` | 6.7.4p1,p6 | `inline` function specifier and inline-substitution suggestion | Positive | supported | exit | unit-xref `sema_inline_test` |
 | `LANG-6.7.4-02` | 6.7.4p2 | Function specifiers appear only on function declarations | Negative | supported | compile-fail | |
 | `LANG-6.7.4-03` | 6.7.4p7 | Inline-definition vs external-definition rules (`extern` ⇒ external definition) | Positive | supported | exit | |
-| `LANG-6.7.4-04` | 6.7.4p3 | An external-linkage inline definition must not define a static-duration modifiable object or reference an internal-linkage identifier | Negative | partial | compile-fail | |
+| `LANG-6.7.4-04` | 6.7.4p3 | An external-linkage inline definition must not define a static-duration modifiable object or reference an internal-linkage identifier | Negative | supported | compile-fail | |
 | `LANG-6.7.4-05` | 6.7.4p8 | A `_Noreturn` function does not return to its caller | Positive | supported | exit | emits trailing `unreachable` |
 | `LANG-6.7.4-06` | 6.7.4p8,p9 | A `_Noreturn` function that returns is undefined (recommended diagnostic) | B-undef | supported | none | documentation |
 | `LANG-6.7.4-07` | 6.7.4p6 | The extent to which inline suggestions are effective is implementation-defined | B-impl | partial | none | `docs/spec.md` |
@@ -700,7 +700,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.6.3-01` | 6.7.6.3p5,p10 | Function declarators/prototypes; `(void)` means no parameters | Positive | supported | exit | |
 | `LANG-6.7.6.3-02` | 6.7.6.3p1–p4 | Constraints: no function/array return type; only `register` parameter storage; non-defining identifier list empty; complete param types in a definition | Negative | supported | compile-fail | |
 | `LANG-6.7.6.3-03` | 6.7.6.3p7,p8 | A parameter "array of T" adjusts to "pointer to T"; "function returning T" to "pointer to function" | Positive | supported | exit | |
-| `LANG-6.7.6.3-04` | 6.7.6.3p14,p15 | Old-style (identifier-list/empty) vs prototype declarator compatibility | Positive | partial | exit | |
+| `LANG-6.7.6.3-04` | 6.7.6.3p14,p15 | Old-style (identifier-list/empty) vs prototype declarator compatibility | Positive | supported | exit | |
 
 ### 6.7.7 Type names
 
@@ -798,7 +798,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.9.2-01` | 6.9.2p1 | A file-scope object with an initializer is an external definition | Positive | supported | exit | |
 | `LANG-6.9.2-02` | 6.9.2p2 | Tentative definitions: a file-scope object without initializer/`static` collapses to one definition (init 0) | Positive | supported | exit | |
 | `LANG-6.9.2-03` | 6.9.2p2 | `int i[];` with only tentative definitions completes to one zero-initialized element | Positive | supported | exit | |
-| `LANG-6.9.2-04` | 6.9.2p3 | Constraint: an internal-linkage tentative definition's type must not remain incomplete | Negative | partial | compile-fail | |
+| `LANG-6.9.2-04` | 6.9.2p3 | Constraint: an internal-linkage tentative definition's type must not remain incomplete | Negative | supported | compile-fail | |
 
 ---
 
@@ -843,7 +843,7 @@ Clause 6.11 is informative. wvmcc targets C17 exactly; these are recorded for co
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.11-01` | 6.11.6,6.11.7 | Obsolescent non-prototype (old-style) function declarators/definitions are still accepted | Positive | partial | exit | informative; wvmcc accepts old-style |
+| `LANG-6.11-01` | 6.11.6,6.11.7 | Obsolescent non-prototype (old-style) function declarators/definitions are still accepted | Positive | supported | exit | informative; wvmcc accepts old-style |
 | `LANG-6.11-02` | 6.11.1–6.11.5,6.11.8,6.11.9 | Remaining future-direction items are informative — no normative test | B-impl | by-design | none | informative clause; documented, not tested |
 
 <!-- language.md complete: Clause 4, Clause 5, 6.2–6.11. -->

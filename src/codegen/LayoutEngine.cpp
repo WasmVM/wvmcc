@@ -1,4 +1,5 @@
 #include "LayoutEngine.hpp"
+#include "../parser/ConstExprEval.hpp"
 #include <algorithm>
 #include <cassert>
 
@@ -19,11 +20,11 @@ static std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl) {
 // Best-effort constant fold of an array-size expression (integer literal).
 static size_t arrayCount(const wvmcc::parser::Declarator* arr) {
     if (arr->array.size.has_value() && *arr->array.size) {
-        const auto& e = **arr->array.size;
-        if (e.kind == wvmcc::parser::Expr::Kind::Integer) {
-            auto v = static_cast<const wvmcc::parser::IntegerLiteral&>(e).value;
-            if (v > 0) return static_cast<size_t>(v);
-        }
+        // Fold the full integer constant expression — not just a bare literal,
+        // but also arithmetic, `sizeof`, and enum constants (e.g.
+        // `char raw[sizeof(struct s) + 4 * sizeof(int)]`).
+        if (auto v = wvmcc::parser::ConstExprEvaluator::evalIntegerConstantExpr(*arr->array.size))
+            if (*v > 0) return static_cast<size_t>(*v);
     }
     return 1; // unknown / flexible array → treat as one element
 }
@@ -153,6 +154,7 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
             }
             layout.fieldOffsets.emplace_back(name, fieldOffset);
             layout.byteAlignment = std::max(layout.byteAlignment, al);
+            return fieldOffset;
         };
 
         // Place a bit-field of `width` bits, storage unit `sz` bytes, LSB-first.
@@ -191,14 +193,20 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
         // adornment and gets its own offset.
         if (member.declarators.empty()) {
             // Anonymous member (e.g. an anonymous struct/union) — embedded by
-            // value, so use its true size.
+            // value, so use its true size. C 6.7.2.1p13: its members are members
+            // of the containing struct/union, so hoist their offsets in (shifted
+            // by the anonymous member's base) so getFieldOffset resolves them.
             size_t sz = memberSize, al = memberAlignment;
             if (structBaseSu) {
                 StructLayout sub = computeLayout(*structBaseSu);
                 sz = sub.byteSize ? sub.byteSize : 1;
                 al = sub.byteAlignment;
+                size_t base = placeField("", sz, al);
+                for (const auto& [n, off] : sub.fieldOffsets)
+                    if (!n.empty()) layout.fieldOffsets.emplace_back(n, base + off);
+            } else {
+                placeField("", sz, al);
             }
-            placeField("", sz, al);
         } else {
             for (const auto& sd : member.declarators) {
                 if (sd.bitfieldWidth.has_value() && *sd.bitfieldWidth) {
@@ -227,6 +235,20 @@ StructLayout LayoutEngine::computeLayout(const wvmcc::parser::StructOrUnionSpeci
                         if (sd.declarator) applyDeclaratorToLayout(sd.declarator, sz, al); // array multiplier
                     } else if (sd.declarator) {
                         applyDeclaratorToLayout(sd.declarator, sz, al);
+                    }
+                    // C 6.7.2.1p18: a flexible array member (the last member of a
+                    // struct, an incomplete array type) is ignored when computing
+                    // the struct's size. It still gets an offset (one past the
+                    // named members) so `s.fam[i]` addresses trailing storage.
+                    bool isFlexArray = !isUnion && !isPointer
+                        && &member == &structSpec.members.back();
+                    if (isFlexArray && sd.declarator) {
+                        bool unsized = false;
+                        for (auto cur = sd.declarator; cur;
+                             cur = (cur->inner.has_value() ? *cur->inner : nullptr))
+                            if (cur->kind == wvmcc::parser::Declarator::Kind::Array
+                                && !cur->array.size.has_value()) { unsized = true; break; }
+                        if (unsized) sz = 0;
                     }
                     placeField(sd.declarator ? declaratorName(sd.declarator) : "", sz, al);
                 }

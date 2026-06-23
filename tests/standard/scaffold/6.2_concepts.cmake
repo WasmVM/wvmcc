@@ -41,7 +41,7 @@ add_standard_static_assert(lang-6.2.6.2-06 ${CMAKE_CURRENT_SOURCE_DIR}/language/
 # via `extern` by the aux TU; both denote the same object.
 add_standard_run_test2(lang-6.2.2-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.2_object_external_linkage.c ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.2_object_external_linkage_aux.c supported)
 add_standard_compile_fail(lang-6.2.7-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.7_incompatible_redeclaration.c supported)
-add_standard_run_test(lang-6.2.7-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.7_composite_type.c partial)
+add_standard_run_test(lang-6.2.7-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.7_composite_type.c supported)
 add_standard_static_assert(lang-6.2.8-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_object_type_alignment.c supported)
 add_standard_static_assert(lang-6.2.8-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_fundamental_alignment_max_align_t.c supported)
 add_standard_static_assert(lang-6.2.8-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_alignas_stricter_alignment.c supported)
