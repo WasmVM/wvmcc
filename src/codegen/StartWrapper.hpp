@@ -6,6 +6,31 @@
 
 namespace wvmcc::codegen::startwrapper {
 
+// #98: shadow-stack (mem[1]) sizing. The shadow stack holds C call frames AND
+// the crt0-built argv[] block (emitStartWrapper writes argv into mem[1] at
+// SP-relative offsets). mem[1] is sized to the largest single frame plus a
+// fixed reserve for call-depth nesting and argv, and `__stack_pointer` is
+// initialized to the top of mem[1] (the stack grows downward). Both the
+// freestanding compiler (ModuleCodegen) and the linker (Crt0Synth) use these.
+constexpr uint64_t kWasmPageSize = 65536;
+// Reserve on top of the largest single frame. One page preserves the legacy
+// 64 KiB stack budget for call depth + argv, while the largest frame gets its
+// own room above it — so this strictly dominates the old fixed 1-page stack.
+constexpr uint64_t kShadowStackReserve = kWasmPageSize;
+// Page-rounded mem[1] byte size for a module whose largest frame is maxFrame.
+// The stack pointer is initialized to this value.
+inline uint64_t shadowStackSize(uint64_t maxFrame) {
+    uint64_t pages = (maxFrame + kShadowStackReserve + kWasmPageSize - 1) / kWasmPageSize;
+    if (pages < 1) pages = 1;
+    return pages * kWasmPageSize;
+}
+
+// #98: high-nibble tag marking an i64 pointer value as referring to mem[1] (the
+// shadow stack). Mirrors FunctionCodegen::kMemidxShift — argv pointers handed to
+// `main` must carry this tag so user-code deref dispatches to mem[1], and the
+// tag-aware sysenv host (get_mem) writes argv strings into mem[1].
+constexpr int64_t kMem1PtrTag = (int64_t)1 << 60;
+
 // Indices of the four sys_proc imports (in `module.imports` order = function
 // index space, since imports occupy the low end of the index space).
 struct SysProcImports {

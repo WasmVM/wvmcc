@@ -17,6 +17,8 @@ add_standard_run_test(lang-6.2.3-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_con
 add_standard_run_test(lang-6.2.4-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.4_static_storage_duration.c supported)
 add_standard_run_test(lang-6.2.4-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.4_automatic_storage_per_recursion.c supported)
 add_standard_run_test(lang-6.2.4-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.4_static_block_scope_persists.c supported)
+add_standard_run_test(lang-6.2.4-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.4_large_static_object.c supported)
+add_standard_run_test(lang-6.2.4-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.4_large_automatic_object.c supported)
 add_standard_static_assert(lang-6.2.5-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_bool_stores_zero_one.c supported)
 add_standard_static_assert(lang-6.2.5-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_char_holds_basic_set.c supported)
 add_standard_static_assert(lang-6.2.5-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.5_char_is_signed.c supported)

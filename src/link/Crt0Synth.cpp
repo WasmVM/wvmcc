@@ -57,6 +57,35 @@ bool isEnvImport(const WasmVM::WasmImport& imp, const std::string& name) {
     return imp.module == "env" && imp.name == name;
 }
 
+// #98: recover the largest single shadow-stack frame across all defined
+// functions by matching the prologue the compiler emits (FunctionCodegen::
+// generatePrologue):
+//   global.get $sp ; i64.const <frameSize> ; i64.sub ; local.tee $fp ; global.set $sp
+// The (get g … sub … set g) shape with a matching global index is unique to the
+// prologue — the epilogue uses i64.add and starts with local.get, and user code
+// never manipulates __stack_pointer directly. Returns 0 if no framed function.
+uint64_t maxFrameSize(const WasmVM::WasmModule& m) {
+    namespace Op = WasmVM::Opcode;
+    uint64_t maxFrame = 0;
+    for (const auto& f : m.funcs) {
+        const auto& b = f.body;
+        for (size_t i = 0; i + 4 < b.size(); ++i) {
+            if (b[i].opcode   != Op::Global_get) continue;
+            if (b[i+1].opcode != Op::I64_const)  continue;
+            if (b[i+2].opcode != Op::I64_sub)    continue;
+            if (b[i+3].opcode != Op::Local_tee)  continue;
+            if (b[i+4].opcode != Op::Global_set) continue;
+            auto* g0 = std::get_if<WasmVM::WasmInstr::OneIdx>(&b[i].imm);
+            auto* g1 = std::get_if<WasmVM::WasmInstr::OneIdx>(&b[i+4].imm);
+            auto* cn = std::get_if<WasmVM::WasmInstr::ConstI64>(&b[i+1].imm);
+            if (!g0 || !g1 || !cn || g0->index != g1->index) continue;
+            if (cn->value > 0)
+                maxFrame = std::max(maxFrame, (uint64_t)cn->value);
+        }
+    }
+    return maxFrame;
+}
+
 // Pull main's funcidx and whether it takes (argc, argv) out of the merged
 // output's exports + types. Returns std::nullopt if main isn't exported.
 struct MainInfo {
@@ -179,12 +208,24 @@ void synthesize(LinkContext& ctx) {
         m.mems.insert(m.mems.begin() + i, memTy);
     }
 
-    // Stack pointer: mut i64 initialized to one page (0x10000).
+    // #98: size mem[1] (shadow stack) to the largest single frame plus reserve.
+    // The stack pointer is initialized to its top; the stack grows downward and
+    // the crt0 argv[] block is carved from the same region (StartWrapper). The
+    // legacy fixed 1-page stack trapped for any frame > 64 KiB.
+    namespace sw = wvmcc::codegen::startwrapper;
+    uint64_t stackTop = sw::shadowStackSize(maxFrameSize(m));
+    {
+        uint64_t pages = stackTop / sw::kWasmPageSize;
+        if ((uint64_t)m.mems[1].min < pages)
+            m.mems[1].min = (decltype(m.mems[1].min))pages;
+    }
+
+    // Stack pointer: mut i64 initialized to the top of the shadow stack.
     {
         WasmVM::WasmGlobal sp;
         sp.type = WasmVM::GlobalType{WasmVM::GlobalType::variable,
                                      WasmVM::ValueType::i64};
-        sp.init = WasmVM::Instr::I64_const{0x10000};
+        sp.init = WasmVM::Instr::I64_const{(WasmVM::i64_t)stackTop};
         m.globals.insert(m.globals.begin(), sp);
     }
     // Heap base: const i64 = round_up_8(max data-segment end).

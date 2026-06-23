@@ -324,6 +324,8 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
 
     // Wrap body with shadow-stack prologue/epilogue when needed.
     if (framePointerLocal_ != -1 && frameSize_ > 0) {
+        // #98: surface this frame's size so the module can size mem[1].
+        if (moduleCg_) moduleCg_->noteMaxFrameSize(frameSize_);
         auto prologue = generatePrologue();
         // Append epilogue at end for void/fallthrough paths.
         generateEpilogue();

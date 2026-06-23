@@ -85,6 +85,12 @@ public:
     // to size the runtime tag-dispatch in emitTaggedLoad/Store.
     uint8_t maxDataMemidx() const { return maxDataMemidx_; }
 
+    // #98: record a function's shadow-stack frame size. The largest single
+    // frame drives mem[1] sizing — freestanding via finalizeFreestandingHeapBase,
+    // linked via the linker's prologue scan. FunctionCodegen calls this once a
+    // function's frame is final.
+    void noteMaxFrameSize(size_t s) { if (s > maxFrameSize_) maxFrameSize_ = s; }
+
     // M2-E: a module-level data-pointer relocation. `codeFuncIdx` is the
     // function's index within `module.funcs` (NOT the module-wide function
     // index space, which would include imports). `instrIdx` is the
@@ -212,6 +218,8 @@ private:
     // Highest memidx in use (see maxDataMemidx()). 1 unless a global requests
     // an explicit higher placement.
     uint8_t maxDataMemidx_ = 1;
+    // #98: largest single shadow-stack frame across all functions in this TU.
+    size_t maxFrameSize_ = 0;
     // Ensure memory `idx` is available for an explicit wvmcc_memidx(N) placement
     // and bump maxDataMemidx_. Freestanding: defines the memory locally (filling
     // gaps). Linkable: records the high-water mark only — the env.__memory_N
@@ -224,9 +232,17 @@ private:
     void setupGlobals();
     // Freestanding mode only: patch the `__heap_base` const i64 global (slot
     // heapBaseGlobalIdx_, reserved early in setupGlobals) to
-    // round_up_to_8(dataAllocator_.currentTop()). Called after secondPass so
-    // the data layout is finalized.
+    // round_up_to_8(dataAllocator_.currentTop()), size mem[0] to hold all static
+    // data including .bss (#99), and size mem[1] + initialize __stack_pointer to
+    // the top of a stack large enough for the largest frame (#98). Called after
+    // secondPass so the data and frame layout are finalized.
     void finalizeFreestandingHeapBase();
+    // Linkable mode only (#99): emit a 1-byte marker data segment at the top of
+    // the static region (dataAllocator_.currentTop()), so the .bss extent — which
+    // otherwise produces no data segment — is visible to the linker's data-extent
+    // scan, which sizes mem[0] and __heap_base. Reuses the existing per-TU data
+    // rebasing in ModuleMerge. Called after secondPass.
+    void emitLinkableDataTopMarker();
     void firstPass(const wvmcc::parser::TranslationUnitPtr& tu);
 
     // #77: register the runtime Wasm globals __stack_pointer / __heap_base as
