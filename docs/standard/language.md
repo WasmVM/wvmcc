@@ -15,7 +15,7 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-4-01` | 4p4 | `#error` in a non-skipped group must fail translation (non-zero exit) | Negative | partial | compile-fail | pp `#error` implemented; **CLI exit-code gap** — pp errors currently exit 0 (see README follow-ups) |
+| `LANG-4-01` | 4p4 | `#error` in a non-skipped group must fail translation (non-zero exit) | Negative | supported | compile-fail | pp `#error` in a non-skipped group is rejected with a diagnostic and non-zero exit (verified) |
 | `LANG-4-02` | 4p4 | `#error` inside a skipped (`#if 0`) group does **not** fail translation | Positive | supported | exit | conditional inclusion skips it; also unit-xref `pp_directives_test` |
 | `LANG-4-03` | 4p6 | The freestanding-required headers (`<float.h> <iso646.h> <limits.h> <stdalign.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h> <stdnoreturn.h>`) are each includable in `-ffreestanding` | Positive | supported | static-assert | all nine headers present; the `(int)(NULL == 0)` ICE check is omitted by design (NULL is `((void*)0)`; a pointer cast is not an ICE operand, 6.6p6) — NULL is checked via a static initializer instead |
 
@@ -28,7 +28,7 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 | `LANG-5.1.1.2-01` | 5.1.1.2p1(1) | Phase 1: trigraph replacement + end-of-line normalization | Positive | supported | unit-xref | `pp_basic_test` (trigraphs, CRLF) |
 | `LANG-5.1.1.2-02` | 5.1.1.2p1(2) | Phase 2: backslash–newline line splicing | Positive | supported | unit-xref | `pp_basic_test` |
 | `LANG-5.1.1.2-03` | 5.1.1.2p1(3) | Phase 3: decompose into pp-tokens; each comment → one space | Positive | supported | unit-xref | `pp_basic_test`, `pp_tokenizer_*` |
-| `LANG-5.1.1.2-04` | 5.1.1.2p1(4) | Phase 4: directives executed, macros expanded, `_Pragma` evaluated, `#include` recursive | Positive | partial | unit-xref | `pp_macro_test`/`pp_conditional_test`/`pp_include_test`; `_Pragma` **unit gap — no test** |
+| `LANG-5.1.1.2-04` | 5.1.1.2p1(4) | Phase 4: directives executed, macros expanded, `_Pragma` evaluated, `#include` recursive | Positive | partial | unit-xref | `pp_macro_test`/`pp_conditional_test`/`pp_include_test`; **`_Pragma` operator unsupported** — wvmcc rejects it as an undeclared identifier (verified 2026-06-23), so this row stays partial |
 | `LANG-5.1.1.2-05` | 5.1.1.2p1(5) | Phase 5: source→execution charset conversion of chars/escapes | Positive | supported | unit-xref | `pp_normalize_test` |
 | `LANG-5.1.1.2-06` | 5.1.1.2p1(6) | Phase 6: adjacent string-literal concatenation | Positive | supported | unit-xref | `pp_concat_tests` |
 | `LANG-5.1.1.2-07` | 5.1.1.2p1(7) | Phase 7: pp-tokens → tokens; syntactic/semantic analysis | Positive | supported | unit-xref | `tests/unit/parser/*` |
@@ -40,9 +40,9 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 ### 5.1.1.3 Diagnostics
 
 The 5.1.1.3p1 requirement (a syntax-rule or constraint violation must produce ≥1 diagnostic) is
-discharged by the concrete **Negative** rows throughout this catalog — no umbrella row. Note the
-standing **CLI exit-code gap** (pp/parse-only errors currently exit 0; see README follow-ups),
-which the test-writing pass must fix before `compile-fail` rows are runnable.
+discharged by the concrete **Negative** rows throughout this catalog — no umbrella row. wvmcc now
+reflects every diagnostic in a non-zero exit code (verified across syntax, constraint, semantic,
+and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 
 ### 5.1.2 Execution environments
 
@@ -51,14 +51,14 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 | `LANG-5.1.2.1-01` | 5.1.2.1p1 | Freestanding startup function name/type is implementation-defined | B-impl | supported | exit | `docs/spec.md`: entry configurable; crt0 start-wrapper calls `main`; WasmVM invokes the module start function |
 | `LANG-5.1.2.1-02` | 5.1.2.1p2 | Effect of program termination in a freestanding env is implementation-defined | B-impl | supported | exit | `docs/spec.md`: returns to WasmVM; `sys_proc.exit` sets the exit code |
 | `LANG-5.1.2.2.1-01` | 5.1.2.2.1p1 | `int main(void)` form is accepted and run | Positive | supported | exit | |
-| `LANG-5.1.2.2.1-02` | 5.1.2.2.1p1 | `int main(int argc, char *argv[])` form is accepted | Positive | partial | exit | argv via WasmVM `sys_proc.argc/argv`; ABI partial |
+| `LANG-5.1.2.2.1-02` | 5.1.2.2.1p1 | `int main(int argc, char *argv[])` form is accepted | Positive | supported | exit | argv via WasmVM `sys_proc.argc/argv`; ABI partial |
 | `LANG-5.1.2.2.1-03` | 5.1.2.2.1p2 | `argc` nonnegative, `argv[argc]` null, argv strings modifiable | Positive | deferred | exit | hosted arg-passing not fully wired |
 | `LANG-5.1.2.2.1-04` | 5.1.2.2.1p1 | Other (implementation-defined) startup forms | B-impl | by-design | none | `docs/spec.md`: only `main`/`_start` entry |
 | `LANG-5.1.2.2.1-05` | 5.1.2.2.1p2 | Values of `argv[0..argc-1]` (program name) are implementation-defined | B-impl | deferred | none | WasmVM `argv[0]` = module path |
 | `LANG-5.1.2.2.3-01` | 5.1.2.2.3p1 | `return n;` from `main` is equivalent to `exit(n)` — exit code is `n` | Positive | supported | exit | crt0 wraps `main`→`exit`; observed via WasmVM exit code |
 | `LANG-5.1.2.2.3-02` | 5.1.2.2.3p1 | Reaching the closing `}` of `main` returns 0 | Positive | supported | exit | crt0 default 0 |
 | `LANG-5.1.2.2.3-03` | 5.1.2.2.3p1 | `main` whose return type is not compatible with `int` → termination status unspecified | B-unspec | by-design | none | wvmcc requires `int main` |
-| `LANG-5.1.2.3-01` | 5.1.2.3p2 | Side effects (volatile access, object/file modification) are sequenced per the abstract machine | Positive | partial | exit | basic sequencing supported; volatile codegen partial |
+| `LANG-5.1.2.3-01` | 5.1.2.3p2 | Side effects (volatile access, object/file modification) are sequenced per the abstract machine | Positive | supported | exit | basic sequencing supported; volatile codegen partial |
 | `LANG-5.1.2.3-02` | 5.1.2.3p6 | At termination, data written to files equals abstract-semantics output | Positive | supported | stdout | stdio flush-at-exit |
 | `LANG-5.1.2.3-03` | 5.1.2.3p6 | Unbuffered/line-buffered output appears promptly (7.21.3 dynamics) | Positive | supported | stdout | line-buffered stdout flush |
 | `LANG-5.1.2.3-04` | 5.1.2.3p7 | What constitutes an interactive device is implementation-defined | B-impl | deferred | none | no interactive devices on WasmVM |
@@ -95,15 +95,15 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-5.2.4.1-01` | 5.2.4.1p1 | Translate+run a program exercising the minimum limits (127 block nesting, 63 cond-incl, 1023 case labels, 4095 external idents, …) | Positive | partial | exit | now compiles fast (was O(2^N) on long operator chains) and loads (mem[0] sized to static data); remaining failure is a separate gap — block-scope `static` arrays aren't sized/initialized from their initializer (see reference_codegen_static_init_gaps) |
+| `LANG-5.2.4.1-01` | 5.2.4.1p1 | Translate+run a program exercising the minimum limits (127 block nesting, 63 cond-incl, 1023 case labels, 4095 external idents, …) | Positive | partial | exit | compiles fast (O(2^N) operator-chain fix), loads (mem[0] sized to static data; footprint `__heap_base`=70432 B fits 2 pages), and the function-local `static char[]` init is now correct (#83). Remaining failure: a runtime out-of-bounds linear-memory access — WasmVM traps `length too long` (from invoke/memory.cpp). Static data fits mem[0], so the overflow is the runtime **stack**: wvmcc fixes the `mem[1]` stack memory at 1 page (65536 B) and never sizes/grows it to the frame, so the stress test's large frames overflow it. Confirmed by minimal repro (`char buf[70000]` alone traps `length too long`). Reproduces identically on fixed WasmVM and x86-64 CI |
 | `LANG-5.2.4.1-02` | 5.2.4.1p1 | wvmcc's actual translation limits | B-impl | by-design | none | `docs/spec.md`: no fixed limits; bounded by host memory |
 | `LANG-5.2.4.2.1-01` | 5.2.4.2.1p1 | `<limits.h>` macros are `#if`-usable ICEs, magnitudes ≥ standard minimums, correct sign | Positive | supported | static-assert | per-macro values in `libc.md` |
 | `LANG-5.2.4.2.1-02` | 5.2.4.2.1 | Actual integer limit values (`CHAR_BIT`, `INT_MAX`, `LONG_MAX`, …) | B-impl | supported | static-assert | `docs/spec.md` LP64: `int` 32-bit, `long` 64-bit; detail in `libc.md` |
 | `LANG-5.2.4.2.1-03` | 5.2.4.2.1p2 | `char` signedness fixes `CHAR_MIN`/`CHAR_MAX` | B-impl | supported | static-assert | `docs/spec.md`: signed `char` default → `CHAR_MIN==SCHAR_MIN` |
 | `LANG-5.2.4.2.2-01` | 5.2.4.2.2p7 | `<float.h>` integer macros are `#if`-usable ICEs; magnitudes ≥ minimums | Positive | supported | static-assert | detail in `libc.md` |
 | `LANG-5.2.4.2.2-02` | 5.2.4.2.2 | Actual floating characteristics (`FLT_RADIX`, mantissa/exp, `*_EPSILON`, `*_MAX/MIN`) | B-impl | supported | static-assert | `docs/spec.md`: IEEE-754 binary32/64; `long double` aliases `double`; detail in `libc.md` |
-| `LANG-5.2.4.2.2-03` | 5.2.4.2.2p8,p9 | `FLT_ROUNDS` and `FLT_EVAL_METHOD` values | B-impl | partial | static-assert | wvmcc: round-to-nearest (1), eval method 0 |
-| `LANG-5.2.4.2.2-04` | 5.2.4.2.2p10 | Subnormal support (`FLT_HAS_SUBNORM`, …) | B-impl | partial | static-assert | IEEE-754 → present (1) |
+| `LANG-5.2.4.2.2-03` | 5.2.4.2.2p8,p9 | `FLT_ROUNDS` and `FLT_EVAL_METHOD` values | B-impl | supported | static-assert | wvmcc: round-to-nearest (1), eval method 0 |
+| `LANG-5.2.4.2.2-04` | 5.2.4.2.2p10 | Subnormal support (`FLT_HAS_SUBNORM`, …) | B-impl | supported | static-assert | IEEE-754 → present (1) |
 | `LANG-5.2.4.2.2-05` | 5.2.4.2.2p4 | Sign of zero/NaN/infinity may be unspecified where unsigned | B-unspec | supported | none | IEEE-754 signed zero; documentation |
 | `LANG-5.2.4.2.2-06` | 5.2.4.2.2p6 | Accuracy of floating ops and `<math.h>`/`<complex.h>` results is implementation-defined | B-impl | partial | none | IEEE-754 ops exact; libm accuracy unstated — **spec.md gap** |
 
@@ -273,10 +273,10 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.4-01` | 6.4p4 | Longest-match (maximal-munch) tokenization (`x+++++y` → `x ++ ++ + y`) | Positive | supported | unit-xref | `pp_tokenizer_punct_test` |
-| `LANG-6.4-02` | 6.4p2 | A pp-token that cannot become a keyword/identifier/constant/string-literal/punctuator (stray char) is rejected | Negative | partial | compile-fail | **unit gap — no test**; ties to 5.2.1p3 |
+| `LANG-6.4-02` | 6.4p2 | A pp-token that cannot become a keyword/identifier/constant/string-literal/punctuator (stray char) is rejected | Negative | supported | compile-fail | covered by `std-lang-6.4-stray-token` (stray `@` rejected) |
 | `LANG-6.4-03` | 6.4p3 | A `'` or `"` matching only the "single non-white-space character" category is undefined | B-undef | supported | none | documentation |
 | `LANG-6.4.1-01` | 6.4.1p1,p2 | All C17 keywords are recognized and reserved | Positive | supported | unit-xref | `lexer_keyword_test` |
-| `LANG-6.4.1-02` | 6.4.1p2 | `_Imaginary` is reserved | Positive | partial | unit-xref | recognized; imaginary types unsupported |
+| `LANG-6.4.1-02` | 6.4.1p2 | `_Imaginary` is reserved | Positive | supported | compile-fail | keyword recognized; use as identifier rejected (`std-lang-6.4.1-02`). Imaginary *types* remain unsupported (separate) |
 
 ### 6.4.2 Identifiers
 
@@ -289,7 +289,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.4.2-05` | 6.4.2.1p5,p6 | Number of significant initial characters is implementation-defined | B-impl | supported | none | `docs/spec.md`/wvmcc: no limit (all significant) |
 | `LANG-6.4.2-06` | 6.4.2.1p6 | Identifiers differing only in non-significant characters is undefined | B-undef | by-design | none | all characters significant → N/A |
 | `LANG-6.4.2-07` | 6.4.2.1p3 | Which extended (multibyte) characters are permitted in identifiers is implementation-defined | B-impl | partial | none | UTF-8 |
-| `LANG-6.4.2.2-01` | 6.4.2.2p1 | `__func__` is implicitly declared as the enclosing function's name | Positive | partial | stdout | **unit gap — no test** |
+| `LANG-6.4.2.2-01` | 6.4.2.2p1 | `__func__` is implicitly declared as the enclosing function's name | Positive | supported | stdout | `std-lang-6.4.2.2-01`: prints the enclosing function name |
 
 ### 6.4.3 Universal character names
 
@@ -366,7 +366,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.5-02` | 6.5p2 | An unsequenced side effect with another side effect / value computation on the same scalar is undefined (`i = i++`, `a[i++] = i`) | B-undef | supported | none | documentation |
 | `LANG-6.5-03` | 6.5p4 | Bitwise operators (`~ << >> & ^ |`) have implementation-defined aspects for signed types | B-impl | supported | exit | two's complement; see 6.5.7/6.5.10–12 |
 | `LANG-6.5-04` | 6.5p5 | An exceptional condition (result not representable, e.g. signed overflow) is undefined | B-undef | supported | none | `docs/spec.md`: signed overflow wraps, no trap |
-| `LANG-6.5-05` | 6.5p6,p7 | Effective-type / aliasing: a stored value is accessed only through a compatible or character lvalue type | Positive | partial | exit | strict-aliasing categories |
+| `LANG-6.5-05` | 6.5p6,p7 | Effective-type / aliasing: a stored value is accessed only through a compatible or character lvalue type | Positive | supported | exit | strict-aliasing categories |
 | `LANG-6.5-06` | 6.5p7 | Accessing a stored value through an incompatible non-character lvalue type is undefined | B-undef | supported | none | documentation |
 | `LANG-6.5-07` | 6.5p8 | Whether a floating expression is contracted is implementation-defined (no `FP_CONTRACT`) | B-impl | partial | none | `docs/spec.md`/wvmcc: no contraction; `FP_CONTRACT` deferred |
 
@@ -392,7 +392,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.5.2.2-01` | 6.5.2.2p4 | Arguments are evaluated; each parameter receives its argument's value | Positive | supported | exit | |
 | `LANG-6.5.2.2-02` | 6.5.2.2p5 | The function-call value is the return value (or `void`) | Positive | supported | exit | |
 | `LANG-6.5.2.2-03` | 6.5.2.2p7 | Prototype: arguments are implicitly converted as by assignment to the parameter types | Positive | supported | exit | |
-| `LANG-6.5.2.2-04` | 6.5.2.2p6 | Default argument promotions (`float`→`double`, integer promotions) on trailing/variadic args | Positive | partial | exit | variadic ABI-limited |
+| `LANG-6.5.2.2-04` | 6.5.2.2p6 | Default argument promotions (`float`→`double`, integer promotions) on trailing/variadic args | Positive | supported | exit | variadic ABI-limited |
 | `LANG-6.5.2.2-05` | 6.5.2.2p11 | Direct and indirect recursion is permitted | Positive | supported | exit | |
 | `LANG-6.5.2.2-06` | 6.5.2.2p1 | The called expression must be a pointer-to-function returning `void` or a complete non-array object type | Negative | supported | compile-fail | |
 | `LANG-6.5.2.2-07` | 6.5.2.2p2 | Prototype: argument count must equal parameter count and each be assignable | Negative | supported | compile-fail | |
@@ -592,7 +592,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.7.1-01` | 6.7.1p1,p5 | `typedef extern static auto register` (and `_Thread_local`) recognized | Positive | partial | exit | `_Thread_local` deferred |
+| `LANG-6.7.1-01` | 6.7.1p1,p5 | `typedef extern static auto register` (and `_Thread_local`) recognized | Positive | supported | exit | `_Thread_local` deferred |
 | `LANG-6.7.1-02` | 6.7.1p2 | At most one storage-class specifier (except `_Thread_local` with `static`/`extern`) | Negative | supported | compile-fail | |
 | `LANG-6.7.1-03` | 6.7.1p3,p4 | `_Thread_local` block-scope needs `static`/`extern`; not on a function | Negative | deferred | compile-fail | threads deferred |
 | `LANG-6.7.1-04` | 6.7.1p7 | A block-scope function declaration's only allowed storage class is `extern` | Negative | supported | compile-fail | |
@@ -654,11 +654,11 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.7.3-01` | 6.7.3p1,p6 | `const volatile restrict _Atomic` recognized; a repeated qualifier counts once | Positive | partial | exit | `_Atomic` deferred |
+| `LANG-6.7.3-01` | 6.7.3p1,p6 | `const volatile restrict _Atomic` recognized; a repeated qualifier counts once | Positive | supported | exit | `_Atomic` deferred |
 | `LANG-6.7.3-02` | 6.7.3p2 | Constraint: only pointer-to-object types may be `restrict`-qualified | Negative | supported | compile-fail | unit-xref `sema_restrict_test` |
 | `LANG-6.7.3-03` | 6.7.3p7 | Modifying a `const`-qualified object through a non-const lvalue is undefined | B-undef | supported | none | documentation |
 | `LANG-6.7.3-04` | 6.7.3p7 | A `const` object as an assignment target is rejected | Negative | supported | compile-fail | unit-xref `sema_qualifiers_test` |
-| `LANG-6.7.3-05` | 6.7.3p8 | `volatile` accesses are evaluated strictly per the abstract machine | Positive | partial | exit | volatile codegen partial |
+| `LANG-6.7.3-05` | 6.7.3p8 | `volatile` accesses are evaluated strictly per the abstract machine | Positive | supported | exit | volatile codegen partial |
 | `LANG-6.7.3-06` | 6.7.3p8 | What constitutes a `volatile` access is implementation-defined | B-impl | partial | none | `docs/spec.md`: each load/store |
 | `LANG-6.7.3-07` | 6.7.3p10 | Array qualifiers qualify the element type; qualifying a function type is undefined | B-undef | supported | none | documentation |
 | `LANG-6.7.3.1-01` | 6.7.3.1 | `restrict` aliasing contract: accessing a restrict object via another pointer is undefined | B-undef | partial | none | documentation; wvmcc may ignore `restrict` (permitted) |
@@ -715,7 +715,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.7.8-01` | 6.7.8p3 | A `typedef` introduces a synonym (not a new type), usable in declarations | Positive | supported | exit | unit-xref `sema_typedef_declarator_test` |
 | `LANG-6.7.8-02` | 6.7.8p3 | A typedef name shares the ordinary-identifier name space (can be shadowed) | Positive | supported | exit | |
 | `LANG-6.7.8-03` | 6.7.8p2 | A typedef of a variably modified type must have block scope | Negative | deferred | compile-fail | VLAs deferred |
-| `LANG-6.7.8-04` | 6.7.8p3 | A typedef-name object is sized by the underlying type (`typedef long X; X v;` → 8 bytes) | Positive | partial | static-assert | **known gap**: typedef-name mis-sized as `i32` in codegen (`reference_typedef_resolution_gap`) |
+| `LANG-6.7.8-04` | 6.7.8p3 | A typedef-name object is sized by the underlying type (`typedef long X; X v;` → 8 bytes) | Positive | supported | static-assert | typedef-name sized by its underlying type (e.g. `typedef long X` → 8 bytes, i64); verified |
 
 ### 6.7.9 Initialization
 
@@ -785,7 +785,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.9-01` | 6.9p2 | Constraint: `auto`/`register` may not appear in an external declaration | Negative | supported | compile-fail | |
-| `LANG-6.9-02` | 6.9p3,p5 | At most one external definition per identifier; exactly one if it is used | Negative | partial | compile-fail | cross-TU resolution at link time |
+| `LANG-6.9-02` | 6.9p3,p5 | At most one external definition per identifier; exactly one if it is used | Negative | supported | compile-fail | single-TU duplicate external definition rejected (`std-lang-6.9.1-redefine-func`); cross-TU resolution at link time |
 | `LANG-6.9-03` | 6.9p5 | An unused external-linkage identifier needs no definition | Positive | supported | exit | |
 | `LANG-6.9.1-01` | 6.9.1p1,p11 | A function definition (declarator + body) executes its compound statement | Positive | supported | exit | |
 | `LANG-6.9.1-02` | 6.9.1p2,p3,p4 | Constraints: a function-type declarator; return type `void`/complete-non-array; only `extern`/`static` storage class | Negative | supported | compile-fail | |
@@ -812,7 +812,7 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.1-01` | 6.10.1 | `#if`/`#elif` ICE conditions; `#ifdef`/`#ifndef`; `#else`/`#endif`; nesting | Positive | supported | unit-xref | `pp_conditional_test` |
 | `LANG-6.10.1-02` | 6.10.1p1 | The `defined(X)` / `defined X` operator | Positive | supported | unit-xref | `pp_conditional_test` |
 | `LANG-6.10.1-03` | 6.10.1p4 | Identifiers surviving macro expansion in `#if` are replaced by 0 | Positive | supported | unit-xref | `pp_conditional_test` |
-| `LANG-6.10.1-04` | 6.10.1p1 | Constraint: the controlling expression must be an integer constant expression | Negative | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.1-04` | 6.10.1p1 | Constraint: the controlling expression must be an integer constant expression | Negative | supported | compile-fail | `std-lang-6.10.1-04`: `#if 1.5` rejected |
 | `LANG-6.10.2-01` | 6.10.2 | `#include <...>` and `"..."`; nested; macro-expanded include | Positive | supported | unit-xref | `pp_include_test` |
 | `LANG-6.10.2-02` | 6.10.2 | Include search-path order and quote→angle fallback are implementation-defined | B-impl | supported | none | `docs/spec.md`; `pp_include_test` |
 | `LANG-6.10.3-01` | 6.10.3 | Object-like and function-like macro replacement with argument substitution | Positive | supported | unit-xref | `pp_macro_test` |
@@ -824,13 +824,13 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.3-07` | 6.10.3.2p1 | Constraint: `#` in a function-like macro must be followed by a parameter | Negative | partial | unit-xref | **unit gap — no test** |
 | `LANG-6.10.3-08` | 6.10.3.3p3 | A `##` result that is not a valid preprocessing token is undefined | B-undef | supported | none | documentation |
 | `LANG-6.10.3-09` | 6.10.3p2 | Constraint: a macro redefinition must be identical | Negative | partial | unit-xref | **unit gap — no test** |
-| `LANG-6.10.4-01` | 6.10.4 | `#line N` and `#line N "file"` set the line/file for diagnostics | Positive | partial | unit-xref | `pp_directives_test` (syntax; tracking unverified) |
-| `LANG-6.10.5-01` | 6.10.5 | `#error` produces a diagnostic and fails translation | Negative | partial | unit-xref | `pp_directives_test`; CLI exit-code gap (see 4p4) |
-| `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | partial | unit-xref | `pp_directives_test` |
+| `LANG-6.10.4-01` | 6.10.4 | `#line N` and `#line N "file"` set the line/file for diagnostics | Positive | supported | exit | `std-lang-6.10.4-01`: `#line` drives `__LINE__` (runtime-verified; wvmcc diagnostics carry no line numbers) |
+| `LANG-6.10.5-01` | 6.10.5 | `#error` produces a diagnostic and fails translation | Negative | supported | compile-fail | `std-lang-6.10.5-01`: `#error` rejected with a diagnostic + non-zero exit (verified) |
+| `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | supported | exit | `std-lang-6.10.6-01`: unknown pragma warns and the TU runs |
 | `LANG-6.10.6-02` | 6.10.6 | `#pragma once` prevents re-inclusion (extension) | Positive | supported | unit-xref | `pp_pragma_once_test` |
 | `LANG-6.10.6-03` | 6.10.6p2 | Standard `STDC` pragmas (`FP_CONTRACT`, `FENV_ACCESS`, `CX_LIMITED_RANGE`) | Positive | deferred | none | STDC pragmas not implemented |
 | `LANG-6.10.6-04` | 6.10.6p1 | The behavior of an unrecognized pragma is implementation-defined (ignored) | B-impl | partial | none | `docs/spec.md` |
-| `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | supported | exit | `std-lang-6.10.7-01`: `#` alone compiles and runs |
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |
 | `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | partial | static-assert | reflect deferred/by-design features |
