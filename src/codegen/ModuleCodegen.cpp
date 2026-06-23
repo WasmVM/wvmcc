@@ -63,6 +63,8 @@ WasmVM::WasmModule ModuleCodegen::generate(const wvmcc::parser::TranslationUnitP
 
     if (compileMode_ == CompileMode::Freestanding) {
         finalizeFreestandingHeapBase();
+    } else {
+        emitLinkableDataTopMarker();
     }
 
     if (emitWrapperHere) {
@@ -134,6 +136,7 @@ size_t ModuleCodegen::allocateStaticStorage(size_t size, size_t align) {
 }
 
 void ModuleCodegen::finalizeFreestandingHeapBase() {
+    namespace sw = wvmcc::codegen::startwrapper;
     // Round up the post-data top to 8 bytes so callers can rely on
     // __heap_base being i64-aligned. Patch the slot reserved in setupGlobals.
     size_t top = dataAllocator_.currentTop();
@@ -143,6 +146,52 @@ void ModuleCodegen::finalizeFreestandingHeapBase() {
         module_.globals[heapBaseGlobalIdx_].init =
             WasmVM::Instr::I64_const{(WasmVM::i64_t)top};
     }
+    // #99: size mem[0] to hold all static data, including .bss objects (which
+    // emit no data segment, so `top` — derived from currentTop() — is the only
+    // signal of their extent). The default min is 1 page; a TU with > 64 KiB of
+    // static data otherwise exceeds the declared memory.
+    if (!module_.mems.empty()) {
+        uint64_t pages = ((uint64_t)top + 0xFFFFu) / 0x10000u;
+        if (pages < 1) pages = 1;
+        if ((uint64_t)module_.mems[0].min < pages)
+            module_.mems[0].min = (decltype(module_.mems[0].min))pages;
+    }
+    // #98: size mem[1] (shadow stack) to the largest single frame plus reserve,
+    // and initialize __stack_pointer to its top (the stack grows downward).
+    // The legacy fixed 1-page stack traps for any frame > 64 KiB.
+    uint64_t stackTop = sw::shadowStackSize((uint64_t)maxFrameSize_);
+    if (module_.mems.size() > 1) {
+        uint64_t pages = stackTop / sw::kWasmPageSize;
+        if ((uint64_t)module_.mems[1].min < pages)
+            module_.mems[1].min = (decltype(module_.mems[1].min))pages;
+    }
+    if (stackPtrGlobalIdx_ >= 0
+        && stackPtrGlobalIdx_ < (int)module_.globals.size()) {
+        module_.globals[stackPtrGlobalIdx_].init =
+            WasmVM::Instr::I64_const{(WasmVM::i64_t)stackTop};
+    }
+}
+
+void ModuleCodegen::emitLinkableDataTopMarker() {
+    // #99: .bss objects (uninitialized statics) consume address space via
+    // dataAllocator_ but emit no data segment, so the linker — which sizes
+    // mem[0] and __heap_base from data-segment extents — cannot see them. Emit a
+    // 1-byte zero segment at the top of the static region so the true top
+    // (including .bss) appears as a data segment. The existing per-TU data
+    // rebasing in ModuleMerge shifts this marker like any other segment, and the
+    // byte lands below __heap_base in the static region's tail padding (harmless;
+    // linear memory is zero-initialized anyway).
+    size_t top = dataAllocator_.currentTop();
+    // currentTop starts at 8 (null-pointer sentinel). top == 8 means the TU has
+    // no static objects, so the 1-page default and existing extent scan suffice
+    // — skip, to avoid perturbing the merge's data rebasing for code-only TUs.
+    if (top <= 8) return;
+    WasmVM::WasmData seg;
+    seg.mode.type = WasmVM::WasmData::DataMode::Mode::active;
+    seg.mode.memidx = 0;
+    seg.mode.offset = WasmVM::Instr::I64_const{(WasmVM::i64_t)top};
+    seg.init = std::vector<std::byte>(1, std::byte{0});
+    module_.datas.push_back(std::move(seg));
 }
 
 bool ModuleCodegen::emitStaticInitSegment(size_t addr, size_t size, uint8_t memidx,

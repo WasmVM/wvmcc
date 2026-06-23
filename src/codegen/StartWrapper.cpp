@@ -130,7 +130,9 @@ void emitStartWrapper(WasmVM::WasmModule& module,
         body.push_back(WasmVM::Instr::I64_and{});
         body.push_back(WasmVM::Instr::I64_sub{});
         body.push_back(WasmVM::Instr::Global_set{kSpGlobal});
-        // argv_base[i] = sp  (store i64 pointer, mem 0)
+        // argv_base[i] = (mem1-tagged) sp  (store i64 pointer into mem[1]).
+        // The shadow stack is mem[1]; the stored value is tagged so user code
+        // dereferences argv[i] through mem[1]'s tag-dispatch (#78/#98).
         body.push_back(WasmVM::Instr::Local_get{3});
         body.push_back(WasmVM::Instr::Local_get{1});
         body.push_back(WasmVM::Instr::I64_extend_i32_s{});
@@ -138,12 +140,17 @@ void emitStartWrapper(WasmVM::WasmModule& module,
         body.push_back(WasmVM::Instr::I64_mul{});
         body.push_back(WasmVM::Instr::I64_add{});
         body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        body.push_back(WasmVM::Instr::I64_const{kMem1PtrTag});
+        body.push_back(WasmVM::Instr::I64_or{});
         // 8-byte aligned: argv_base is computed from an 8-aligned stack pointer
-        // and indexed by i*8 (align hint log2(8) = 3).
-        body.push_back(WasmVM::Instr::I64_store{0, 0, 3});
-        // sys_proc.argv(i, sp, (i64)(len + 1))
+        // and indexed by i*8 (align hint log2(8) = 3). memidx 1 = shadow stack.
+        body.push_back(WasmVM::Instr::I64_store{1, 0, 3});
+        // sys_proc.argv(i, mem1-tagged sp, (i64)(len + 1)). The tag routes the
+        // host's string copy into mem[1] (sysenv get_mem dispatches on the tag).
         body.push_back(WasmVM::Instr::Local_get{1});
         body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
+        body.push_back(WasmVM::Instr::I64_const{kMem1PtrTag});
+        body.push_back(WasmVM::Instr::I64_or{});
         body.push_back(WasmVM::Instr::Local_get{2});
         body.push_back(WasmVM::Instr::I32_const{1});
         body.push_back(WasmVM::Instr::I32_add{});
@@ -164,6 +171,10 @@ void emitStartWrapper(WasmVM::WasmModule& module,
         // operand stack for sys_proc.exit to consume.
         body.push_back(WasmVM::Instr::Local_get{0});
         body.push_back(WasmVM::Instr::Local_get{3});
+        // argv itself is a mem[1] pointer: tag it so main's argv[i] indexing
+        // dispatches loads to the shadow stack.
+        body.push_back(WasmVM::Instr::I64_const{kMem1PtrTag});
+        body.push_back(WasmVM::Instr::I64_or{});
         body.push_back(WasmVM::Instr::Call{mainFuncIdx});
         emitTerminate(body);
     } else {
