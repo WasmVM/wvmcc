@@ -16,6 +16,17 @@ int atexit(void (*func)(void));
 _Noreturn void quick_exit(int status);
 int at_quick_exit(void (*func)(void));
 
+/* Communication with the environment (7.22.4.6) */
+char *getenv(const char *name);
+
+/* Multibyte/wide-character conversion (7.22.7, 7.22.8). wvmcc supports only the
+   "C" locale (single-byte, MB_CUR_MAX == 1). */
+int    mblen(const char *s, size_t n);
+int    mbtowc(wchar_t *pwc, const char *s, size_t n);
+int    wctomb(char *s, wchar_t wc);
+size_t mbstowcs(wchar_t *dst, const char *src, size_t n);
+size_t wcstombs(char *dst, const wchar_t *src, size_t n);
+
 /* Conversion */
 int       atoi(const char *s);
 long      atol(const char *s);

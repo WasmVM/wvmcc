@@ -2207,7 +2207,7 @@ ExprPtr Parser::parsePrimary() {
         auto fl = make_ast<FloatLiteral>();
         fl->span = tok.span;
         fl->raw = tok.lexeme();
-        // Detect suffix (f/F/l/L). Strip before stod.
+        // Detect suffix (f/F/l/L). Strip before parsing.
         bool isFloat = false;
         std::string body = fl->raw;
         if (!body.empty()) {
@@ -2215,7 +2215,11 @@ ExprPtr Parser::parsePrimary() {
             if (last == 'f' || last == 'F') { isFloat = true; body.pop_back(); }
             else if (last == 'l' || last == 'L') { body.pop_back(); }
         }
-        try { fl->value = std::stod(body); } catch (...) { fl->value = 0.0; }
+        // Use strtod, not std::stod: a subnormal literal (e.g. DBL_TRUE_MIN,
+        // 4.94e-324) underflows to ERANGE, which std::stod reports by *throwing*
+        // out_of_range — the old catch then silently produced 0.0. strtod returns
+        // the correctly-rounded (subnormal) value and merely sets errno.
+        fl->value = std::strtod(body.c_str(), nullptr);
         fl->isFloat = isFloat;
         fl->kind = Expr::Kind::Float;
         return fl;

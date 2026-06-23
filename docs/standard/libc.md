@@ -52,7 +52,7 @@ ones are `#if`-usable. Values follow IEEE-754 binary32/binary64 with `long doubl
 | `LIBC-float-FLT_MAX-01` | 5.2.4.2.2p12 | FLT_MAX / DBL_MAX / LDBL_MAX | obj-macro | Max finite value (≥ 1E37) | B-impl | supported | static-assert | |
 | `LIBC-float-FLT_MIN-01` | 5.2.4.2.2p13 | FLT_MIN / DBL_MIN / LDBL_MIN | obj-macro | Min normalized value (≤ 1E-37) | B-impl | supported | static-assert | |
 | `LIBC-float-FLT_EPSILON-01` | 5.2.4.2.2p13 | FLT_EPSILON / DBL_EPSILON / LDBL_EPSILON | obj-macro | Difference 1 → next representable | B-impl | supported | static-assert | |
-| `LIBC-float-FLT_TRUE_MIN-01` | 5.2.4.2.2p13 | FLT_TRUE_MIN / *_TRUE_MIN | obj-macro | Min positive (subnormal) value | B-impl | partial | static-assert | |
+| `LIBC-float-FLT_TRUE_MIN-01` | 5.2.4.2.2p13 | FLT_TRUE_MIN / *_TRUE_MIN | obj-macro | Min positive (subnormal) value | B-impl | supported | static-assert | subnormal literals now lex via strtod (no underflow-to-0) |
 | `LIBC-float-FLT_HAS_SUBNORM-01` | 5.2.4.2.2p10 | FLT_HAS_SUBNORM / *_HAS_SUBNORM | obj-macro | Subnormal support flag | B-impl | partial | static-assert | IEEE-754 → 1 |
 
 ## `<iso646.h>` (7.9)
@@ -237,13 +237,13 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-stdlib-exit-01` | 7.22.4.4 | exit | fn | Runs atexit handlers, flushes/closes streams, terminates with status | Positive | supported | exit | |
 | `LIBC-stdlib-_Exit-01` | 7.22.4.5 | _Exit | fn | Terminates without atexit handlers or flushing | Positive | supported | exit | |
 | `LIBC-stdlib-quick_exit-01` | 7.22.4.3,7.22.4.7 | quick_exit / at_quick_exit | fn | Quick-exit handler registration and termination | Positive | supported | exit | |
-| `LIBC-stdlib-getenv-01` | 7.22.4.6 | getenv | fn | Looks up an environment variable | Positive | partial | exit | via `sys_proc.getenv` |
+| `LIBC-stdlib-getenv-01` | 7.22.4.6 | getenv | fn | Looks up an environment variable | Positive | supported | exit | via `sys_proc.getenv` |
 | `LIBC-stdlib-system-01` | 7.22.4.8 | system | fn | Executes a command via the host | Positive | by-design | none | no host process on WasmVM |
 | `LIBC-stdlib-bsearch-01` | 7.22.5.1 | bsearch | fn | Binary search of a sorted array | Positive | supported | exit | |
 | `LIBC-stdlib-qsort-01` | 7.22.5.2 | qsort | fn | Sorts via a comparator | Positive | supported | exit | |
 | `LIBC-stdlib-abs-01` | 7.22.6.1 | abs / labs / llabs | fn | Integer absolute value | Positive | supported | exit | |
 | `LIBC-stdlib-div-01` | 7.22.6.2 | div / ldiv / lldiv | fn | Quotient and remainder together | Positive | supported | exit | |
-| `LIBC-stdlib-mb-01` | 7.22.7,7.22.8 | mblen / mbtowc / wctomb / mbstowcs / wcstombs | fn | Multibyte/wide conversions | Positive | partial | exit | "C" locale, UTF-8 |
+| `LIBC-stdlib-mb-01` | 7.22.7,7.22.8 | mblen / mbtowc / wctomb / mbstowcs / wcstombs | fn | Multibyte/wide conversions | Positive | supported | exit | "C" locale (single-byte, MB_CUR_MAX == 1) |
 
 ## `<stdio.h>` (7.21)
 
