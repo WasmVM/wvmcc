@@ -21,9 +21,11 @@ Schema: **ID · Spec § · Entity · Kind · Test case · Category · Status · 
 >
 > **Status basis.** `supported`/`partial` reflect the `runtime/` libc; the minimal freestanding
 > headers (`<limits.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h>`, per 4p6) are present and
-> testable in `-ffreestanding`. `<complex.h>`,
-> `<tgmath.h>`, `<stdatomic.h>`, `<threads.h>`, `<fenv.h>`, `<uchar.h>`, `<wchar.h>`,
-> `<wctype.h>`, `<locale.h>`, `<signal.h>`, `<setjmp.h>` are `deferred`/`by-design` per
+> testable in `-ffreestanding`. `<uchar.h>`, `<wchar.h>` and `<wctype.h>` provide their required
+> *types and macros* (the wide-character/IO *functions* remain deferred — only the "C" locale is
+> supported). `<complex.h>`,
+> `<tgmath.h>`, `<stdatomic.h>`, `<threads.h>`, `<fenv.h>`,
+> `<locale.h>`, `<signal.h>`, `<setjmp.h>` are `deferred`/`by-design` per
 > `docs/spec.md`.
 
 ---
@@ -425,7 +427,7 @@ Threads — by-design absent (single-threaded, `__STDC_NO_THREADS__` defined, `d
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-uchar-types-01` | 7.28 | char16_t / char32_t / mbstate_t / size_t | type | Defined | Positive | partial | static-assert | |
+| `LIBC-uchar-types-01` | 7.28 | char16_t / char32_t / mbstate_t / size_t | type | Defined | Positive | supported | static-assert | `<uchar.h>` provides the types |
 | `LIBC-uchar-conv-01` | 7.28.1 | mbrtoc16 / c16rtomb / mbrtoc32 / c32rtomb | fn | Restartable multibyte↔wide conversion | Positive | deferred | none | unsupported |
 
 ## `<wchar.h>` (7.29)
@@ -434,7 +436,7 @@ Wide-character utilities — deferred.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-wchar-types-01` | 7.29.1 | wchar_t / wint_t / mbstate_t / struct tm / WEOF / WCHAR_MIN / WCHAR_MAX / NULL | type/obj-macro | Defined | Positive | partial | static-assert | |
+| `LIBC-wchar-types-01` | 7.29.1 | wchar_t / wint_t / mbstate_t / struct tm / WEOF / WCHAR_MIN / WCHAR_MAX / NULL | type/obj-macro | Defined | Positive | supported | static-assert | `<wchar.h>` provides the types/macros (functions deferred) |
 | `LIBC-wchar-io-01` | 7.29.2,7.29.3 | fwprintf / wprintf / swprintf / fwscanf / fgetwc / fputwc / … | fn | Wide formatted/character I/O | Positive | deferred | none | |
 | `LIBC-wchar-numconv-01` | 7.29.4.1 | wcstod / wcstol / wcstoul / … | fn | Wide numeric conversions | Positive | deferred | none | |
 | `LIBC-wchar-string-01` | 7.29.4 | wcscpy / wcscat / wcscmp / wcslen / wcschr / wcsstr / … | fn | Wide string utilities | Positive | deferred | none | |
@@ -445,7 +447,7 @@ Wide-character utilities — deferred.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-wctype-types-01` | 7.30.1 | wctype_t / wctrans_t / wint_t / WEOF | type/obj-macro | Defined | Positive | partial | static-assert | |
+| `LIBC-wctype-types-01` | 7.30.1 | wctype_t / wctrans_t / wint_t / WEOF | type/obj-macro | Defined | Positive | supported | static-assert | `<wctype.h>` provides the types/macro (functions deferred) |
 | `LIBC-wctype-class-01` | 7.30.2 | iswalnum / iswalpha / … / iswxdigit / iswctype / wctype | fn | Wide character classification | Positive | deferred | none | |
 | `LIBC-wctype-map-01` | 7.30.3 | towlower / towupper / towctrans / wctrans | fn | Wide character case mapping | Positive | deferred | none | |
 
