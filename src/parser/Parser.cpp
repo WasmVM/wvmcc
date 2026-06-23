@@ -448,21 +448,57 @@ DeclarationSpecifiers Parser::parseDeclarationSpecifiers() {
             continue;
         }
         if (alignspec.count(s)) {
-            // parse _Alignas( constant-expression ) and store parsed expr
+            // 6.7.5: alignment-specifier is `_Alignas ( type-name )` or
+            // `_Alignas ( constant-expression )`. The type-name form has the
+            // same effect as `_Alignas(_Alignof(type-name))` (6.7.5p6), so we
+            // lower it to an AlignOfExpr and store it alongside the
+            // constant-expression forms in `alignExprs`.
             lex.next();
             if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == "(") {
                 lex.next();
-                // parse an inner constant-expression (or arbitrary expression)
-                auto expr = parseConditionalExpression();
-                // expect ')'
-                if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
-                    wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Alignas expression"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
-                } else {
-                    lex.next();
+                // Heuristic: does the operand start a type-name?
+                bool isType = false;
+                if (lex.peek()) {
+                    auto u = lex.peek();
+                    if (u->kind() == TokenKind::Keyword) {
+                        static const std::unordered_set<std::string> tnames = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum","const","volatile","restrict","_Atomic"};
+                        if (tnames.count(u->lexeme())) isType = true;
+                    } else if (u->kind() == TokenKind::Identifier) {
+                        if (typedef_names.count(u->lexeme())) isType = true;
+                    }
                 }
-                // record both textual placeholder and parsed expr for Semantic to evaluate
-                specs.alignSpec.push_back(s); // keep marker for legacy uses
-                specs.alignExprs.push_back(expr);
+                if (isType) {
+                    auto specs2 = parseDeclarationSpecifiers();
+                    int ptrDepth = parseAbstractPointerDepth();
+                    std::vector<ExprPtr> arrayDims;
+                    parseAbstractArrayDims(arrayDims);
+                    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                        if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after type name in _Alignas"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+                    } else lex.next();
+                    auto ae = make_ast<AlignOfExpr>();
+                    if (ptrDepth > 0 || !arrayDims.empty()) {
+                        ae->type = buildTypeNameNode(specs2, ptrDepth, arrayDims);
+                    } else {
+                        ae->typeSpecs = specs2;
+                        ae->type = make_ast<TypeNode>();
+                        ae->type->kind = TypeNode::Kind::Builtin; ae->type->text = "type";
+                    }
+                    ae->kind = Expr::Kind::AlignOf;
+                    specs.alignSpec.push_back(s);
+                    specs.alignExprs.push_back(ae);
+                } else {
+                    // parse an inner constant-expression (or arbitrary expression)
+                    auto expr = parseConditionalExpression();
+                    // expect ')'
+                    if (!(lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")")) {
+                        wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Alignas expression"; if (lex.peek()) d.span = lex.peek()->span; diagnostics.push_back(std::move(d));
+                    } else {
+                        lex.next();
+                    }
+                    // record both textual placeholder and parsed expr for Semantic to evaluate
+                    specs.alignSpec.push_back(s); // keep marker for legacy uses
+                    specs.alignExprs.push_back(expr);
+                }
             } else {
                 // malformed: treat as simple spec for recovery
                 specs.alignSpec.push_back(s);
@@ -2546,6 +2582,32 @@ ExprPtr Parser::parseUnaryExpression() {
                 return nullptr;
             }
             lex.next();
+            // `_Alignof ( type-name )` is the standard form (6.5.3.4), but
+            // `_Alignof(expression)` (a GNU/clang extension) is also accepted:
+            // the alignment is that of the operand's type, honoring any _Alignas
+            // on a named object. Use the sizeof type-vs-expression heuristic.
+            {
+                bool isType = false;
+                if (lex.peek()) {
+                    auto u = lex.peek();
+                    if (u->kind() == TokenKind::Keyword) {
+                        static const std::unordered_set<std::string> tnames = {"void","char","short","int","long","float","double","signed","unsigned","_Bool","_Complex","_Imaginary","struct","union","enum","const","volatile","restrict","_Atomic"};
+                        if (tnames.count(u->lexeme())) isType = true;
+                    } else if (u->kind() == TokenKind::Identifier) {
+                        if (typedef_names.count(u->lexeme())) isType = true;
+                    }
+                }
+                if (!isType) {
+                    ExprPtr inner = parseAssignmentExpression();
+                    if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ")") lex.next();
+                    else if (lex.peek()) { wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error; d.message = "expected ')' after _Alignof expression"; d.span = lex.peek()->span; diagnostics.push_back(std::move(d)); }
+                    auto ae = make_ast<AlignOfExpr>();
+                    ae->expr = inner;
+                    ae->kind = Expr::Kind::AlignOf;
+                    ae->span = t->span;
+                    return ae;
+                }
+            }
             auto specs = parseDeclarationSpecifiers();
             int aoPtrDepth = parseAbstractPointerDepth();
             std::vector<ExprPtr> aoArrayDims;

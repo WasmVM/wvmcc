@@ -323,6 +323,10 @@ struct AlignOfExpr : Expr {
     std::string typeText; // textual representation of the type inside _Alignof
     // Raw type-specifiers for `_Alignof(type-name)` (see SizeofExpr::typeSpecs).
     std::optional<DeclarationSpecifiers> typeSpecs;
+    // `_Alignof(expression)` operand (GNU/clang extension): when set, the
+    // alignment is that of the operand's type, honoring any _Alignas on a
+    // named object. Mutually exclusive with the type-name forms above.
+    ExprPtr expr;
 };
 
 struct CompoundLiteral : Expr {

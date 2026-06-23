@@ -207,8 +207,8 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 |---|---|---|---|---|---|---|
 | `LANG-6.2.8-01` | 6.2.8p1 | Each complete object type has an implementation-defined alignment | B-impl | supported | static-assert | `docs/spec.md`: `char`1 `short`2 `int`/`float`4 `long`/`double`8 |
 | `LANG-6.2.8-02` | 6.2.8p2 | Fundamental alignments (≤ `_Alignof(max_align_t)`) are supported for all storage durations | Positive | supported | static-assert | `docs/spec.md`: `max_align_t` = 8; `_Alignof(type)` folds in an ICE |
-| `LANG-6.2.8-03` | 6.2.8p1 | `_Alignas` requests a stricter alignment | Positive | partial | static-assert | unit-xref `sema_alignas_test`; runtime over-alignment partial |
-| `LANG-6.2.8-04` | 6.2.8p3 | Extended (over-)alignment beyond `max_align_t` | B-impl | partial | static-assert | support for over-alignment partial |
+| `LANG-6.2.8-03` | 6.2.8p1 | `_Alignas` requests a stricter alignment | Positive | supported | static-assert | `_Alignof(obj)` reports the `_Alignas` override (#81) |
+| `LANG-6.2.8-04` | 6.2.8p3 | Extended (over-)alignment beyond `max_align_t` | B-impl | supported | static-assert | `_Alignas`/`_Alignof` of objects in ICE (#81) |
 
 ---
 
@@ -681,7 +681,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-6.7.5-01` | 6.7.5p6,p7 | `_Alignas(type)` ≡ `_Alignas(_Alignof(type))`; `_Alignas(const-expr)`; strictest wins | Positive | partial | static-assert | unit-xref `sema_alignas_test` |
+| `LANG-6.7.5-01` | 6.7.5p6,p7 | `_Alignas(type)` ≡ `_Alignas(_Alignof(type))`; `_Alignas(const-expr)`; strictest wins | Positive | supported | static-assert | `_Alignas(type-name)` + member `_Alignas`→struct alignment in ICE (#81) |
 | `LANG-6.7.5-02` | 6.7.5p2 | Constraint: `_Alignas` not with `typedef`/`register`, not on a function/bit-field | Negative | supported | compile-fail | |
 | `LANG-6.7.5-03` | 6.7.5p3–p5 | Constraint: a valid (supported) alignment, not weaker than required | Negative | supported | compile-fail | |
 | `LANG-6.7.5-04` | 6.7.5p8 | Inconsistent `_Alignas` across declarations of one object is undefined | B-undef | partial | none | documentation |

@@ -20,8 +20,13 @@ public:
     // one (backed by typeOfExpr) for the duration of a call. Returns the TypeNode
     // of an expression, or null if unknown. RAII set/clear via ResolverScope.
     using TypeResolver = std::function<TypeNodePtr(const ExprPtr &)>;
+    // #81: `_Alignof(expr)` of a *named object* must report the object's
+    // declared alignment (which may be raised by _Alignas), not just its type's
+    // natural alignment. The semantic pass supplies a resolver returning that
+    // value for an identifier operand (nullopt → fall back to type alignment).
+    using AlignResolver = std::function<std::optional<long long>(const ExprPtr &)>;
     struct ResolverScope {
-        explicit ResolverScope(TypeResolver r);
+        explicit ResolverScope(TypeResolver r, AlignResolver a = nullptr);
         ~ResolverScope();
         ResolverScope(const ResolverScope &) = delete;
         ResolverScope &operator=(const ResolverScope &) = delete;

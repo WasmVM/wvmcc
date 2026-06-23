@@ -44,8 +44,8 @@ add_standard_compile_fail(lang-6.2.7-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2
 add_standard_run_test(lang-6.2.7-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.7_composite_type.c partial)
 add_standard_static_assert(lang-6.2.8-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_object_type_alignment.c supported)
 add_standard_static_assert(lang-6.2.8-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_fundamental_alignment_max_align_t.c supported)
-add_standard_static_assert(lang-6.2.8-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_alignas_stricter_alignment.c partial)
-add_standard_static_assert(lang-6.2.8-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_extended_overalignment.c partial)
+add_standard_static_assert(lang-6.2.8-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_alignas_stricter_alignment.c supported)
+add_standard_static_assert(lang-6.2.8-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.2_concepts/6.2.8_extended_overalignment.c supported)
 
 # Multi-object user-TU linking now works (#84): lang-6.2.2-03 (object external
 # linkage) is registered above and passes. The remaining two cross-TU rows link
