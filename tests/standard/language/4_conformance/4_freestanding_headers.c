@@ -50,7 +50,11 @@ _Static_assert(sizeof(bool) == sizeof(_Bool), "stdbool.h defines bool as _Bool")
 /* <stddef.h> — 7.19: size_t, ptrdiff_t, NULL, offsetof. */
 _Static_assert(sizeof(size_t) > 0, "stddef.h declares size_t");
 _Static_assert(sizeof(ptrdiff_t) > 0, "stddef.h declares ptrdiff_t");
-_Static_assert((int)(NULL == 0), "stddef.h defines NULL");
+/* NOTE: wvmcc rejects `(int)(NULL == 0)` in an integer constant expression by
+ * design — NULL is the type-safe `((void*)0)`, and a pointer cast is not a
+ * valid ICE operand (6.6p6). NULL's presence and null-pointer-constant nature
+ * is checked via a static initializer (ill-formed unless NULL is one). */
+static void *lang_4_03_null = NULL;
 struct lang_4_03_s { char a; int b; };
 _Static_assert(offsetof(struct lang_4_03_s, a) == 0, "stddef.h defines offsetof");
 

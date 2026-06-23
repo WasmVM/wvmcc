@@ -31,7 +31,7 @@ add_standard_static_assert(libc-inttypes-pri-macros ${CMAKE_CURRENT_SOURCE_DIR}/
 add_standard_static_assert(libc-inttypes-scn-macros ${CMAKE_CURRENT_SOURCE_DIR}/libc/inttypes/scn_macros.c partial)
 add_standard_run_test(libc-inttypes-strtoimax ${CMAKE_CURRENT_SOURCE_DIR}/libc/inttypes/strtoimax.c supported)
 add_standard_static_assert(libc-iso646-and ${CMAKE_CURRENT_SOURCE_DIR}/libc/iso646/alternative_spellings.c deferred)
-add_standard_static_assert(libc-locale-lconv ${CMAKE_CURRENT_SOURCE_DIR}/libc/locale/lconv.c partial)
+add_standard_static_assert(libc-locale-lconv ${CMAKE_CURRENT_SOURCE_DIR}/libc/locale/lconv.c supported)
 add_standard_run_test(libc-locale-localeconv ${CMAKE_CURRENT_SOURCE_DIR}/libc/locale/localeconv.c supported)
 add_standard_run_test(libc-locale-setlocale ${CMAKE_CURRENT_SOURCE_DIR}/libc/locale/setlocale.c supported)
 add_standard_run_test(libc-math-compare ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/compare.c supported)

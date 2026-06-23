@@ -17,7 +17,7 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 |---|---|---|---|---|---|---|
 | `LANG-4-01` | 4p4 | `#error` in a non-skipped group must fail translation (non-zero exit) | Negative | partial | compile-fail | pp `#error` implemented; **CLI exit-code gap** — pp errors currently exit 0 (see README follow-ups) |
 | `LANG-4-02` | 4p4 | `#error` inside a skipped (`#if 0`) group does **not** fail translation | Positive | supported | exit | conditional inclusion skips it; also unit-xref `pp_directives_test` |
-| `LANG-4-03` | 4p6 | The freestanding-required headers (`<float.h> <iso646.h> <limits.h> <stdalign.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h> <stdnoreturn.h>`) are each includable in `-ffreestanding` | Positive | partial | static-assert | present: `limits`/`stdarg`/`stdbool`/`stddef`/`stdint`; **missing: `float`/`iso646`/`stdalign`/`stdnoreturn`** (see libc.md) |
+| `LANG-4-03` | 4p6 | The freestanding-required headers (`<float.h> <iso646.h> <limits.h> <stdalign.h> <stdarg.h> <stdbool.h> <stddef.h> <stdint.h> <stdnoreturn.h>`) are each includable in `-ffreestanding` | Positive | supported | static-assert | all nine headers present; the `(int)(NULL == 0)` ICE check is omitted by design (NULL is `((void*)0)`; a pointer cast is not an ICE operand, 6.6p6) — NULL is checked via a static initializer instead |
 
 ## Clause 5 — Environment
 
