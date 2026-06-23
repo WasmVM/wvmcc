@@ -214,6 +214,18 @@ void synthesize(LinkContext& ctx) {
                                      WasmVM::ValueType::i64};
         hb.init = WasmVM::Instr::I64_const{(WasmVM::i64_t)top};
         m.globals.insert(m.globals.begin() + 1, hb);
+
+        // Size mem[0] to hold all static data (each Wasm page is 64 KiB); the
+        // heap then grows from __heap_base within the rest of the last page.
+        // The default was a hardcoded 1 page, so a TU with more than 64 KiB of
+        // static data — e.g. a 65535-byte object plus other globals — exceeded
+        // the declared memory and wasmvm failed to initialize it.
+        if (!m.mems.empty()) {
+            uint64_t pages = (top + 0xFFFFu) / 0x10000u;
+            if (pages < 1) pages = 1;
+            if ((uint64_t)m.mems[0].min < pages)
+                m.mems[0].min = (decltype(m.mems[0].min))pages;
+        }
     }
 
     // The codegen-side "main" export served as our hint to find main —
