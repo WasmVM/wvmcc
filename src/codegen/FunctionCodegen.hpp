@@ -287,6 +287,8 @@ private:
     void emitReturnStmt(const wvmcc::parser::ReturnStmt& stmt);
     void emitExprStmt(const wvmcc::parser::ExprStmt& stmt);
     void emitCompoundStmt(const wvmcc::parser::CompoundStmt& stmt);
+    // Emit a controlling expression as a valid i32 condition (reduces i64/f32/f64).
+    void emitConditionI32(const wvmcc::parser::ExprPtr& cond);
     void emitIfStmt(const wvmcc::parser::IfStmt& stmt);
     void emitWhileStmt(const wvmcc::parser::WhileStmt& stmt);
     void emitForStmt(const wvmcc::parser::ForStmt& stmt);
