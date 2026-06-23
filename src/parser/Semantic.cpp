@@ -2168,6 +2168,12 @@ static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std
                             auto v = ConstExprEvaluator::evalIntegerConstantExpr(e.value.value());
                             if (!v.has_value()) {
                                 Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "enumerator value must be an integer constant expression"; d.span = e.value.value()->span; diagnostics.push_back(std::move(d));
+                            } else if (*v < -2147483648LL || *v > 2147483647LL) {
+                                // C 6.7.2.2p2: an enumeration constant's value must
+                                // be representable as an `int`. (Also catches an
+                                // int-typed constant expression that overflows,
+                                // 6.6p4 — e.g. `2147483647 + 1`.)
+                                Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "enumerator value " + std::to_string(*v) + " is not representable as 'int'"; d.span = e.value.value()->span; diagnostics.push_back(std::move(d));
                             } else {
                                 seenVals[e.name] = *v;
                                 next = *v + 1;

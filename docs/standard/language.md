@@ -567,7 +567,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 |---|---|---|---|---|---|---|
 | `LANG-6.6-01` | 6.6p2,p6 | Integer constant expressions evaluate at translation time (array size, enum value, bit-field width, `case` label) | Positive | supported | static-assert | |
 | `LANG-6.6-02` | 6.6p3 | Constraint: no assignment/`++`/`--`/function-call/comma operators (except in an unevaluated subexpression) | Negative | supported | compile-fail | |
-| `LANG-6.6-03` | 6.6p4 | Constraint: a constant expression's value must be in range for its type | Negative | partial | compile-fail | |
+| `LANG-6.6-03` | 6.6p4 | Constraint: a constant expression's value must be in range for its type | Negative | supported | compile-fail | |
 | `LANG-6.6-04` | 6.6p6 | ICE operand rules: only integer/enum/char constants, `sizeof`/`_Alignof`, and float constants as immediate cast operands | Negative | supported | compile-fail | unit-xref `sema_enum_test`, `static_assert_test` |
 | `LANG-6.6-05` | 6.6p7,p8 | Arithmetic constant expressions are accepted in initializers | Positive | supported | static-assert | |
 | `LANG-6.6-06` | 6.6p9 | Address constants (`&` of a static-duration object, a function designator, array/function decay) | Positive | supported | exit | |

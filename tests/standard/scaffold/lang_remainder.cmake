@@ -36,7 +36,7 @@ add_standard_run_test(lang-6.6-06 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_const
 add_standard_static_assert(lang-6.6-05 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_arithmetic_constant_initializers.c supported)
 add_standard_compile_fail(lang-6.6-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_ice_comma_operator.c supported)
 add_standard_compile_fail(lang-6.6-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_ice_float_operand.c supported)
-add_standard_compile_fail(lang-6.6-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_ice_out_of_range.c partial)
+add_standard_compile_fail(lang-6.6-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_ice_out_of_range.c supported)
 add_standard_static_assert(lang-6.6-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_ice_translation_time.c supported)
 add_standard_static_assert(lang-6.6-08 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.6_constant_expressions/6.6_short_circuit_ice.c supported)
 add_standard_static_assert(lang-6.7.10-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.7_declarations/6.7.10_static_assert_passes.c supported)
