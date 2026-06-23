@@ -21,7 +21,7 @@ add_standard_static_assert(lang-5.2.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_
 add_standard_static_assert(lang-5.2.1-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.1_null_character_terminates.c supported)
 add_standard_static_assert(lang-5.2.2-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.2_alphabetic_escapes_control_values.c supported)
 add_standard_static_assert(lang-5.2.2-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.2_escape_values_unique.c supported)
-add_standard_run_test(lang-5.2.4.1-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.4.1_translation_limits_stress.c partial)
+add_standard_run_test(lang-5.2.4.1-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.4.1_translation_limits_stress.c)
 add_standard_static_assert(lang-5.2.4.2.1-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.4.2.1_char_signedness_limits.c supported)
 add_standard_static_assert(lang-5.2.4.2.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.4.2.1_integer_limit_values_lp64.c supported)
 add_standard_static_assert(lang-5.2.4.2.1-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/5_environment/5.2.4.2.1_limits_macros_minimums.c supported)
