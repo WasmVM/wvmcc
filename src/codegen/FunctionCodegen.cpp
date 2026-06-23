@@ -3668,6 +3668,14 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         // what lets a following deref pick the correct load width — e.g.
         // `*(charptr + 1)` must do an 8-bit load, not the i32 default. (`ptr -
         // ptr` yields ptrdiff_t and falls through to the integer path below.)
+        // Resolve both operand types ONCE and reuse them across the pointer /
+        // shift / arithmetic paths below. Previously the `+`/`-` pointer check
+        // recomputed them and then the arithmetic path recomputed them again,
+        // so each binary node evaluated its operands' types twice — making a
+        // chain like `a + b + c + … + z` cost O(2^N), i.e. a long sum (such as
+        // a 127-term expression) was effectively un-compilable.
+        auto lt = getExprTypeNode(b.lhs);
+        auto rt = getExprTypeNode(b.rhs);
         if (b.op == "+" || b.op == "-") {
             auto decayToPtr = [](wvmcc::parser::TypeNodePtr t)
                 -> wvmcc::parser::TypeNodePtr {
@@ -3683,8 +3691,8 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
                 }
                 return nullptr;
             };
-            auto lp = decayToPtr(getExprTypeNode(b.lhs));
-            auto rp = decayToPtr(getExprTypeNode(b.rhs));
+            auto lp = decayToPtr(lt);
+            auto rp = decayToPtr(rt);
             if (b.op == "+") {
                 if (lp) return lp;            // ptr + int
                 if (rp) return rp;            // int + ptr
@@ -3698,7 +3706,6 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
         // observes this — `sizeof(int << longlong)` is sizeof(int)
         // (LANG-6.5.7-07).
         if (b.op == "<<" || b.op == ">>") {
-            auto lt = getExprTypeNode(b.lhs);
             if (lt && typeMap_.toWasmType(lt) == WasmVM::ValueType::i32
                 && typeMap_.byteSize(lt) < 4) {
                 auto promoted = wvmcc::parser::make_ast<wvmcc::parser::TypeNode>();
@@ -3709,10 +3716,8 @@ wvmcc::parser::TypeNodePtr FunctionCodegen::getExprTypeNode(const wvmcc::parser:
             }
             return lt;
         }
-        // Arithmetic / bitwise: usual arithmetic conversions on operand
-        // types; here we pick the "wider" of the two.
-        auto lt = getExprTypeNode(b.lhs);
-        auto rt = getExprTypeNode(b.rhs);
+        // Arithmetic / bitwise: usual arithmetic conversions on operand types
+        // (lt/rt resolved above); pick the "wider" of the two.
         auto lvt = lt ? typeMap_.toWasmType(lt) : WasmVM::ValueType::i32;
         auto rvt = rt ? typeMap_.toWasmType(rt) : WasmVM::ValueType::i32;
         auto common = arithCommonType(lvt, rvt);

@@ -95,7 +95,7 @@ which the test-writing pass must fix before `compile-fail` rows are runnable.
 
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
-| `LANG-5.2.4.1-01` | 5.2.4.1p1 | Translate+run a program exercising the minimum limits (127 block nesting, 63 cond-incl, 1023 case labels, 4095 external idents, …) | Positive | partial | exit | wvmcc imposes no fixed minimums by design; representative stress program |
+| `LANG-5.2.4.1-01` | 5.2.4.1p1 | Translate+run a program exercising the minimum limits (127 block nesting, 63 cond-incl, 1023 case labels, 4095 external idents, …) | Positive | partial | exit | now compiles fast (was O(2^N) on long operator chains) and loads (mem[0] sized to static data); remaining failure is a separate gap — block-scope `static` arrays aren't sized/initialized from their initializer (see reference_codegen_static_init_gaps) |
 | `LANG-5.2.4.1-02` | 5.2.4.1p1 | wvmcc's actual translation limits | B-impl | by-design | none | `docs/spec.md`: no fixed limits; bounded by host memory |
 | `LANG-5.2.4.2.1-01` | 5.2.4.2.1p1 | `<limits.h>` macros are `#if`-usable ICEs, magnitudes ≥ standard minimums, correct sign | Positive | supported | static-assert | per-macro values in `libc.md` |
 | `LANG-5.2.4.2.1-02` | 5.2.4.2.1 | Actual integer limit values (`CHAR_BIT`, `INT_MAX`, `LONG_MAX`, …) | B-impl | supported | static-assert | `docs/spec.md` LP64: `int` 32-bit, `long` 64-bit; detail in `libc.md` |
