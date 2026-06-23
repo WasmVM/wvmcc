@@ -444,9 +444,30 @@ void ModuleCodegen::firstPass(const wvmcc::parser::TranslationUnitPtr& tu) {
             if (*fd) definedInTU.insert(getFuncName((*fd)->declarator));
         }
     }
+    // Wasm requires every imported function to occupy a lower index than any
+    // defined function. A function declaration that isn't defined in this TU
+    // becomes an import — and such a declaration may appear *after* defined
+    // functions in source (e.g. a `sys_*` host import declared mid-file). So
+    // register imports in a first pass and definitions in a second, rather than
+    // in source order; otherwise a late import is numbered after the defined
+    // functions, the emitted import-first layout disagrees, and every `call`
+    // index is off (a validation error).
+    auto isImportDecl = [&](const wvmcc::parser::ExternalDeclPtr& ext) -> bool {
+        auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&ext->decl);
+        return d && *d && (*d)->declarator
+            && (*d)->declarator->kind == wvmcc::parser::Declarator::Kind::Function
+            && !definedInTU.count(getFuncName((*d)->declarator));
+    };
+    // Pass 1: imported function declarations (low, contiguous indices).
     for (const auto& external : tu->externals) {
         if (!external) continue;
-        // Skip prototype declarations for names defined later in this TU.
+        if (isImportDecl(external)) registerExternalDecl(external);
+    }
+    // Pass 2: everything else (definitions; non-function declarations are
+    // handled by registerGlobalVars below). Defined-in-TU prototypes are skipped.
+    for (const auto& external : tu->externals) {
+        if (!external) continue;
+        if (isImportDecl(external)) continue;   // already registered in pass 1
         if (auto d = std::get_if<wvmcc::parser::DeclarationPtr>(&external->decl)) {
             if (*d && (*d)->declarator
                 && (*d)->declarator->kind == wvmcc::parser::Declarator::Kind::Function
