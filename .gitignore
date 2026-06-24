@@ -9,3 +9,4 @@ exclude
 *.a
 Testing/
 *.logtests/integration/phase2/*.wasm
+.claude
