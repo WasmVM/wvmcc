@@ -3098,9 +3098,15 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                         : (argTypes.size() != pcount);
                     if (countBad && curDiagnostics) {
                         Diagnostic d; d.severity = Diagnostic::Severity::Error;
+                        d.category = Diagnostic::Category::Semantic;
                         d.message = (argTypes.size() > pcount && !fnType->isVariadic)
                             ? "too many arguments to function call"
                             : "argument count does not match function prototype";
+                        // #28: actionable fix hint with the expected arity.
+                        d.hint = "function expects "
+                            + std::to_string(pcount)
+                            + (fnType->isVariadic ? " or more arguments"
+                               : (pcount == 1 ? " argument" : " arguments"));
                         d.span = e->span; curDiagnostics->push_back(std::move(d));
                     }
                     // NOTE: per-argument *type* compatibility is deliberately not

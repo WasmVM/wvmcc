@@ -222,11 +222,77 @@ InputKind classifyInput(const std::string& path) {
     return InputKind::Source;
 }
 
-void printDiagnostics(const std::vector<wvmcc::Diagnostic>& diagnostics) {
+// Load a source file split into lines for caret rendering (#28, approach A).
+// Line endings are stripped; an empty result means the file could not be read.
+// Only the primary TU is loaded — positions from #included files (fileId is not
+// yet tracked) simply fall back to the no-snippet form.
+static std::vector<std::string> loadSourceLines(const std::string& path) {
+    std::vector<std::string> lines;
+    std::ifstream ifs(path);
+    if (!ifs) return lines;
+    std::string line;
+    while (std::getline(ifs, line)) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        lines.push_back(std::move(line));
+    }
+    return lines;
+}
+
+// Print the offending source line and a `^` caret under column `col` (1-based).
+// Leading characters before the caret are reproduced from the source (tabs stay
+// tabs) so the caret lines up regardless of the terminal's tab width.
+static void printCaret(const std::string& srcLine, int col) {
+    std::cerr << "    " << srcLine << "\n";
+    std::string pad = "    ";
+    for (int i = 0; i + 1 < col; ++i) {
+        pad += (i < (int)srcLine.size() && srcLine[i] == '\t') ? '\t' : ' ';
+    }
+    std::cerr << pad << "^\n";
+}
+
+// Print a batch of diagnostics (#28). With a span, emit the
+// `file:line:col: severity: message` header plus a source line + caret; without
+// one, fall back to the legacy `severity: message`. A non-empty `hint` is shown
+// as a trailing `note:` line.
+//
+// Approach B: the source file is resolved by the span's `fileId` through the
+// preprocessor's SourceManager, so a caret renders for errors anywhere in the
+// #include tree — not just the primary TU. Spans with no fileId (0, e.g. a
+// synthetic span) fall back to `sourcePath`, read lazily from disk once.
+void printDiagnostics(const std::vector<wvmcc::Diagnostic>& diagnostics,
+                      const std::string& sourcePath = "",
+                      const wvmcc::SourceManager* sm = nullptr) {
+    std::vector<std::string> primaryLines;
+    bool primaryLoaded = false;
+    auto primary = [&]() -> const std::vector<std::string>& {
+        if (!primaryLoaded) {
+            if (!sourcePath.empty()) primaryLines = loadSourceLines(sourcePath);
+            primaryLoaded = true;
+        }
+        return primaryLines;
+    };
+
     for (const auto& d : diagnostics) {
         const char* sev = (d.severity == wvmcc::Diagnostic::Severity::Error) ? "error" :
                           (d.severity == wvmcc::Diagnostic::Severity::Warning) ? "warning" : "info";
-        std::cerr << sev << ": " << d.message << "\n";
+        if (d.span) {
+            const auto& b = d.span->begin;
+            const std::string* path = sm ? sm->pathForId(b.fileId) : nullptr;
+            const std::vector<std::string>* lines = sm ? sm->linesForId(b.fileId) : nullptr;
+            std::string shownPath = path ? *path
+                                  : (sourcePath.empty() ? std::string("<source>") : sourcePath);
+            std::cerr << shownPath << ":" << b.line << ":" << b.column << ": "
+                      << sev << ": " << d.message << "\n";
+            const std::vector<std::string>& srcLines = lines ? *lines : primary();
+            if (b.line >= 1 && b.line <= (int)srcLines.size()) {
+                printCaret(srcLines[b.line - 1], b.column);
+            }
+        } else {
+            std::cerr << sev << ": " << d.message << "\n";
+        }
+        if (!d.hint.empty()) {
+            std::cerr << "note: " << d.hint << "\n";
+        }
     }
 }
 
@@ -299,15 +365,15 @@ static CompileResult compileSource(const std::string& path,
     wvmcc::parser::Lexer lex(pp);
     wvmcc::parser::Parser parser(lex);
     wvmcc::parser::TranslationUnitPtr tu = parser.parseTranslationUnit();
-    printDiagnostics(pp.getDiagnostics());
-    printDiagnostics(parser.getDiagnostics());
+    printDiagnostics(pp.getDiagnostics(), path, &pp.sourceManager());
+    printDiagnostics(parser.getDiagnostics(), path, &pp.sourceManager());
     if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
         return result;
     }
 
     wvmcc::parser::Semantic sem(tu, false);
     if (!sem.run(parser.getDiagnosticsRef())) {
-        printDiagnostics(parser.getDiagnostics());
+        printDiagnostics(parser.getDiagnostics(), path, &pp.sourceManager());
         return result;
     }
 
@@ -320,7 +386,7 @@ static CompileResult compileSource(const std::string& path,
 
     const auto& codegenDiags = codegen.getDiagnostics();
     if (!codegenDiags.empty()) {
-        printDiagnostics(codegenDiags);
+        printDiagnostics(codegenDiags, path, &pp.sourceManager());
         for (const auto& d : codegenDiags) {
             if (d.severity == wvmcc::Diagnostic::Severity::Error) return result;
         }
@@ -397,7 +463,7 @@ int main(int argc, char** argv) {
 
         if (args.preprocessOnly) {
             while (auto tok = pp.next()) std::cout << tok->lexeme;
-            printDiagnostics(pp.getDiagnostics());
+            printDiagnostics(pp.getDiagnostics(), input, &pp.sourceManager());
             return hasError(pp.getDiagnostics()) ? 1 : 0;
         }
 
@@ -405,8 +471,8 @@ int main(int argc, char** argv) {
         wvmcc::parser::Lexer lex(pp);
         wvmcc::parser::Parser parser(lex);
         wvmcc::parser::TranslationUnitPtr tu = parser.parseTranslationUnit();
-        printDiagnostics(pp.getDiagnostics());
-        printDiagnostics(parser.getDiagnostics());
+        printDiagnostics(pp.getDiagnostics(), input, &pp.sourceManager());
+        printDiagnostics(parser.getDiagnostics(), input, &pp.sourceManager());
         if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
             return 1;
         }
@@ -460,14 +526,14 @@ int main(int argc, char** argv) {
             wvmcc::parser::Lexer lex(pp);
             wvmcc::parser::Parser parser(lex);
             wvmcc::parser::TranslationUnitPtr tu = parser.parseTranslationUnit();
-            printDiagnostics(pp.getDiagnostics());
-            printDiagnostics(parser.getDiagnostics());
+            printDiagnostics(pp.getDiagnostics(), input, &pp.sourceManager());
+            printDiagnostics(parser.getDiagnostics(), input, &pp.sourceManager());
             if (hasError(pp.getDiagnostics()) || hasError(parser.getDiagnostics())) {
                 return 1;
             }
             wvmcc::parser::Semantic sem(tu, false);
             if (!sem.run(parser.getDiagnosticsRef())) {
-                printDiagnostics(parser.getDiagnostics());
+                printDiagnostics(parser.getDiagnostics(), input, &pp.sourceManager());
                 return 1;
             }
             wvmcc::codegen::ModuleCodegen codegen(sem);
@@ -478,7 +544,7 @@ int main(int argc, char** argv) {
             auto module = codegen.generate(tu);
             const auto& codegenDiags = codegen.getDiagnostics();
             if (!codegenDiags.empty()) {
-                printDiagnostics(codegenDiags);
+                printDiagnostics(codegenDiags, input, &pp.sourceManager());
                 for (const auto& d : codegenDiags) {
                     if (d.severity == wvmcc::Diagnostic::Severity::Error) return 1;
                 }

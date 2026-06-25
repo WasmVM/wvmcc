@@ -12,6 +12,7 @@
 #include <filesystem>
 #include "Tokenizer.hpp"
 #include "MacroTable.hpp"
+#include "SourceManager.hpp"
 #include "../common.hpp"
 
 namespace wvmcc {
@@ -38,6 +39,11 @@ public:
 
     // Diagnostics collected during preprocessing
     const std::vector<Diagnostic>& getDiagnostics() const { return diagnostics; }
+
+    // #28 (approach B): the file registry used to resolve a diagnostic's
+    // fileId back to a path + source text for caret rendering. Shared with the
+    // child preprocessors spawned for #includes, so it covers the whole tree.
+    const SourceManager& sourceManager() const { return *sourceManager_; }
 
 private:
     // --- Configuration & state -----------------------------------------------
@@ -187,9 +193,14 @@ private:
         std::unique_ptr<std::istringstream> stream;
         std::unique_ptr<Tokenizer> tokenizer;
         std::string dir;
+        int fileId{0}; // #28: stamped onto every token read from this file
     };
 
     std::vector<FileCtx> fileStack;
+    // #28 (approach B): shared file registry. A default instance is created for
+    // a top-level Preprocessor; child preprocessors (see executeInclude) adopt
+    // the parent's so fileIds are globally unique across the include tree.
+    std::shared_ptr<SourceManager> sourceManager_{std::make_shared<SourceManager>()};
     std::deque<PPToken> outBuffer;
     bool atLineStart{true};
     // #line presumed-line offset (6.10.4): added to a token's physical line to

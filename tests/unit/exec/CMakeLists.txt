@@ -17,3 +17,8 @@ add_test(NAME cli-flags COMMAND wvmcc-cli-flags-test)
 add_executable(wvmcc-diagnostic-exit-status-test diagnostic_exit_status_test.cpp)
 add_dependencies(wvmcc-diagnostic-exit-status-test wvmcc)
 add_test(NAME diagnostic-exit-status COMMAND wvmcc-diagnostic-exit-status-test)
+
+# #28: enhanced diagnostics — file:line:col header, source snippet + caret, hint.
+add_executable(wvmcc-diagnostic-caret-test diagnostic_caret_test.cpp)
+add_dependencies(wvmcc-diagnostic-caret-test wvmcc)
+add_test(NAME diagnostic-caret COMMAND wvmcc-diagnostic-caret-test)
