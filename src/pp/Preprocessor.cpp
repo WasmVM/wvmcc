@@ -132,12 +132,16 @@ bool Preprocessor::pushFile(const std::string& path) {
     if (!f) return false;
     std::ostringstream ss;
     ss << f.rdbuf();
-    auto ssp = std::make_unique<std::istringstream>(ss.str());
+    std::string contents = ss.str();
+    auto ssp = std::make_unique<std::istringstream>(contents);
     auto tz = std::make_unique<Tokenizer>(*ssp);
     FileCtx ctx;
     ctx.path = path;
     ctx.stream = std::move(ssp);
     ctx.tokenizer = std::move(tz);
+    // #28: register this file so its tokens can be stamped with a stable fileId
+    // and its text recovered for caret rendering at diagnostic-print time.
+    ctx.fileId = sourceManager_->addFile(path, std::move(contents));
     // Initialize tokenizer state for streaming use
     ctx.tokenizer->reset();
     ctx.dir = std::filesystem::path(path).parent_path().string();
@@ -203,8 +207,11 @@ std::optional<PPToken> Preprocessor::readRawToken() {
             atLineStart = true;
             continue;
         }
-        
-        (void)ctx; (void)tok;
+        // #28: the Tokenizer's per-file SourceBuffer leaves fileId at 0; stamp the
+        // owning file's id here, the single choke point where tokens enter from a
+        // file, so spans carry it through Lexer -> Parser -> AST unchanged.
+        tok->span.begin.fileId = ctx.fileId;
+        tok->span.end.fileId = ctx.fileId;
         return tok;
     }
     return std::nullopt;
@@ -557,6 +564,9 @@ bool Preprocessor::executeInclude(const std::string& header, bool isAngle,
         child.sysroot = sysroot;
         child.inclusionStack = inclusionStack;
         child.pragmaOnceFiles = pragmaOnceFiles;
+        // #28: share the file registry so the included file's tokens get globally
+        // unique fileIds and its text stays recoverable after the child is gone.
+        child.sourceManager_ = sourceManager_;
         // Inherit the parent's macros so the included file can see them
         // (matches C preprocessor semantics — feature-test macros are
         // typically defined before #include lines).
