@@ -96,15 +96,27 @@ void emitStartWrapper(WasmVM::WasmModule& module,
         // sp_save = sp
         body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
         body.push_back(WasmVM::Instr::Local_set{4});
-        // argv_base = sp - argc * 8;  sp = argv_base
+        // argv_base = sp - (argc + 1) * 8;  sp = argv_base
+        // One extra slot: argv[argc] shall be a null pointer (5.1.2.2.1p2).
         body.push_back(WasmVM::Instr::Global_get{kSpGlobal});
         body.push_back(WasmVM::Instr::Local_get{0});
         body.push_back(WasmVM::Instr::I64_extend_i32_s{});
+        body.push_back(WasmVM::Instr::I64_const{1});
+        body.push_back(WasmVM::Instr::I64_add{});
         body.push_back(WasmVM::Instr::I64_const{8});
         body.push_back(WasmVM::Instr::I64_mul{});
         body.push_back(WasmVM::Instr::I64_sub{});
         body.push_back(WasmVM::Instr::Local_tee{3});
         body.push_back(WasmVM::Instr::Global_set{kSpGlobal});
+        // argv_base[argc] = 0 — the loop below fills slots 0..argc-1 only.
+        body.push_back(WasmVM::Instr::Local_get{3});
+        body.push_back(WasmVM::Instr::Local_get{0});
+        body.push_back(WasmVM::Instr::I64_extend_i32_s{});
+        body.push_back(WasmVM::Instr::I64_const{8});
+        body.push_back(WasmVM::Instr::I64_mul{});
+        body.push_back(WasmVM::Instr::I64_add{});
+        body.push_back(WasmVM::Instr::I64_const{0});
+        body.push_back(WasmVM::Instr::I64_store{1, 0, 3});
         // i = 0
         body.push_back(WasmVM::Instr::I32_const{0});
         body.push_back(WasmVM::Instr::Local_set{1});
