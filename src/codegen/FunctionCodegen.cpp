@@ -1598,6 +1598,7 @@ void FunctionCodegen::emitVaBuiltin(const std::string& name,
         wvmcc::Diagnostic d;
         d.severity = wvmcc::Diagnostic::Severity::Error;
         d.message = "va_list argument must be a plain local variable";
+        if (apExpr) d.span = apExpr->span;
         diagnostics_.push_back(std::move(d));
         emit(WasmVM::Instr::Drop{});
     };
@@ -1609,6 +1610,7 @@ void FunctionCodegen::emitVaBuiltin(const std::string& name,
             wvmcc::Diagnostic d;
             d.severity = wvmcc::Diagnostic::Severity::Error;
             d.message = "__builtin_va_start used outside a variadic function";
+            d.span = expr.span;
             diagnostics_.push_back(std::move(d));
             return;
         }
@@ -1760,6 +1762,7 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
         // #79: function pointers are tagged-i64 funcref-table slots. Push the
         // pointer value (the table index, after masking the tag) and use
         // call_indirect <table 0> <typeidx>.
+        size_t diagsBeforeCallee = diagnostics_.size();
         emitExpr(expr.callee, false);
 
         std::optional<WasmVM::index_t> typeIdx;
@@ -1803,10 +1806,16 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
 
         if (!typeIdx) {
             emit(WasmVM::Instr::Unreachable{});
-            wvmcc::Diagnostic d;
-            d.severity = wvmcc::Diagnostic::Severity::Error;
-            d.message = "indirect call: unable to determine callee type";
-            diagnostics_.push_back(std::move(d));
+            // #27: if emitting the callee already diagnosed the root cause
+            // (e.g. an undeclared identifier), don't stack a second error on
+            // the same call expression.
+            if (diagnostics_.size() == diagsBeforeCallee) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "indirect call: unable to determine callee type";
+                d.span = expr.span;
+                diagnostics_.push_back(std::move(d));
+            }
             return;
         }
 
@@ -1910,6 +1919,7 @@ void FunctionCodegen::emitCallExpr(const wvmcc::parser::CallExpr& expr) {
                 wvmcc::Diagnostic d;
                 d.severity = wvmcc::Diagnostic::Severity::Error;
                 d.message = "variadic struct-by-value arguments not yet supported";
+                d.span = varg->span;
                 diagnostics_.push_back(std::move(d));
             }
 
@@ -3203,6 +3213,7 @@ void FunctionCodegen::emitItemsWithGotoLift(const std::vector<wvmcc::parser::Blo
                         wvmcc::Diagnostic d;
                         d.severity = wvmcc::Diagnostic::Severity::Error;
                         d.message = "forward goto with overlapping range is not supported";
+                        d.span = gs.span;
                         diagnostics_.push_back(std::move(d));
                         continue;
                     }
@@ -3355,19 +3366,20 @@ void FunctionCodegen::emitDoWhileStmt(const wvmcc::parser::DoWhileStmt& stmt) {
     emit(WasmVM::Instr::End{});
 }
 
-void FunctionCodegen::emitBreakStmt(const wvmcc::parser::BreakStmt&) {
+void FunctionCodegen::emitBreakStmt(const wvmcc::parser::BreakStmt& stmt) {
     if (controlFlowStack_.empty()) {
         emit(WasmVM::Instr::Unreachable{});
         wvmcc::Diagnostic d;
         d.severity = wvmcc::Diagnostic::Severity::Error;
         d.message = "'break' not inside loop or switch";
+        d.span = stmt.span;
         diagnostics_.push_back(std::move(d));
         return;
     }
     emit(WasmVM::Instr::Br{breakDepth()});
 }
 
-void FunctionCodegen::emitContinueStmt(const wvmcc::parser::ContinueStmt&) {
+void FunctionCodegen::emitContinueStmt(const wvmcc::parser::ContinueStmt& stmt) {
     // Continue requires an enclosing loop (skipping switches).
     auto stk = controlFlowStack_;
     bool hasLoop = false;
@@ -3380,6 +3392,7 @@ void FunctionCodegen::emitContinueStmt(const wvmcc::parser::ContinueStmt&) {
         wvmcc::Diagnostic d;
         d.severity = wvmcc::Diagnostic::Severity::Error;
         d.message = "'continue' not inside a loop";
+        d.span = stmt.span;
         diagnostics_.push_back(std::move(d));
         return;
     }
@@ -3412,6 +3425,7 @@ void FunctionCodegen::emitGotoStmt(const wvmcc::parser::GotoStmt& stmt) {
     wvmcc::Diagnostic d;
     d.severity = wvmcc::Diagnostic::Severity::Error;
     d.message = "backward or non-local goto is not supported";
+    d.span = stmt.span;
     diagnostics_.push_back(std::move(d));
 }
 

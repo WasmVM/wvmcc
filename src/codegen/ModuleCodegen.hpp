@@ -140,8 +140,20 @@ public:
     // the emitted module is unsound — the driver should report and not ship it).
     const std::vector<wvmcc::Diagnostic>& getDiagnostics() const { return diagnostics_; }
 
+    // #27: C name + definition span of each emitted function, keyed by its
+    // index in module_.funcs — lets the driver turn an opaque `func[N]`
+    // validator error into a named, located diagnostic.
+    struct CodeFuncInfo {
+        std::string name;
+        std::optional<wvmcc::SourceSpan> span;
+    };
+    const std::unordered_map<size_t, CodeFuncInfo>& getCodeFuncInfo() const {
+        return codeFuncInfo_;
+    }
+
 private:
     std::vector<wvmcc::Diagnostic> diagnostics_;
+    std::unordered_map<size_t, CodeFuncInfo> codeFuncInfo_;
     const wvmcc::parser::Semantic& semantic_;
     CompileMode compileMode_ = CompileMode::Linkable; // M2-D: default flipped from Freestanding
     // Resolved enum-constant values from the parser (see setEnumConstants).

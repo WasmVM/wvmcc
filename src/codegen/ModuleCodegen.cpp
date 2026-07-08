@@ -843,6 +843,8 @@ void ModuleCodegen::emitFunctionDefinition(const wvmcc::parser::FunctionDefPtr& 
         }
     }
 
+    codeFuncInfo_[module_.funcs.size()] =
+        {getFuncName(funcDef->declarator), funcDef->span};
     module_.funcs.push_back(wasmFunc);
 }
 
