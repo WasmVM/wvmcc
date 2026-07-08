@@ -183,6 +183,8 @@ private:
 | `#error`, `#warning` | ✅ | Full support with conditional checks |
 | `#line`, `#pragma` | ✅ | Full support with validation |
 | `#pragma once` | ✅ | Honored; guarded file included once |
+| `_Pragma("...")` operator | ✅ | 6.10.9: destringized and processed as `#pragma`, including from macro expansion (#108) |
+| `#pragma STDC FP_CONTRACT` | ✅ | Accepted as a no-op — contraction is permanently OFF (`docs/spec.md`, #113) |
 
 ## Error Handling
 - All directive errors must include `SourcePos` (line, column)
