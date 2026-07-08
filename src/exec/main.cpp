@@ -307,6 +307,83 @@ bool hasError(const std::vector<wvmcc::Diagnostic>& diagnostics) {
     return false;
 }
 
+// Run semantic analysis and report whether codegen may proceed. Sema appends
+// into the parser's diagnostic list, whose earlier entries the caller already
+// printed — so print only the entries sema adds. #27: any sema Error gates
+// codegen even when sem.run() itself reports success; lowering a known-broken
+// TU only yields cascading secondary diagnostics.
+static bool runSemantic(wvmcc::parser::Semantic& sem,
+                        wvmcc::parser::Parser& parser,
+                        const std::string& path,
+                        const wvmcc::SourceManager& sm) {
+    size_t before = parser.getDiagnostics().size();
+    bool ok = sem.run(parser.getDiagnosticsRef());
+    std::vector<wvmcc::Diagnostic> added(
+        parser.getDiagnostics().begin() + before, parser.getDiagnostics().end());
+    printDiagnostics(added, path, &sm);
+    return ok && !hasError(added);
+}
+
+// #27 / lowering-plan Step 5.3: render a module_validate() failure as a
+// located diagnostic. The validator reports function-body errors as
+// "func[N]:<detail>" where N indexes the module's *defined* functions; map N
+// back to the C function that produced it — via codegen's per-function records
+// for a fresh TU, or the export table for a linked module (whose functions no
+// single TU's codegen describes).
+static void printValidationError(const std::string& what,
+                                 const WasmVM::WasmModule& module,
+                                 const wvmcc::codegen::ModuleCodegen* codegen,
+                                 const std::string& sourcePath,
+                                 const wvmcc::SourceManager* sm) {
+    size_t funcIdx = SIZE_MAX;
+    std::string detail = what;
+    if (what.rfind("func[", 0) == 0) {
+        size_t close = what.find("]:");
+        if (close != std::string::npos) {
+            funcIdx = std::strtoull(what.c_str() + 5, nullptr, 10);
+            detail = what.substr(close + 2);
+        }
+    }
+
+    std::string name;
+    std::optional<wvmcc::SourceSpan> span;
+    if (funcIdx != SIZE_MAX) {
+        if (codegen) {
+            const auto& info = codegen->getCodeFuncInfo();
+            auto it = info.find(funcIdx);
+            if (it != info.end()) {
+                name = it->second.name;
+                span = it->second.span;
+            }
+        }
+        if (name.empty()) {
+            // Exports index the full function space (imports first), while the
+            // validator's N counts defined functions only.
+            size_t numFuncImports = 0;
+            for (const auto& imp : module.imports) {
+                if (std::holds_alternative<WasmVM::index_t>(imp.desc)) {
+                    ++numFuncImports;
+                }
+            }
+            for (const auto& exp : module.exports) {
+                if (exp.desc == WasmVM::WasmExport::DescType::func
+                    && exp.index == numFuncImports + funcIdx) {
+                    name = exp.name;
+                    break;
+                }
+            }
+        }
+    }
+
+    wvmcc::Diagnostic d;
+    d.severity = wvmcc::Diagnostic::Severity::Error;
+    d.message = name.empty()
+        ? "module validation failed: " + detail
+        : "module validation failed in function '" + name + "': " + detail;
+    d.span = span;
+    printDiagnostics({d}, sourcePath, sm);
+}
+
 void printTokenStats(const std::vector<wvmcc::parser::Token>& tokens) {
     size_t kw = 0, id = 0, intc = 0, floatc = 0, enumc = 0, chart = 0, str = 0, punct = 0;
     for (const auto& t : tokens) {
@@ -372,8 +449,7 @@ static CompileResult compileSource(const std::string& path,
     }
 
     wvmcc::parser::Semantic sem(tu, false);
-    if (!sem.run(parser.getDiagnosticsRef())) {
-        printDiagnostics(parser.getDiagnostics(), path, &pp.sourceManager());
+    if (!runSemantic(sem, parser, path, pp.sourceManager())) {
         return result;
     }
 
@@ -393,7 +469,8 @@ static CompileResult compileSource(const std::string& path,
     }
 
     if (auto err = WasmVM::module_validate(result.module)) {
-        std::cerr << "error: module validation failed: " << err->what() << std::endl;
+        printValidationError(err->what(), result.module, &codegen, path,
+                             &pp.sourceManager());
         return result;
     }
 
@@ -532,8 +609,7 @@ int main(int argc, char** argv) {
                 return 1;
             }
             wvmcc::parser::Semantic sem(tu, false);
-            if (!sem.run(parser.getDiagnosticsRef())) {
-                printDiagnostics(parser.getDiagnostics(), input, &pp.sourceManager());
+            if (!runSemantic(sem, parser, input, pp.sourceManager())) {
                 return 1;
             }
             wvmcc::codegen::ModuleCodegen codegen(sem);
@@ -550,8 +626,8 @@ int main(int argc, char** argv) {
                 }
             }
             if (auto err = WasmVM::module_validate(module)) {
-                std::cerr << "error: module validation failed: " << err->what()
-                          << std::endl;
+                printValidationError(err->what(), module, &codegen, input,
+                                     &pp.sourceManager());
                 return 1;
             }
             std::string outFile = args.outPath;
@@ -668,7 +744,8 @@ int main(int argc, char** argv) {
     }
 
     if (auto err = WasmVM::module_validate(linkResult.module)) {
-        std::cerr << "error: linked module validation failed: " << err->what() << std::endl;
+        printValidationError(err->what(), linkResult.module, nullptr, "",
+                             nullptr);
         return 1;
     }
 

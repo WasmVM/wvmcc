@@ -41,7 +41,9 @@ private:
     // before per-expression types are computed) can accept `static int *p = arr;`
     // and `static fn_t f = func;`.
     std::unordered_set<std::string> addressConstantNames_{};
-    std::unordered_set<std::string> usedNames{};
+    // Identifier uses that may need an external definition, keyed by name with
+    // the span of the first use (#27: gives the end-of-TU warning a location).
+    std::unordered_map<std::string, wvmcc::SourceSpan> usedNames{};
     // recorded declaration signatures for compatibility checks
     std::unordered_map<std::string, std::string> declaredSignatures{};
     // recorded canonical type representations for compatibility checks (structural)
@@ -101,6 +103,10 @@ private:
     // (C 6.7.4p3).
     bool inInlineExternalDef_{false};
     std::unordered_map<std::string, wvmcc::SourceSpan> enumTagDefs{};
+    // Every enumerator name seen in the TU. An enumeration constant is not an
+    // object and needs no external definition (#27: filters the end-of-TU
+    // "no external definition" warning).
+    std::unordered_set<std::string> enumeratorNames_{};
     // recorded tag *kind* per tag name for tag-kind-mismatch detection
     // (C 6.7.2.3p2): a tag may only be re-used with the same kind. Value is one
     // of 's' (struct), 'u' (union), 'e' (enum).

@@ -22,3 +22,10 @@ add_test(NAME diagnostic-exit-status COMMAND wvmcc-diagnostic-exit-status-test)
 add_executable(wvmcc-diagnostic-caret-test diagnostic_caret_test.cpp)
 add_dependencies(wvmcc-diagnostic-caret-test wvmcc)
 add_test(NAME diagnostic-caret COMMAND wvmcc-diagnostic-caret-test)
+
+# #27: comprehensive error handling — call-site type mismatch is a named
+# located error, no cascading diagnostics, per-function recovery, and valid
+# implicit conversions never rejected.
+add_executable(wvmcc-error-handling-test error_handling_test.cpp)
+add_dependencies(wvmcc-error-handling-test wvmcc)
+add_test(NAME error-handling COMMAND wvmcc-error-handling-test)

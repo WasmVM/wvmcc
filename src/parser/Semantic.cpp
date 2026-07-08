@@ -1151,7 +1151,7 @@ std::shared_ptr<TypeNode> Semantic::buildTypeFromDeclaration(const DeclarationSp
             if (!voidParams) for (const auto &p : fps) {
                 // best-effort: build param type nodes (limited info)
                 std::shared_ptr<TypeNode> ptn = nullptr;
-                if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);
+                if (p.declarator) ptn = buildTypeFromDeclaration(p.specifiers, p.declarator, true, nullptr);
                 else if (p.typeSpec.has_value()) { ptn = std::make_shared<TypeNode>(); ptn->kind = TypeNode::Kind::Builtin; ptn->text = *p.typeSpec; }
                 if (!ptn) ptn = std::make_shared<TypeNode>();
                 f->params.push_back(ptn);
@@ -1237,7 +1237,7 @@ std::shared_ptr<TypeNode> Semantic::canonicalTypeRepr(const DeclarationSpecifier
                 f->isVariadic = layer->function.isVariadic;
                 for (const auto &p : layer->function.params) {
                     std::shared_ptr<TypeNode> ptn = nullptr;
-                    if (p.declarator) ptn = buildTypeFromDeclaration(DeclarationSpecifiers(), p.declarator, true, nullptr);
+                    if (p.declarator) ptn = buildTypeFromDeclaration(p.specifiers, p.declarator, true, nullptr);
                     else if (p.typeSpec.has_value()) { ptn = std::make_shared<TypeNode>(); ptn->kind = TypeNode::Kind::Builtin; ptn->text = *p.typeSpec; }
                     if (!ptn) ptn = std::make_shared<TypeNode>();
                     f->params.push_back(ptn);
@@ -1273,7 +1273,12 @@ void Semantic::recordDef(const std::string &name, const wvmcc::SourceSpan &span)
 // ASTVisitor hooks overridden by Semantic
 void Semantic::onIdent(const ASTVisitor::IdentifierExprPtr &id) {
     if (!id) return;
-    if (!id->name.empty()) usedNames.insert(id->name);
+    if (id->name.empty()) return;
+    // #27: a use that resolves to a block-scope object (local, parameter) does
+    // not need an external definition — recording it here made the end-of-TU
+    // "no external definition" warning fire on virtually every function.
+    if (lookupLocal(id->name)) return;
+    usedNames.emplace(id->name, id->span);
 }
 
 void Semantic::onFunctionDef(const FunctionDefPtr &f) {
@@ -2040,12 +2045,23 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
     }
 
     // Warn about identifier uses with no external definition in TU
-    for (const auto &name : usedNames) {
+    for (const auto &[name, useSpan] : usedNames) {
         auto it = defCount.find(name);
         int count = (it == defCount.end()) ? 0 : it->second;
         // A tentative definition provides an external definition (it becomes a
         // zero-initialized definition at end of translation unit, 6.9.2p2).
         if (count == 0 && tentativeDefs.find(name) == tentativeDefs.end()) {
+            // An enumeration constant is not an object; an internal-linkage
+            // (static) definition satisfies uses within this TU. Neither needs
+            // an external definition (#27).
+            if (enumeratorNames_.count(name) || internalDefs.count(name)) continue;
+            // A file-scope declaration means the definition may legitimately
+            // live in another TU (every extern function/object would warn
+            // otherwise). Only a name with no declaration at all is suspect.
+            if (declaredTypeRepr.count(name) || functionDecls.count(name)) continue;
+            // Compiler builtins (__builtin_va_start, …) are resolved by
+            // codegen and never have a C declaration.
+            if (name.rfind("__builtin_", 0) == 0) continue;
             // If all file-scope declarations for this function are inline (no extern),
             // they do not provide an external definition and we should not warn here.
             if (functionDecls.find(name) != functionDecls.end()) {
@@ -2057,6 +2073,7 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
             Diagnostic diag;
             diag.severity = Diagnostic::Severity::Warning;
             diag.message = "identifier '" + name + "' used but no external definition in this translation unit";
+            diag.span = useSpan;
             diagnostics.push_back(std::move(diag));
         }
     }
@@ -2100,21 +2117,21 @@ bool Semantic::run(std::vector<wvmcc::Diagnostic> &diagnostics) {
 }
 
 // forward declare helper
-static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics, std::unordered_set<const void*> &seenSuDefs);
+static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics, std::unordered_set<const void*> &seenSuDefs, std::unordered_set<std::string> &enumeratorNames);
 
 void Semantic::checkExternal(const ExternalDeclPtr &e, std::vector<wvmcc::Diagnostic> &diagnostics) {
     if (!e) return;
     if (std::holds_alternative<FunctionDefPtr>(e->decl)) {
         auto f = std::get<FunctionDefPtr>(e->decl);
         // record any struct/union/enum definitions appearing in function specifiers
-        processTypeSpecifiersForTags(f->specifiers, structUnionTagDefs, enumTagDefs, f->span, diagnostics, seenSuDefs_);
+        processTypeSpecifiersForTags(f->specifiers, structUnionTagDefs, enumTagDefs, f->span, diagnostics, seenSuDefs_, enumeratorNames_);
         checkTagKinds(f->specifiers, f->span, diagnostics);
         checkBitfields(f->specifiers, diagnostics);
         checkFunction(f, diagnostics);
     } else if (std::holds_alternative<DeclarationPtr>(e->decl)) {
         auto d = std::get<DeclarationPtr>(e->decl);
         // inspect declaration specifiers for tag definitions
-        processTypeSpecifiersForTags(d->specifiers, structUnionTagDefs, enumTagDefs, d->span, diagnostics, seenSuDefs_);
+        processTypeSpecifiersForTags(d->specifiers, structUnionTagDefs, enumTagDefs, d->span, diagnostics, seenSuDefs_, enumeratorNames_);
         checkTagKinds(d->specifiers, d->span, diagnostics);
         checkBitfields(d->specifiers, diagnostics);
         checkDeclaration(d, diagnostics);
@@ -2123,7 +2140,7 @@ void Semantic::checkExternal(const ExternalDeclPtr &e, std::vector<wvmcc::Diagno
 
 // Helper to inspect type-specifiers in a declaration or function specifiers to
 // record or detect duplicate struct/union and enum tag definitions.
-static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics, std::unordered_set<const void*> &seenSuDefs) {
+static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std::unordered_map<std::string, wvmcc::SourceSpan> &structDefs, std::unordered_map<std::string, wvmcc::SourceSpan> &enumDefs, const SourceSpan &span, std::vector<wvmcc::Diagnostic> &diagnostics, std::unordered_set<const void*> &seenSuDefs, std::unordered_set<std::string> &enumeratorNames) {
     for (const auto &ts : specs.typeSpecifiers) {
         if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::StructOrUnion) {
             if (ts.su && ts.su->name) {
@@ -2156,7 +2173,7 @@ static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std
         } else if (ts.kind == DeclarationSpecifiers::TypeSpecifier::Kind::Atomic) {
             // If this is `_Atomic(inner)`, recurse into inner specs to find any tag definitions
             if (ts.atomicInner) {
-                processTypeSpecifiersForTags(*ts.atomicInner, structDefs, enumDefs, span, diagnostics, seenSuDefs);
+                processTypeSpecifiersForTags(*ts.atomicInner, structDefs, enumDefs, span, diagnostics, seenSuDefs, enumeratorNames);
             }
         }
             // If this enum has a body, validate enumerators: duplicate names and constant inits
@@ -2165,6 +2182,7 @@ static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std
                     std::unordered_map<std::string, long long> seenVals;
                     long long next = 0;
                     for (const auto &e : ts.en->enumerators) {
+                        enumeratorNames.insert(e.name);
                         if (seenVals.find(e.name) != seenVals.end()) {
                             Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "duplicate enumerator '" + e.name + "'"; d.span = span; diagnostics.push_back(std::move(d));
                             continue;
@@ -2199,6 +2217,7 @@ static void processTypeSpecifiersForTags(const DeclarationSpecifiers &specs, std
                                 std::unordered_map<std::string, long long> seenVals;
                                 long long next = 0;
                                 for (const auto &e : its.en->enumerators) {
+                                    enumeratorNames.insert(e.name);
                                     if (seenVals.find(e.name) != seenVals.end()) {
                                         Diagnostic d; d.severity = Diagnostic::Severity::Error; d.message = "duplicate enumerator '" + e.name + "'"; d.span = span; diagnostics.push_back(std::move(d));
                                         continue;
@@ -3109,10 +3128,77 @@ Semantic::ExprTypeResult Semantic::typeOfExpr(const ExprPtr &e) const {
                                : (pcount == 1 ? " argument" : " arguments"));
                         d.span = e->span; curDiagnostics->push_back(std::move(d));
                     }
-                    // NOTE: per-argument *type* compatibility is deliberately not
-                    // diagnosed here — modelling the implicit assignment-style
-                    // conversions (int<->long, 0->pointer, etc.) accurately is
-                    // out of scope and would risk rejecting valid code.
+                    // Per-argument type compatibility (C 6.5.2.2p2 via the
+                    // 6.5.16.1 assignment constraints). Modelling the full
+                    // implicit-conversion lattice (int<->long ranks, 0->pointer
+                    // null constants, void* interconversion) accurately is out
+                    // of scope, so only combinations that no implicit
+                    // conversion permits are rejected (#27):
+                    //   - pointer/array/function argument for an arithmetic
+                    //     parameter (except _Bool, which accepts any scalar);
+                    //   - struct/union argument for a non-struct parameter, or
+                    //     vice versa.
+                    // Anything unknown or unresolved on either side is skipped,
+                    // so well-formed code is never rejected.
+                    if (!countBad && curDiagnostics) {
+                        std::string calleeName;
+                        if (c->callee && c->callee->kind == Expr::Kind::Ident) {
+                            if (auto cid = std::dynamic_pointer_cast<IdentifierExpr>(c->callee))
+                                calleeName = cid->name;
+                        }
+                        const std::string calleeDesc = calleeName.empty()
+                            ? "function" : ("'" + calleeName + "'");
+                        auto isBoolBuiltin = [](const std::shared_ptr<TypeNode> &t) {
+                            if (!t || t->kind != TypeNode::Kind::Builtin) return false;
+                            using S = DeclarationSpecifiers::SimpleTypeSpecifier;
+                            for (auto s : t->simple) if (s == S::Bool) return true;
+                            return false;
+                        };
+                        for (size_t i = 0; i < pcount && i < argTypes.size(); ++i) {
+                            const auto &paramT = fnType->params[i];
+                            const auto &argT = argTypes[i].type;
+                            if (!paramT || !argT) continue;
+                            bool argPtrish = tcIsPointer(argT) || tcIsArray(argT)
+                                          || tcIsFunction(argT);
+                            // Positive classification only: an empty/unknown
+                            // TypeNode (unresolved typedef, best-effort param)
+                            // must not count as arithmetic or scalar here.
+                            auto positivelyArith = [](const std::shared_ptr<TypeNode> &t) {
+                                return tcIsArithmetic(t)
+                                    && (t->kind == TypeNode::Kind::Enum
+                                        || !t->simple.empty());
+                            };
+                            std::string why, hint;
+                            if (argPtrish && positivelyArith(paramT)
+                                && !isBoolBuiltin(paramT)) {
+                                why = "makes an arithmetic value from a pointer"
+                                      " without a cast";
+                                hint = "cast the argument explicitly if the"
+                                       " conversion is intended";
+                            } else if (tcIsStructOrUnion(argT)
+                                       && (positivelyArith(paramT)
+                                           || tcIsPointer(paramT))) {
+                                why = "has incompatible type";
+                                hint = "a struct/union cannot convert to a"
+                                       " scalar parameter";
+                            } else if (tcIsStructOrUnion(paramT)
+                                       && (positivelyArith(argT)
+                                           || tcIsPointer(argT))) {
+                                why = "has incompatible type";
+                                hint = "a scalar cannot convert to a"
+                                       " struct/union parameter";
+                            }
+                            if (why.empty()) continue;
+                            Diagnostic d;
+                            d.severity = Diagnostic::Severity::Error;
+                            d.message = "passing argument " + std::to_string(i + 1)
+                                + " of " + calleeDesc + " " + why;
+                            d.hint = hint;
+                            d.span = (i < c->args.size() && c->args[i])
+                                ? c->args[i]->span : e->span;
+                            curDiagnostics->push_back(std::move(d));
+                        }
+                    }
                 } else {
                     // no prototype: apply default promotions to arguments (no diagnostic)
                     for (size_t i = 0; i < argTypes.size(); ++i) {
@@ -3640,9 +3726,12 @@ void Semantic::checkFunction(const FunctionDefPtr &f, std::vector<wvmcc::Diagnos
         diagnostics.push_back(std::move(diag));
     }
 
-    // Track internal (static) function definitions for duplicate checking
+    // Track internal (static) function definitions for duplicate checking.
+    // Use declaratorName(): a function definition's declarator is a
+    // Function-kind node whose identifier is nested, so `id.name` directly is
+    // empty here (which used to file every static def under "").
     if (f->specifiers.hasStorage(wvmcc::parser::StorageClass::Static)) {
-        std::string nm = f->declarator->id.name;
+        const std::string &nm = name;
         auto it = internalDefs.find(nm);
         if (it != internalDefs.end() && it->second.second) {
             // duplicate internal definition handled by parser (constraint checks). Do not emit here.
