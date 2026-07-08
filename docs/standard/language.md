@@ -105,7 +105,7 @@ and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 | `LANG-5.2.4.2.2-03` | 5.2.4.2.2p8,p9 | `FLT_ROUNDS` and `FLT_EVAL_METHOD` values | B-impl | supported | static-assert | wvmcc: round-to-nearest (1), eval method 0 |
 | `LANG-5.2.4.2.2-04` | 5.2.4.2.2p10 | Subnormal support (`FLT_HAS_SUBNORM`, …) | B-impl | supported | static-assert | IEEE-754 → present (1) |
 | `LANG-5.2.4.2.2-05` | 5.2.4.2.2p4 | Sign of zero/NaN/infinity may be unspecified where unsigned | B-unspec | supported | none | IEEE-754 signed zero; documentation |
-| `LANG-5.2.4.2.2-06` | 5.2.4.2.2p6 | Accuracy of floating ops and `<math.h>`/`<complex.h>` results is implementation-defined | B-impl | partial | none | IEEE-754 ops exact; libm accuracy unstated — **spec.md gap** |
+| `LANG-5.2.4.2.2-06` | 5.2.4.2.2p6 | Accuracy of floating ops and `<math.h>`/`<complex.h>` results is implementation-defined | B-impl | by-design | none | characterized in `docs/spec.md` (#111): basic ops correctly rounded (Wasm IEEE-754); libm software impl, no formal ULP bound; complex deferred |
 
 ---
 

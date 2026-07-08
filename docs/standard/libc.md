@@ -278,8 +278,10 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 ## `<math.h>` (7.12)
 
 Each base function with an `f`/`l` suffix denotes the `float`/`long double` variant; `long double`
-aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined (5.2.4.2.2p6 —
-`docs/spec.md` gap on libm accuracy).
+aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined (5.2.4.2.2p6) and
+characterized in `docs/spec.md` (Floating-point accuracy and math error handling), together with the
+errno contract: `math_errhandling == MATH_ERRNO`; domain → `EDOM`+NaN, pole/overflow →
+`ERANGE`+`±HUGE_VAL`, underflow silent.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -304,7 +306,7 @@ aliases `double` (`docs/spec.md`). Accuracy of results is implementation-defined
 | `LIBC-math-fmax-01` | 7.12.12 | fdim / fmax / fmin (+ f/l) | fn | Max/min/positive-difference | Positive | supported | exit | NaN treated as missing data (F.10.9) |
 | `LIBC-math-fma-01` | 7.12.13 | fma (+ f/l) | fn | Fused multiply-add | Positive | supported | exit | scaled double-double; single-rounding holds incl. the subnormal tie case |
 | `LIBC-math-compare-01` | 7.12.14 | isgreater / isgreaterequal / isless / islessequal / islessgreater / isunordered | fn-macro | Quiet comparison macros | Positive | supported | exit | |
-| `LIBC-math-errno-01` | 7.12.1 | (all) | fn | Domain/range errors set `errno`/raise FE exceptions per `math_errhandling` | B-impl | partial | none | `docs/spec.md`: errno-based; **accuracy gap** |
+| `LIBC-math-errno-01` | 7.12.1 | (all) | fn | Domain/range errors set `errno`/raise FE exceptions per `math_errhandling` | B-impl | supported | exit | `math_errhandling == MATH_ERRNO`; EDOM on domain, ERANGE on pole/overflow, underflow silent (`docs/spec.md`, #112; `errno_math.c`) |
 | `LIBC-math-FP_CONTRACT-01` | 7.12.2 | FP_CONTRACT | pragma | Controls expression contraction | B-impl | deferred | none | `docs/spec.md`: no contraction |
 
 ## `<time.h>` (7.27)

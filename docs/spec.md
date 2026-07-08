@@ -182,6 +182,24 @@ using PPTokenStream = std::vector<PPToken>;
 - Floating point:
   - `float`/`double`: IEEE-754 binary32/binary64 → `f32`/`f64`.
   - `long double`: alias to `double` in M0. Flag: `-flong-double=64` (enforced).
+- Floating-point accuracy (C17 §5.2.4.2.2p6, §7.12p1) and math error handling (§7.12.1):
+  - Basic operations (`+ - * /`, comparisons, conversions): correctly rounded
+    to nearest-even, inherited from WebAssembly's IEEE-754 `f32`/`f64`
+    semantics. No contraction, no excess precision (`FLT_EVAL_METHOD == 0`).
+  - `<math.h>` library accuracy is implementation-defined: portable software
+    implementations (no hardware intrinsics). Exactly-representable cases
+    (integer `pow` exponents, `frexp`/`ldexp`/`scalbn`/`modf`, `fmod`,
+    perfect squares) are exact; transcendentals are range-reduce + polynomial
+    with observed error well under `1e-9` at the conformance-tested points.
+    No formal ULP bound is claimed. `<complex.h>` is deferred
+    (`__STDC_NO_COMPLEX__`).
+  - Error handling: `math_errhandling == MATH_ERRNO` (floating exceptions are
+    not raised — no fenv). A **domain error** sets `errno = EDOM` and returns
+    NaN. A **pole error** or **overflow** sets `errno = ERANGE` and returns
+    `±HUGE_VAL` (= `±INFINITY`). **Underflow** returns the correctly signed
+    zero and leaves `errno` untouched (§7.12.1p6 implementation choice).
+    A quiet-NaN argument propagates without touching `errno`; no libm call
+    ever clears `errno` (§7.5p3).
 - Alignment & layout:
   - Fundamental alignments: `char` 1, `short` 2, `int`/`float` 4, `long`/`double`/`long long` 8.
   - Struct/union: natural alignment with padding; follows Clang wasm64 rules.

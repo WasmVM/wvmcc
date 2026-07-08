@@ -8,6 +8,7 @@
 // instead of unions (codegen path for unions is narrower today).
 
 #include <math.h>
+#include <errno.h>
 #include <string.h>
 
 typedef unsigned long u64;
@@ -139,7 +140,8 @@ double nexttoward(double x, long double y) { return nextafter(x, (double)y); }
 // ay*2^k <= ax. Each step is exact (×2 and like-magnitude subtraction), so the
 // result is exact for all finite x, y (not just small ones).
 double fmod(double x, double y) {
-    if (__isnan(x) || __isnan(y) || __isinf(x) || y == 0.0) return __wvmcc_nan();
+    if (__isnan(x) || __isnan(y)) return __wvmcc_nan();
+    if (__isinf(x) || y == 0.0)   { errno = EDOM; return __wvmcc_nan(); }   // 7.12.10.1p3
     if (__isinf(y)) return x;
     double ax = fabs(x), ay = fabs(y);
     if (ax < ay) return x;
@@ -152,7 +154,8 @@ double fmod(double x, double y) {
 }
 
 double remainder(double x, double y) {
-    if (__isnan(x) || __isnan(y) || __isinf(x) || y == 0.0) return __wvmcc_nan();
+    if (__isnan(x) || __isnan(y)) return __wvmcc_nan();
+    if (__isinf(x) || y == 0.0)   { errno = EDOM; return __wvmcc_nan(); }   // 7.12.10.2p3
     if (__isinf(y)) return x;
     double r  = fmod(x, y);
     double ay = fabs(y);
@@ -184,6 +187,17 @@ double remquo(double x, double y, int *quo) {
 // (7.12p1 / Annex F.10); range-reduce + polynomial gives well under 1e-9 at
 // the conformance-tested points, and the exactly-representable cases (integer
 // powers, frexp/ldexp/scalbn/modf, perfect squares/cubes) are exact.
+//
+// Error handling (7.12.1, math_errhandling == MATH_ERRNO — #112):
+//   domain error  -> errno = EDOM,   return NaN
+//   pole error    -> errno = ERANGE, return ±HUGE_VAL (or ∓, per the pole)
+//   overflow      -> errno = ERANGE, return ±HUGE_VAL
+//   underflow     -> errno untouched (7.12.1p6 leaves it implementation-
+//                    defined), return the correctly signed zero
+// A quiet-NaN *argument* is not a domain error: it propagates without
+// touching errno. errno is never cleared (7.5p3). Helpers that other libm
+// functions call internally must not set errno for intermediate overflow the
+// caller absorbs (see scalbn_raw / the tanh saturation cutoff).
 // ===========================================================================
 
 #define LN2_HI   6.93147180369123816490e-01   // ln2, high word
@@ -201,11 +215,18 @@ static double twopow(int n) { return double_of(((u64)(1023 + n)) << 52); }
 
 // ---- exponent / scaling primitives (exact) --------------------------------
 
-double scalbn(double x, int n) {
+// errno-free core, for internal callers whose own result absorbs the
+// intermediate scaling (e.g. fma's binade shift).
+static double scalbn_raw(double x, int n) {
     if (!__isfinite(x) || x == 0.0) return x;
     while (n >  1023) { x *= twopow(1023);  n -= 1023; }
     while (n < -1022) { x *= twopow(-1022); n += 1022; }
     return x * twopow(n);
+}
+double scalbn(double x, int n) {
+    double r = scalbn_raw(x, n);
+    if (__isinf(r) && __isfinite(x)) errno = ERANGE;    // overflow (7.12.1p5)
+    return r;
 }
 double ldexp(double x, int n)   { return scalbn(x, n); }
 double scalbln(double x, long n){
@@ -256,7 +277,7 @@ double logb(double x) {
 
 double sqrt(double x) {
     if (__isnan(x)) return x;
-    if (x < 0.0)    return __wvmcc_nan();
+    if (x < 0.0)    { errno = EDOM; return __wvmcc_nan(); }
     if (x == 0.0 || __isinf(x)) return x;
     int e;
     double m = frexp(x, &e);                  // x = m * 2^e, m in [0.5, 1)
@@ -282,13 +303,13 @@ double cbrt(double x) {
 double exp(double x) {
     if (__isnan(x)) return x;
     if (__isinf(x)) return x > 0.0 ? x : 0.0;
-    if (x >  709.782712893384) return __wvmcc_inf();
-    if (x < -745.133219101941) return 0.0;
+    if (x >  709.782712893384) { errno = ERANGE; return __wvmcc_inf(); }
+    if (x < -745.133219101941) return 0.0;   // underflow: errno untouched
     int k = (int)(x * INV_LN2 + (x >= 0.0 ? 0.5 : -0.5));     // nearest integer
     double r = (x - k * LN2_HI) - k * LN2_LO;                 // |r| <= ln2/2
     double term = 1.0, sum = 1.0;
     for (int i = 1; i <= 16; i++) { term *= r / i; sum += term; }
-    return scalbn(sum, k);
+    return scalbn_raw(sum, k);   // in range: the overflow cutoff ran above
 }
 double exp2(double x) {
     if (__isnan(x)) return x;
@@ -308,8 +329,8 @@ double expm1(double x) {
 
 double log(double x) {
     if (__isnan(x)) return x;
-    if (x < 0.0)    return __wvmcc_nan();
-    if (x == 0.0)   return -__wvmcc_inf();
+    if (x < 0.0)    { errno = EDOM;   return __wvmcc_nan(); }
+    if (x == 0.0)   { errno = ERANGE; return -__wvmcc_inf(); }   // pole
     if (__isinf(x)) return x;
     int e;
     double m = frexp(x, &e);              // m in [0.5, 1)
@@ -372,13 +393,13 @@ double atan(double x) {
 }
 double asin(double x) {
     if (__isnan(x)) return x;
-    if (fabs(x) > 1.0) return __wvmcc_nan();
+    if (fabs(x) > 1.0) { errno = EDOM; return __wvmcc_nan(); }
     if (fabs(x) == 1.0) return copysign(PIO2, x);
     return atan(x / sqrt(1.0 - x * x));
 }
 double acos(double x) {
     if (__isnan(x)) return x;
-    if (fabs(x) > 1.0) return __wvmcc_nan();
+    if (fabs(x) > 1.0) { errno = EDOM; return __wvmcc_nan(); }
     return PIO2 - asin(x);
 }
 double atan2(double y, double x) {
@@ -404,25 +425,33 @@ double cosh(double x) {
 }
 double tanh(double x) {
     if (__isnan(x)) return x;
+    // tanh saturates to ±1 within double precision long before exp(2|x|)
+    // overflows; cut over early so no spurious ERANGE leaks from exp.
+    if (fabs(x) > 20.0) return copysign(1.0, x);
     double e = exp(2.0 * fabs(x));
     double t = (e - 1.0) / (e + 1.0);
     return x < 0.0 ? -t : t;
 }
 double asinh(double x) {
     if (!__isfinite(x)) return x;
-    double a = fabs(x), r = log(a + sqrt(a * a + 1.0));
+    double a = fabs(x);
+    // a*a would overflow for huge a; asinh(x) ~= sign(x)*log(2|x|) there.
+    double r = a > 1e150 ? log(a) + LN2 : log(a + sqrt(a * a + 1.0));
     return x < 0.0 ? -r : r;
 }
 double acosh(double x) {
     if (__isnan(x)) return x;
-    if (x < 1.0) return __wvmcc_nan();
+    if (x < 1.0) { errno = EDOM; return __wvmcc_nan(); }
+    // x*x would overflow for huge x; acosh(x) ~= log(2x) there (exact to
+    // double precision once x > 2^53).
+    if (x > 1e150) return log(x) + LN2;
     return log(x + sqrt(x * x - 1.0));
 }
 double atanh(double x) {
     if (__isnan(x)) return x;
     double a = fabs(x);
-    if (a > 1.0)  return __wvmcc_nan();
-    if (a == 1.0) return copysign(__wvmcc_inf(), x);
+    if (a > 1.0)  { errno = EDOM;   return __wvmcc_nan(); }
+    if (a == 1.0) { errno = ERANGE; return copysign(__wvmcc_inf(), x); }   // pole
     double r = 0.5 * log((1.0 + a) / (1.0 - a));
     return x < 0.0 ? -r : r;
 }
@@ -439,10 +468,13 @@ double pow(double x, double y) {
         unsigned long m = neg ? (unsigned long)(-n) : (unsigned long)n;
         double r = 1.0, base = x;
         while (m) { if (m & 1) r *= base; base *= base; m >>= 1; }
-        return neg ? 1.0 / r : r;
+        r = neg ? 1.0 / r : r;
+        if (__isinf(r) && __isfinite(x)) errno = ERANGE;    // overflow
+        return r;
     }
-    if (x > 0.0) return exp(y * log(x));
-    return __wvmcc_nan();                            // negative base, non-integer exp
+    if (x > 0.0) return exp(y * log(x));             // exp sets ERANGE on overflow
+    errno = EDOM;                                    // negative base, non-integer exp
+    return __wvmcc_nan();
 }
 
 double hypot(double x, double y) {
@@ -451,7 +483,9 @@ double hypot(double x, double y) {
     if (x < y) { double t = x; x = y; y = t; }
     if (x == 0.0) return 0.0;
     double r = y / x;
-    return x * sqrt(1.0 + r * r);
+    double h = x * sqrt(1.0 + r * r);
+    if (__isinf(h)) errno = ERANGE;   // inputs are finite here (checked above)
+    return h;
 }
 
 // ---- fused multiply-add ---------------------------------------------------
@@ -479,12 +513,12 @@ double fma(double x, double y, double z) {
     double xm = frexp(x, &ex), ym = frexp(y, &ey);  // xm,ym in [0.5,1)
     int S = ex + ey;                                 // true product = (xm*ym)*2^S
     double ph, pl; two_prod(xm, ym, &ph, &pl);       // exact, |ph| in (0.25,1)
-    double zs = scalbn(z, -S);                       // bring z to the 2^S binade
+    double zs = scalbn_raw(z, -S);                   // bring z to the 2^S binade
     if (!__isfinite(zs)) return x * y + z;           // z too far out of range to fuse
     double s1, e1; two_sum(ph, zs, &s1, &e1);
     double hi, lo; two_sum(s1, pl + e1, &hi, &lo);
-    double r = scalbn(hi, S);                         // round once back to the true scale
-    if (lo != 0.0) r += scalbn(lo, S);
+    double r = scalbn(hi, S);   // public: a genuine fma overflow sets ERANGE
+    if (lo != 0.0) r += scalbn_raw(lo, S);
     return r;
 }
 float fmaf(float x, float y, float z) {

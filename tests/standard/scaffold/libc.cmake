@@ -36,6 +36,7 @@ add_standard_run_test(libc-locale-localeconv ${CMAKE_CURRENT_SOURCE_DIR}/libc/lo
 add_standard_run_test(libc-locale-setlocale ${CMAKE_CURRENT_SOURCE_DIR}/libc/locale/setlocale.c supported)
 add_standard_run_test(libc-math-compare ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/compare.c supported)
 add_standard_static_assert(libc-math-errhandling ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/errhandling.c supported)
+add_standard_run_test(libc-math-errno ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/errno_math.c supported)
 add_standard_run_test(libc-math-exp ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/exp.c supported)
 add_standard_run_test(libc-math-fma ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fma.c supported)
 add_standard_run_test(libc-math-fmax ${CMAKE_CURRENT_SOURCE_DIR}/libc/math/fmax.c supported)
