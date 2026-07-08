@@ -22,6 +22,10 @@ WasmVM::ValueType arithCommonType(WasmVM::ValueType lhs, WasmVM::ValueType rhs) 
     return WasmVM::ValueType::i32;
 }
 
+// Defined with the goto helpers further below; used by generate() to seed
+// functionLabels_ before body emission.
+void collectItemLabels(const wvmcc::parser::BlockItemPtr& bi, std::unordered_set<std::string>& out);
+
 } // namespace
 
 // Emit a conversion instruction that turns `from` into `to`. Caller guarantees
@@ -317,6 +321,9 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
     if (!addressTakenNames_.empty()) {
         framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
     }
+
+    functionLabels_.clear();
+    for (const auto& it : funcDef->body) collectItemLabels(it, functionLabels_);
 
     emitItemsWithGotoLift(funcDef->body);
 
@@ -3058,6 +3065,48 @@ bool stmtHasGotoTo(const wvmcc::parser::StmtPtr& s,
     default:         return false;
     }
 }
+
+// Collect every label name in a statement subtree (labels have function scope,
+// 6.2.1p3). Used for emitGotoStmt's fallback diagnostic.
+void collectLabels(const wvmcc::parser::StmtPtr& s, std::unordered_set<std::string>& out);
+void collectItemLabels(const wvmcc::parser::BlockItemPtr& bi, std::unordered_set<std::string>& out) {
+    if (!bi) return;
+    if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&bi->item)) collectLabels(*sp, out);
+}
+void collectLabels(const wvmcc::parser::StmtPtr& s, std::unordered_set<std::string>& out) {
+    using K = wvmcc::parser::Stmt::Kind;
+    if (!s) return;
+    switch (s->kind) {
+    case K::Label: {
+        const auto& ls = static_cast<const wvmcc::parser::LabelStmt&>(*s);
+        out.insert(ls.name);
+        collectLabels(ls.stmt, out);
+        return;
+    }
+    case K::Compound:
+        for (const auto& it : static_cast<const wvmcc::parser::CompoundStmt&>(*s).items)
+            collectItemLabels(it, out);
+        return;
+    case K::If: {
+        const auto& i = static_cast<const wvmcc::parser::IfStmt&>(*s);
+        collectLabels(i.thenStmt, out);
+        if (i.elseStmt) collectLabels(*i.elseStmt, out);
+        return;
+    }
+    case K::While:   collectLabels(static_cast<const wvmcc::parser::WhileStmt&>(*s).body, out); return;
+    case K::DoWhile: collectLabels(static_cast<const wvmcc::parser::DoWhileStmt&>(*s).body, out); return;
+    case K::For: {
+        const auto& f = static_cast<const wvmcc::parser::ForStmt&>(*s);
+        if (f.init) collectItemLabels(*f.init, out);
+        collectLabels(f.body, out);
+        return;
+    }
+    case K::Switch:  collectLabels(static_cast<const wvmcc::parser::SwitchStmt&>(*s).body, out); return;
+    case K::Case:    collectLabels(static_cast<const wvmcc::parser::CaseStmt&>(*s).stmt, out); return;
+    case K::Default: collectLabels(static_cast<const wvmcc::parser::DefaultStmt&>(*s).stmt, out); return;
+    default: return;
+    }
+}
 } // namespace
 
 bool FunctionCodegen::topLevelNeedsGotoDispatch(
@@ -3071,6 +3120,7 @@ bool FunctionCodegen::topLevelNeedsGotoDispatch(
                 labelIdx[static_cast<const wvmcc::parser::LabelStmt&>(**sp).name] = (int)i;
     }
     if (labelIdx.empty()) return false;
+    std::vector<std::pair<int, int>> fwdRanges; // (goto idx, target label idx)
     for (size_t i = 0; i < items.size(); ++i) {
         if (!items[i]) continue;
         auto sp = std::get_if<wvmcc::parser::StmtPtr>(&items[i]->item);
@@ -3079,13 +3129,25 @@ bool FunctionCodegen::topLevelNeedsGotoDispatch(
         // this level; a backward (target index <= goto index) one needs dispatch.
         if ((*sp)->kind == K::Goto) {
             auto it = labelIdx.find(static_cast<const wvmcc::parser::GotoStmt&>(**sp).label);
-            if (it != labelIdx.end() && it->second <= (int)i) return true;
+            if (it != labelIdx.end()) {
+                if (it->second <= (int)i) return true;
+                fwdRanges.emplace_back((int)i, it->second);
+            }
             continue;
         }
         // A goto nested anywhere below this level (inside if/for/…/a label's
         // statement) targeting a label here is non-local — needs dispatch.
         if (stmtHasGotoTo(*sp, labelIdx)) return true;
     }
+    // The forward lift expresses each goto→label range as a wrapping Block, so
+    // two ranges must nest properly (or coincide at the target). Improperly
+    // overlapping ranges need the dispatch loop instead.
+    for (size_t a = 0; a + 1 < fwdRanges.size(); ++a)
+        for (size_t b = a + 1; b < fwdRanges.size(); ++b) {
+            auto [s1, e1] = fwdRanges[a];
+            auto [s2, e2] = fwdRanges[b];
+            if (s2 < e1 && e1 < e2) return true; // s1 <= s2 by construction
+        }
     return false;
 }
 
@@ -3096,17 +3158,12 @@ void FunctionCodegen::emitGotoDispatch(const std::vector<wvmcc::parser::BlockIte
     // code before the first label). A label both names a segment and begins it.
     std::vector<std::vector<wvmcc::parser::BlockItemPtr>> segments;
     segments.emplace_back();
-    // Save any outer dispatch context (nested goto-dispatch is rare but legal).
-    bool savedActive = gotoDispatchActive_;
-    int savedState = gotoStateLocal_, savedLoopD = gotoDispatchLoopDepth_, savedExitD = gotoDispatchExitDepth_;
-    auto savedMap = gotoLabelSeg_;
-    gotoLabelSeg_.clear();
-
+    std::unordered_map<std::string, int> labelSeg;
     for (const auto& item : items) {
         if (item) {
             if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&item->item)) {
                 if (*sp && (*sp)->kind == K::Label) {
-                    gotoLabelSeg_[static_cast<const wvmcc::parser::LabelStmt&>(**sp).name] = (int)segments.size();
+                    labelSeg[static_cast<const wvmcc::parser::LabelStmt&>(**sp).name] = (int)segments.size();
                     segments.emplace_back();
                 }
             }
@@ -3115,15 +3172,20 @@ void FunctionCodegen::emitGotoDispatch(const std::vector<wvmcc::parser::BlockIte
     }
     int N = (int)segments.size();
 
-    gotoStateLocal_ = allocRawLocal(WasmVM::ValueType::i32);
+    int stateLocal = allocRawLocal(WasmVM::ValueType::i32);
     emit(WasmVM::Instr::I32_const{0});                                  // entry = segment 0
-    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)gotoStateLocal_});
+    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)stateLocal});
 
     emit(WasmVM::Instr::Block{std::nullopt});                           // $exit
-    gotoDispatchExitDepth_ = currentBlockDepth_;
+    int exitDepth = currentBlockDepth_;
     emit(WasmVM::Instr::Loop{std::nullopt});                            // $dispatch
-    gotoDispatchLoopDepth_ = currentBlockDepth_;
-    gotoDispatchActive_ = true;
+    int loopDepth = currentBlockDepth_;
+
+    // Push this dispatch context; an outer one (nested goto-dispatch is rare
+    // but legal) stays on the stack so gotos can still reach its labels. Note
+    // segment-body emission below may push/pop nested contexts, so the stack
+    // entry must not be referenced across emitBlockItem — use the locals.
+    gotoDispatchStack_.push_back({stateLocal, loopDepth, exitDepth, labelSeg});
 
     // One block per segment; segment N-1 outermost so segment 0 is innermost
     // (mirrors emitSwitchStmt). br to $seg_i lands just after its End, where
@@ -3132,13 +3194,13 @@ void FunctionCodegen::emitGotoDispatch(const std::vector<wvmcc::parser::BlockIte
 
     // Dispatch: br_table[state] -> end of the matching segment block.
     auto segBrIdx = [&](int seg) {
-        int depthAtOpen = gotoDispatchLoopDepth_ + N - seg;
+        int depthAtOpen = loopDepth + N - seg;
         return (WasmVM::index_t)(currentBlockDepth_ - depthAtOpen);
     };
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)gotoStateLocal_});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)stateLocal});
     WasmVM::Instr::Br_table bt;
     for (int seg = 0; seg < N; ++seg) bt.indices.push_back(segBrIdx(seg));
-    bt.indices.push_back((WasmVM::index_t)(currentBlockDepth_ - gotoDispatchExitDepth_)); // default -> exit
+    bt.indices.push_back((WasmVM::index_t)(currentBlockDepth_ - exitDepth)); // default -> exit
     emit(bt);
 
     // Segment bodies in source order. Each segment, after its statements, must
@@ -3149,21 +3211,17 @@ void FunctionCodegen::emitGotoDispatch(const std::vector<wvmcc::parser::BlockIte
         for (const auto& it : segments[i]) emitBlockItem(it);
         if (i + 1 < N) {
             emit(WasmVM::Instr::I32_const{i + 1});
-            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)gotoStateLocal_});
-            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - gotoDispatchLoopDepth_)});
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)stateLocal});
+            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - loopDepth)});
         } else {
-            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - gotoDispatchExitDepth_)});
+            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - exitDepth)});
         }
     }
 
     emit(WasmVM::Instr::End{});  // close loop $dispatch
     emit(WasmVM::Instr::End{});  // close block $exit
 
-    gotoDispatchActive_ = savedActive;
-    gotoStateLocal_ = savedState;
-    gotoDispatchLoopDepth_ = savedLoopD;
-    gotoDispatchExitDepth_ = savedExitD;
-    gotoLabelSeg_ = std::move(savedMap);
+    gotoDispatchStack_.pop_back();
 }
 
 void FunctionCodegen::emitItemsWithGotoLift(const std::vector<wvmcc::parser::BlockItemPtr>& items) {
@@ -3208,15 +3266,9 @@ void FunctionCodegen::emitItemsWithGotoLift(const std::vector<wvmcc::parser::Blo
                 const auto& gs = static_cast<const wvmcc::parser::GotoStmt&>(**sp);
                 auto it = labelIdx.find(gs.label);
                 if (it != labelIdx.end() && it->second > i) {
-                    if (!openBlocks.empty() && it->second > openBlocks.back().closeAt) {
-                        emit(WasmVM::Instr::Unreachable{});
-                        wvmcc::Diagnostic d;
-                        d.severity = wvmcc::Diagnostic::Severity::Error;
-                        d.message = "forward goto with overlapping range is not supported";
-                        d.span = gs.span;
-                        diagnostics_.push_back(std::move(d));
-                        continue;
-                    }
+                    // Ranges nest properly here: topLevelNeedsGotoDispatch
+                    // routed any improperly overlapping set to the dispatch
+                    // loop before this lift ran.
                     emit(WasmVM::Instr::Block{std::nullopt});
                     openBlocks.push_back({it->second});
                     emit(WasmVM::Instr::Br{0});
@@ -3406,25 +3458,32 @@ void FunctionCodegen::emitLabelStmt(const wvmcc::parser::LabelStmt& stmt) {
 }
 
 void FunctionCodegen::emitGotoStmt(const wvmcc::parser::GotoStmt& stmt) {
-    // Inside a dispatch loop (emitGotoDispatch): set the state to the target
-    // segment and branch back to the loop to re-dispatch. Works for forward,
-    // backward, and non-local (nested) jumps uniformly.
-    if (gotoDispatchActive_) {
-        auto it = gotoLabelSeg_.find(stmt.label);
-        if (it != gotoLabelSeg_.end()) {
+    // Inside a dispatch loop (emitGotoDispatch): set the state of the innermost
+    // enclosing dispatch whose block owns the target label to that label's
+    // segment and branch back to its loop to re-dispatch. Works for forward,
+    // backward, and non-local (nested) jumps uniformly — including a goto that
+    // leaves a nested dispatch block for a label of an outer one.
+    for (auto ctx = gotoDispatchStack_.rbegin(); ctx != gotoDispatchStack_.rend(); ++ctx) {
+        auto it = ctx->labelSeg.find(stmt.label);
+        if (it != ctx->labelSeg.end()) {
             emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)it->second});
-            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)gotoStateLocal_});
-            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - gotoDispatchLoopDepth_)});
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)ctx->stateLocal});
+            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - ctx->loopDepth)});
             return;
         }
     }
     // Forward same-level gotos are lifted in emitItemsWithGotoLift and emitted
-    // there as Br. Reaching here otherwise means the target is outside any
-    // dispatch/lift scope handled so far.
+    // there as Br. Reaching here otherwise means the label lives in a scope the
+    // goto's block does not enclose — i.e. the jump would have to enter a
+    // nested block partway (6.8.6.1 allows this when no VLA is in scope, but
+    // the dispatch lowering cannot express it yet) — or does not exist at all
+    // (also rejected at parse time).
     emit(WasmVM::Instr::Unreachable{});
     wvmcc::Diagnostic d;
     d.severity = wvmcc::Diagnostic::Severity::Error;
-    d.message = "backward or non-local goto is not supported";
+    d.message = functionLabels_.count(stmt.label)
+        ? "goto into a nested block is not supported (label '" + stmt.label + "')"
+        : "use of undeclared label '" + stmt.label + "'";
     d.span = stmt.span;
     diagnostics_.push_back(std::move(d));
 }

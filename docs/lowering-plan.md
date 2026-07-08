@@ -127,7 +127,7 @@ All expression emission is stack-machine style: `emitExpr(ExprPtr, bool need_lva
 | `break` / `continue` | `Br{depth}` — depth computed from `ControlFlowStack` |
 | `switch` (dense) | `br_table` dispatch; nested `Block`s per case, outermost `Block` is break target |
 | `switch` (sparse) | chained `if`/`else` comparisons (when `max-min > 4 * num_cases`) |
-| `goto` | dispatch loop for arbitrary (forward/backward/non-local) jumps; same-level forward gotos lifted to `Block`+`Br` |
+| `goto` | dispatch loop for arbitrary (forward/backward/non-local) jumps, chaining to outer dispatch contexts and covering overlapping forward ranges; simple same-level forward gotos lifted to `Block`+`Br`; jump *into* a nested block not yet lowered |
 | `_Static_assert` | no code emitted (evaluated at semantic phase) |
 
 ---

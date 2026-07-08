@@ -212,13 +212,22 @@ public:
     // a br_table dispatch target (WebAssembly has only structured control flow).
     void emitGotoDispatch(const std::vector<wvmcc::parser::BlockItemPtr>& items);
 
-    // Active dispatch-loop context (set while inside emitGotoDispatch) so a
-    // nested `goto` can branch back to the loop and re-dispatch.
-    bool gotoDispatchActive_ = false;
-    int gotoStateLocal_ = -1;       // i32 local holding the current segment id
-    int gotoDispatchLoopDepth_ = 0; // currentBlockDepth_ at the dispatch loop
-    int gotoDispatchExitDepth_ = 0; // currentBlockDepth_ at the enclosing exit block
-    std::unordered_map<std::string, int> gotoLabelSeg_; // label name -> segment id
+    // Stack of active dispatch-loop contexts (one per emitGotoDispatch level)
+    // so a nested `goto` can branch back to the innermost enclosing dispatch
+    // loop whose block owns the target label — including an outer one when
+    // the goto sits inside a nested block that has its own dispatch loop.
+    struct GotoDispatchCtx {
+        int stateLocal;    // i32 local holding the current segment id
+        int loopDepth;     // currentBlockDepth_ at the dispatch loop
+        int exitDepth;     // currentBlockDepth_ at the enclosing exit block
+        std::unordered_map<std::string, int> labelSeg; // label name -> segment id
+    };
+    std::vector<GotoDispatchCtx> gotoDispatchStack_;
+
+    // All label names in the current function (function scope, 6.2.1), used to
+    // distinguish a goto into a not-yet-supported nested scope from a plain
+    // undeclared label in emitGotoStmt's fallback diagnostic.
+    std::unordered_set<std::string> functionLabels_;
 
     // For testing: force the frame-pointer local to a specific index.
     // In production, generate() sets this automatically when address-taken vars exist.

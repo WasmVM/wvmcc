@@ -285,6 +285,68 @@ static int test_backward_goto_dispatch_loop() {
     return 0;
 }
 
+// goto A; 1; goto B; A: 2; B: 3;  →  the two forward ranges overlap without
+// nesting ((0,3) vs (2,4)), which the Block lift cannot express; the block
+// must fall back to the dispatch loop with no diagnostic (#109).
+static int test_overlapping_forward_gotos_dispatch() {
+    TypeMap tm; SymbolTable st;
+    FunctionCodegen cg(tm, st);
+
+    auto cs = make_ast<CompoundStmt>();
+    cs->kind = Stmt::Kind::Compound;
+    cs->items.push_back(wrapStmt(makeGoto("A")));
+    cs->items.push_back(wrapStmt(makeExprStmt(makeI32(1))));
+    cs->items.push_back(wrapStmt(makeGoto("B")));
+    cs->items.push_back(wrapStmt(makeLabel("A", makeExprStmt(makeI32(2)))));
+    cs->items.push_back(wrapStmt(makeLabel("B", makeExprStmt(makeI32(3)))));
+
+    cg.emitStmt(cs);
+    const auto& I = cg.getInstructions();
+
+    if (!cg.getDiagnostics().empty()) { std::cerr << "unexpected diagnostic\n"; return 1; }
+    bool hasLoop = false, hasBrTable = false, hasUnreachable = false;
+    for (const auto& instr : I) {
+        if (instr.opcode == WasmVM::Opcode::Loop) hasLoop = true;
+        if (instr.opcode == WasmVM::Opcode::Br_table) hasBrTable = true;
+        if (instr.opcode == WasmVM::Opcode::Unreachable) hasUnreachable = true;
+    }
+    if (!hasLoop || !hasBrTable) { std::cerr << "expected dispatch-loop fallback\n"; return 2; }
+    if (hasUnreachable) { std::cerr << "overlapping forward gotos should not error\n"; return 3; }
+    return 0;
+}
+
+// { A: 1; goto A; goto OUT; } OUT: 2;  →  the nested block gets its own
+// dispatch loop (backward goto A); `goto OUT` inside it must still reach the
+// outer block's dispatch context instead of erroring (#109).
+static int test_goto_outer_label_from_nested_dispatch() {
+    TypeMap tm; SymbolTable st;
+    FunctionCodegen cg(tm, st);
+
+    auto inner = makeCompound({
+        makeLabel("A", makeExprStmt(makeI32(1))),
+        makeGoto("A"),
+        makeGoto("OUT"),
+    });
+    auto cs = make_ast<CompoundStmt>();
+    cs->kind = Stmt::Kind::Compound;
+    cs->items.push_back(wrapStmt(inner));
+    cs->items.push_back(wrapStmt(makeLabel("OUT", makeExprStmt(makeI32(2)))));
+
+    cg.emitStmt(cs);
+    const auto& I = cg.getInstructions();
+
+    if (!cg.getDiagnostics().empty()) {
+        std::cerr << "unexpected diagnostic: " << cg.getDiagnostics()[0].message << "\n";
+        return 1;
+    }
+    for (const auto& instr : I) {
+        if (instr.opcode == WasmVM::Opcode::Unreachable) {
+            std::cerr << "goto to outer label should not be unreachable\n"; return 2;
+        }
+    }
+    return 0;
+}
+
 // ---------------------------------------------------------------------------
 // Issue #17: switch lowering
 // ---------------------------------------------------------------------------
@@ -397,6 +459,8 @@ int main() {
     RUN(test_nested_continue_depth);
     RUN(test_forward_goto_basic);
     RUN(test_backward_goto_dispatch_loop);
+    RUN(test_overlapping_forward_gotos_dispatch);
+    RUN(test_goto_outer_label_from_nested_dispatch);
     RUN(test_switch_dense_brtable);
     RUN(test_switch_sparse_ifchain);
     RUN(test_switch_break_exits);

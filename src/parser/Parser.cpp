@@ -1426,8 +1426,18 @@ FunctionDefPtr Parser::parseFunctionDef(const DeclarationSpecifiers& specs, cons
         if (!cur->inner.has_value()) break;
     }
     f->body = parseCompoundBody();
-    // validate gotos: each goto must name an existing label in this function
-    // (defer reporting to Semantic pass)
+    // 6.8.6.1p1: the identifier in a goto shall name a label located somewhere
+    // in the enclosing function. Labels have function scope, so they are all
+    // known once the body has been parsed.
+    for (const auto& [label, span] : gotos_in_current_function) {
+        if (!labels_in_current_function.count(label)) {
+            wvmcc::Diagnostic d;
+            d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "use of undeclared label '" + label + "'";
+            d.span = span;
+            diagnostics.push_back(std::move(d));
+        }
+    }
     // clear current function speculative state
     current_function_specs.reset();
     current_function_returns_pointer = false;
