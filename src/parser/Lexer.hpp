@@ -4,6 +4,7 @@
 #include "../pp/Preprocessor.hpp"
 #include "Token.hpp"
 #include "AST.hpp"
+#include <deque>
 #include <optional>
 
 namespace wvmcc::parser {
@@ -41,9 +42,16 @@ public:
     // Returns nullptr if not an identifier.
     ExprPtr consumeIdentifierAsExpr();
 
+    // Undo one next(): the token is returned again by the following
+    // peek()/next(). Used for two-token lookahead (`ident :` labeled-statement
+    // detection), where the identifier must be re-parsed as an expression when
+    // no ':' follows. LIFO when called repeatedly.
+    void pushBack(const Token& t) { pending_.push_front(t); }
+
 private:
     wvmcc::Preprocessor* pp{nullptr};
     std::optional<wvmcc::PPToken> la;
+    std::deque<Token> pending_;   // pushed-back tokens, served before `pp`
     std::size_t consumed_{0};
 
     void refillLA();

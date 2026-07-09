@@ -182,6 +182,10 @@ using PPTokenStream = std::vector<PPToken>;
 - Floating point:
   - `float`/`double`: IEEE-754 binary32/binary64 → `f32`/`f64`.
   - `long double`: alias to `double` in M0. Flag: `-flong-double=64` (enforced).
+  - Contraction (C17 §6.5p8): wvmcc never contracts floating expressions; the
+    `FP_CONTRACT` state is permanently **OFF**. `#pragma STDC FP_CONTRACT
+    ON|OFF|DEFAULT` (directive or `_Pragma` form) is accepted with no effect —
+    `ON` merely permits contraction, so every setting is honored vacuously.
 - Floating-point accuracy (C17 §5.2.4.2.2p6, §7.12p1) and math error handling (§7.12.1):
   - Basic operations (`+ - * /`, comparisons, conversions): correctly rounded
     to nearest-even, inherited from WebAssembly's IEEE-754 `f32`/`f64`

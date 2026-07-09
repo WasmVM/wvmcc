@@ -64,6 +64,9 @@ add_test(NAME pp-line-macro COMMAND wvmcc-pp-line-macro-test)
 add_executable(wvmcc-pp-pragma-once-test pp_pragma_once_test.cpp ${PP_SRCS})
 add_test(NAME pp-pragma-once COMMAND wvmcc-pp-pragma-once-test)
 
+add_executable(wvmcc-pp-pragma-operator-test pp_pragma_operator_test.cpp ${PP_SRCS})
+add_test(NAME pp-pragma-operator COMMAND wvmcc-pp-pragma-operator-test)
+
 add_executable(wvmcc-pp-sysroot-include-test pp_sysroot_include_test.cpp ${PP_SRCS})
 target_include_directories(wvmcc-pp-sysroot-include-test PRIVATE
     ${SRC} ${WASMVM_INCLUDE_DIR})

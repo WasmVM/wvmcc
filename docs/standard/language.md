@@ -28,7 +28,7 @@ Schema: **ID · Spec § · Test case · Category · Status · Verify · Notes**.
 | `LANG-5.1.1.2-01` | 5.1.1.2p1(1) | Phase 1: trigraph replacement + end-of-line normalization | Positive | supported | unit-xref | `pp_basic_test` (trigraphs, CRLF) |
 | `LANG-5.1.1.2-02` | 5.1.1.2p1(2) | Phase 2: backslash–newline line splicing | Positive | supported | unit-xref | `pp_basic_test` |
 | `LANG-5.1.1.2-03` | 5.1.1.2p1(3) | Phase 3: decompose into pp-tokens; each comment → one space | Positive | supported | unit-xref | `pp_basic_test`, `pp_tokenizer_*` |
-| `LANG-5.1.1.2-04` | 5.1.1.2p1(4) | Phase 4: directives executed, macros expanded, `_Pragma` evaluated, `#include` recursive | Positive | partial | unit-xref | `pp_macro_test`/`pp_conditional_test`/`pp_include_test`; **`_Pragma` operator unsupported** — wvmcc rejects it as an undeclared identifier (verified 2026-06-23), so this row stays partial |
+| `LANG-5.1.1.2-04` | 5.1.1.2p1(4) | Phase 4: directives executed, macros expanded, `_Pragma` evaluated, `#include` recursive | Positive | supported | unit-xref | `pp_macro_test`/`pp_conditional_test`/`pp_include_test`/`pp_pragma_operator_test`; `_Pragma` implemented (#108) |
 | `LANG-5.1.1.2-05` | 5.1.1.2p1(5) | Phase 5: source→execution charset conversion of chars/escapes | Positive | supported | unit-xref | `pp_normalize_test` |
 | `LANG-5.1.1.2-06` | 5.1.1.2p1(6) | Phase 6: adjacent string-literal concatenation | Positive | supported | unit-xref | `pp_concat_tests` |
 | `LANG-5.1.1.2-07` | 5.1.1.2p1(7) | Phase 7: pp-tokens → tokens; syntactic/semantic analysis | Positive | supported | unit-xref | `tests/unit/parser/*` |
@@ -368,7 +368,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.5-04` | 6.5p5 | An exceptional condition (result not representable, e.g. signed overflow) is undefined | B-undef | supported | none | `docs/spec.md`: signed overflow wraps, no trap |
 | `LANG-6.5-05` | 6.5p6,p7 | Effective-type / aliasing: a stored value is accessed only through a compatible or character lvalue type | Positive | supported | exit | strict-aliasing categories |
 | `LANG-6.5-06` | 6.5p7 | Accessing a stored value through an incompatible non-character lvalue type is undefined | B-undef | supported | none | documentation |
-| `LANG-6.5-07` | 6.5p8 | Whether a floating expression is contracted is implementation-defined (no `FP_CONTRACT`) | B-impl | partial | none | `docs/spec.md`/wvmcc: no contraction; `FP_CONTRACT` deferred |
+| `LANG-6.5-07` | 6.5p8 | Whether a floating expression is contracted is implementation-defined (`FP_CONTRACT` accepted, always OFF) | B-impl | by-design | unit-xref | `docs/spec.md`: no contraction, state permanently OFF; `#pragma STDC FP_CONTRACT` accepted as a no-op (#113, `pp_pragma_operator_test`) |
 
 ### 6.5.1 Primary expressions
 
@@ -772,7 +772,10 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.8.5-02` | 6.8.5p3 | Constraint: a `for` declaration declares only `auto`/`register` objects | Negative | supported | compile-fail | |
 | `LANG-6.8.5-03` | 6.8.5p6 | A non-constant-controlled loop with no I/O/volatile/sync may be assumed to terminate | B-impl | by-design | none | `docs/spec.md`/wvmcc: no forced-progress transform |
 | `LANG-6.8.6.1-01` | 6.8.6.1p2 | `goto label` jumps to the labeled statement in the enclosing function | Positive | supported | exit | |
-| `LANG-6.8.6.1-02` | 6.8.6.1p1 | Constraint: `goto` targets a label in the enclosing function; no jump into a VLA scope | Negative | partial | compile-fail | VLA part deferred |
+| `LANG-6.8.6.1-02` | 6.8.6.1p1 | Constraint: `goto` targets a label in the enclosing function; no jump into a VLA scope | Negative | partial | compile-fail | undeclared label diagnosed at parse time; VLA part deferred with VLAs |
+| `LANG-6.8.6.1-03` | 6.8.6.1p2 | Overlapping (non-nesting) forward goto ranges fall back to the dispatch loop | Positive | supported | exit | |
+| `LANG-6.8.6.1-04` | 6.8.6.1p2 | `goto` from inside a nested block to an outer label (labels have function scope) | Positive | supported | exit | |
+| `LANG-6.8.6.1-05` | 6.8.6.1p1 | `goto` into a nested scope (legal when no VLA is in scope) | Positive | partial | exit | compounds (any depth), if branches, and while/for/do bodies supported via entry-state propagation (init/cond skipped per 6.2.4p6); *switch bodies* (Duff-style) still rejected with a precise error |
 | `LANG-6.8.6.2-01` | 6.8.6.2p2 | `continue` jumps to the loop-continuation of the smallest enclosing loop (a `for` runs `e3`) | Positive | supported | exit | |
 | `LANG-6.8.6.2-02` | 6.8.6.2p1 | Constraint: `continue` only within a loop body | Negative | supported | compile-fail | |
 | `LANG-6.8.6.3-01` | 6.8.6.3p2 | `break` terminates the smallest enclosing `switch`/loop | Positive | supported | exit | |
@@ -828,14 +831,14 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.5-01` | 6.10.5 | `#error` produces a diagnostic and fails translation | Negative | supported | compile-fail | `std-lang-6.10.5-01`: `#error` rejected with a diagnostic + non-zero exit (verified) |
 | `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | supported | exit | `std-lang-6.10.6-01`: unknown pragma warns and the TU runs |
 | `LANG-6.10.6-02` | 6.10.6 | `#pragma once` prevents re-inclusion (extension) | Positive | supported | unit-xref | `pp_pragma_once_test` |
-| `LANG-6.10.6-03` | 6.10.6p2 | Standard `STDC` pragmas (`FP_CONTRACT`, `FENV_ACCESS`, `CX_LIMITED_RANGE`) | Positive | deferred | none | STDC pragmas not implemented |
+| `LANG-6.10.6-03` | 6.10.6p2 | Standard `STDC` pragmas (`FP_CONTRACT`, `FENV_ACCESS`, `CX_LIMITED_RANGE`) | Positive | partial | unit-xref | `FP_CONTRACT` accepted (no-op, always OFF — #113); `FENV_ACCESS`/`CX_LIMITED_RANGE` still warn-and-ignore (gated on deferred fenv/complex) |
 | `LANG-6.10.6-04` | 6.10.6p1 | The behavior of an unrecognized pragma is implementation-defined (ignored) | B-impl | by-design | none | `docs/spec.md` |
 | `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | supported | exit | `std-lang-6.10.7-01`: `#` alone compiles and runs |
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |
 | `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | partial | static-assert | reflect deferred/by-design features |
 | `LANG-6.10.8-04` | 6.10.8p2 | Constraint: predefined macros and `__LINE__`/`__FILE__` are not redefinable | Negative | partial | unit-xref | **unit gap — no test** |
-| `LANG-6.10.9-01` | 6.10.9 | The `_Pragma("...")` operator | Positive | deferred | none | **unit gap — no test**; not implemented |
+| `LANG-6.10.9-01` | 6.10.9 | The `_Pragma("...")` operator | Positive | supported | unit-xref | destringize + processed as `#pragma`; works from macro expansion (`pp_pragma_operator_test`, #108) |
 
 ## 6.11 Future language directions
 

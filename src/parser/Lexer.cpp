@@ -220,12 +220,19 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
 Lexer::Lexer(wvmcc::Preprocessor& ps) : pp(&ps) { refillLA(); }
 
 std::optional<Token> Lexer::peek() {
+    if (!pending_.empty()) return pending_.front();
     skipWhitespaceAndNewlines();
     if (!la) return std::nullopt;
     return classify_local(*la);
 }
 
 std::optional<Token> Lexer::next() {
+    if (!pending_.empty()) {
+        Token t = pending_.front();
+        pending_.pop_front();
+        ++consumed_;
+        return t;
+    }
     skipWhitespaceAndNewlines();
     if (!pp) return std::nullopt;
     auto ppTok = pp->next();
@@ -239,6 +246,7 @@ std::optional<Token> Lexer::next() {
 }
 
 void Lexer::skipWhitespaceAndNewlines() {
+    if (!pending_.empty()) return;   // pushed-back tokens are never whitespace
     refillLA();
     while (la) {
         if (la->kind == wvmcc::PPTokenKind::Whitespace || la->kind == wvmcc::PPTokenKind::Newline) {
@@ -252,6 +260,15 @@ void Lexer::skipWhitespaceAndNewlines() {
 }
 
 bool Lexer::consumeIfPunctuator(const std::string& punct) {
+    if (!pending_.empty()) {
+        const Token& t = pending_.front();
+        if (t.kind() == TokenKind::Punctuator && t.lexeme() == punct) {
+            pending_.pop_front();
+            ++consumed_;
+            return true;
+        }
+        return false;
+    }
     skipWhitespaceAndNewlines();
     refillLA();
     if (!la) return false;
@@ -265,6 +282,16 @@ bool Lexer::consumeIfPunctuator(const std::string& punct) {
 }
 
 std::optional<std::pair<std::string, wvmcc::SourceSpan>> Lexer::consumeIfIdentifier() {
+    if (!pending_.empty()) {
+        const Token& t = pending_.front();
+        if (t.kind() == TokenKind::Identifier) {
+            auto out = std::make_pair(t.lexeme(), t.span);
+            pending_.pop_front();
+            ++consumed_;
+            return out;
+        }
+        return std::nullopt;
+    }
     skipWhitespaceAndNewlines();
     refillLA();
     if (!la) return std::nullopt;
@@ -280,6 +307,17 @@ std::optional<std::pair<std::string, wvmcc::SourceSpan>> Lexer::consumeIfIdentif
 }
 
 bool Lexer::expectIdentifier(std::string& out, wvmcc::SourceSpan* span) {
+    if (!pending_.empty()) {
+        const Token& t = pending_.front();
+        if (t.kind() == TokenKind::Identifier) {
+            out = t.lexeme();
+            if (span) *span = t.span;
+            pending_.pop_front();
+            ++consumed_;
+            return true;
+        }
+        return false;
+    }
     skipWhitespaceAndNewlines();
     refillLA();
     if (!la) return false;

@@ -129,6 +129,22 @@ int main() {
         if (!sawGoto || !sawLabel) { std::cerr << "expected goto and label" << std::endl; return 20; }
     }
 
+    // 6.8.6.1p1: a goto naming a label that exists nowhere in the function is
+    // diagnosed at parse time (labels have function scope, so all are known
+    // once the body is parsed).
+    {
+        std::string src = "int main() { goto nope; return 0; }\n";
+        if (parse_first_function(src, f, diags) != 0) { std::cerr << "undeclared-label parse failed" << std::endl; return 30; }
+        bool sawUndeclared = false;
+        for (auto &d : diags) {
+            if (d.severity == wvmcc::Diagnostic::Severity::Error
+                && d.message.find("undeclared label 'nope'") != std::string::npos) {
+                sawUndeclared = true;
+            }
+        }
+        if (!sawUndeclared) { std::cerr << "expected undeclared-label diagnostic" << std::endl; return 31; }
+    }
+
     // break/continue placement: ensure diagnostics emitted when outside loops (parser produces diagnostics)
     {
         std::string src = "int main() { break; continue; return 0; }\n";
