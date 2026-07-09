@@ -771,11 +771,11 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 | `LANG-6.8.5-01` | 6.8.5p2 | Constraint: an iteration controlling expression has scalar type | Negative | supported | compile-fail | |
 | `LANG-6.8.5-02` | 6.8.5p3 | Constraint: a `for` declaration declares only `auto`/`register` objects | Negative | supported | compile-fail | |
 | `LANG-6.8.5-03` | 6.8.5p6 | A non-constant-controlled loop with no I/O/volatile/sync may be assumed to terminate | B-impl | by-design | none | `docs/spec.md`/wvmcc: no forced-progress transform |
-| `LANG-6.8.6.1-01` | 6.8.6.1p2 | `goto label` jumps to the labeled statement in the enclosing function | Positive | supported | exit | jump *into* a nested block not yet lowered (see `LANG-6.8.6.1-05`) |
+| `LANG-6.8.6.1-01` | 6.8.6.1p2 | `goto label` jumps to the labeled statement in the enclosing function | Positive | supported | exit | |
 | `LANG-6.8.6.1-02` | 6.8.6.1p1 | Constraint: `goto` targets a label in the enclosing function; no jump into a VLA scope | Negative | partial | compile-fail | undeclared label diagnosed at parse time; VLA part deferred with VLAs |
 | `LANG-6.8.6.1-03` | 6.8.6.1p2 | Overlapping (non-nesting) forward goto ranges fall back to the dispatch loop | Positive | supported | exit | |
 | `LANG-6.8.6.1-04` | 6.8.6.1p2 | `goto` from inside a nested block to an outer label (labels have function scope) | Positive | supported | exit | |
-| `LANG-6.8.6.1-05` | 6.8.6.1p1 | `goto` into a nested block (legal when no VLA is in scope) | Positive | deferred | none | rejected: "goto into a nested block is not supported"; needs entry-state propagation through the structured lowering |
+| `LANG-6.8.6.1-05` | 6.8.6.1p1 | `goto` into a nested scope (legal when no VLA is in scope) | Positive | partial | exit | compounds (any depth), if branches, and while/for/do bodies supported via entry-state propagation (init/cond skipped per 6.2.4p6); *switch bodies* (Duff-style) still rejected with a precise error |
 | `LANG-6.8.6.2-01` | 6.8.6.2p2 | `continue` jumps to the loop-continuation of the smallest enclosing loop (a `for` runs `e3`) | Positive | supported | exit | |
 | `LANG-6.8.6.2-02` | 6.8.6.2p1 | Constraint: `continue` only within a loop body | Negative | supported | compile-fail | |
 | `LANG-6.8.6.3-01` | 6.8.6.3p2 | `break` terminates the smallest enclosing `switch`/loop | Positive | supported | exit | |

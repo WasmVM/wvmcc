@@ -2135,6 +2135,32 @@ StmtPtr Parser::parseStmt() {
         auto g = make_ast<GotoStmt>(); g->label = label; g->kind = Stmt::Kind::Goto; return std::static_pointer_cast<Stmt>(g);
     }
 
+    // labeled-statement in sub-statement position (6.8.1): `ident : statement`,
+    // e.g. a chained label `L1: L2: stmt` or `if (c) L: stmt;`. Needs two
+    // tokens of lookahead — consume the identifier and push it back when no
+    // ':' follows, so the expression fallback below re-reads it unchanged.
+    if (lex.peek() && lex.peek()->kind() == TokenKind::Identifier) {
+        auto idtok = *lex.next();
+        if (lex.peek() && lex.peek()->kind() == TokenKind::Punctuator && lex.peek()->lexeme() == ":") {
+            lex.next(); // consume ':'
+            auto ls = make_ast<LabelStmt>();
+            ls->name = idtok.lexeme();
+            ls->span = idtok.span;
+            ls->kind = Stmt::Kind::Label;
+            // 6.8.1p3: a label name shall be unique within its function.
+            if (!labels_in_current_function.insert(ls->name).second) {
+                wvmcc::Diagnostic d;
+                d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "duplicate label '" + ls->name + "' in function";
+                d.span = idtok.span;
+                diagnostics.push_back(std::move(d));
+            }
+            ls->stmt = parseStmt();
+            return std::static_pointer_cast<Stmt>(ls);
+        }
+        lex.pushBack(idtok);
+    }
+
     // fallback: expression statement
     {
         auto expr = parseExpression();

@@ -212,21 +212,43 @@ public:
     // a br_table dispatch target (WebAssembly has only structured control flow).
     void emitGotoDispatch(const std::vector<wvmcc::parser::BlockItemPtr>& items);
 
-    // Stack of active dispatch-loop contexts (one per emitGotoDispatch level)
-    // so a nested `goto` can branch back to the innermost enclosing dispatch
-    // loop whose block owns the target label — including an outer one when
-    // the goto sits inside a nested block that has its own dispatch loop.
+    // --- General-goto machinery (6.8.6.1, #109) ------------------------------
+    // Every label gets a function-unique id (source order, 1-based), and one
+    // shared i32 local (`gotoTargetLocal_`) holds the id of a pending goto
+    // target (0 = normal sequential flow). Every dispatch loop keys its
+    // br_table on that pending id, so a `goto` lowers uniformly to
+    // "set target; br to the innermost dispatch loop whose block subtree owns
+    // the label", and the target propagates *into* nested scopes: a routed
+    // segment re-enters the construct that contains the label, each construct
+    // on the path skips its condition/initializer while a target is pending
+    // (see emitIf/While/ForStmt), and the label itself consumes the target
+    // (emitLabelStmt). Entry-target labels are those some goto reaches by
+    // entering a nested scope partway — the ones that need this descent.
     struct GotoDispatchCtx {
-        int stateLocal;    // i32 local holding the current segment id
         int loopDepth;     // currentBlockDepth_ at the dispatch loop
         int exitDepth;     // currentBlockDepth_ at the enclosing exit block
-        std::unordered_map<std::string, int> labelSeg; // label name -> segment id
+        std::unordered_map<std::string, int> labelSeg; // top-level label -> segment
+        std::unordered_set<std::string> subtreeEntry;  // entry-targets under any item
     };
     std::vector<GotoDispatchCtx> gotoDispatchStack_;
 
-    // All label names in the current function (function scope, 6.2.1), used to
-    // distinguish a goto into a not-yet-supported nested scope from a plain
-    // undeclared label in emitGotoStmt's fallback diagnostic.
+    std::unordered_map<std::string, int> labelId_;  // label -> function-unique id
+    int maxLabelId_ = 0;
+    std::unordered_set<std::string> entryTargets_;  // labels needing inward routing
+    int gotoTargetLocal_ = -1;                      // shared pending-target local
+
+    // Pre-body analysis (generate()): assign label ids in source order and
+    // compute entryTargets_ from every goto/label pair's block relationship.
+    void analyzeGotoLabels(const std::vector<wvmcc::parser::BlockItemPtr>& body);
+    int idOf(const std::string& label);             // assigns lazily if unseen
+    int ensureGotoTargetLocal();
+    // Entry-target label names contained anywhere in a statement subtree.
+    std::vector<std::string> entryTargetNamesIn(const wvmcc::parser::StmtPtr& s);
+    // Emit an i32 that is nonzero iff the pending target equals one of `names`.
+    void emitPendingTargetInSet(const std::vector<std::string>& names);
+
+    // All label names in the current function (function scope, 6.2.1), used by
+    // emitGotoStmt's fallback diagnostic.
     std::unordered_set<std::string> functionLabels_;
 
     // For testing: force the frame-pointer local to a specific index.

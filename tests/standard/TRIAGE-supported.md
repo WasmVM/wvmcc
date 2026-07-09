@@ -27,7 +27,7 @@ Regenerate counts with: `cd build-Debug && ctest -R '^std-' -L status-supported`
 | E | parser rejects valid C17 syntax (nested compound statements; `sizeof`/cast of pointer type-names) | **#88** | open (~28) |
 | F | libc function undeclared / unimplemented | — | reconciled to `status-partial` (M2-Libc) |
 | G | freestanding header missing (`float.h`, `inttypes.h`, `iso646.h`, `locale.h`, `signal.h`) | *unfiled* | ~8 static-assert tests blocked on `include file not found` |
-| H | backward / non-local `goto` unsupported | #93/#109 | resolved — dispatch-loop lowering; only jump *into* a nested block remains deferred |
+| H | backward / non-local `goto` unsupported | #93/#109 | resolved — dispatch-loop lowering + entry-state descent; only jump into a *switch body* remains rejected |
 | I | static-storage initializer constant-folding too strict | *unfiled* | 2 |
 | J | codegen feature unimplemented (unary/binop/conversion) | *unfiled* | 3 |
 | K | tentative definitions rejected as "multiple external definitions" (6.9.2); cross-TU decl-merge | **#89** / #84 | open |

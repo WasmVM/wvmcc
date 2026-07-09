@@ -22,10 +22,6 @@ WasmVM::ValueType arithCommonType(WasmVM::ValueType lhs, WasmVM::ValueType rhs) 
     return WasmVM::ValueType::i32;
 }
 
-// Defined with the goto helpers further below; used by generate() to seed
-// functionLabels_ before body emission.
-void collectItemLabels(const wvmcc::parser::BlockItemPtr& bi, std::unordered_set<std::string>& out);
-
 } // namespace
 
 // Emit a conversion instruction that turns `from` into `to`. Caller guarantees
@@ -322,8 +318,7 @@ WasmVM::WasmFunc FunctionCodegen::generate(const wvmcc::parser::FunctionDefPtr& 
         framePointerLocal_ = allocRawLocal(WasmVM::ValueType::i64);
     }
 
-    functionLabels_.clear();
-    for (const auto& it : funcDef->body) collectItemLabels(it, functionLabels_);
+    analyzeGotoLabels(funcDef->body);
 
     emitItemsWithGotoLift(funcDef->body);
 
@@ -3107,7 +3102,125 @@ void collectLabels(const wvmcc::parser::StmtPtr& s, std::unordered_set<std::stri
     default: return;
     }
 }
+
+// Scan for the goto/label block relationship (analyzeGotoLabels). A label is
+// "chain-visible" from a goto iff it is a direct item of some compound block
+// that encloses the goto — exactly the labels the dispatch-loop chaining in
+// emitGotoStmt can reach without entering a scope. Everything else a goto
+// targets is an entry-target. Labels that are not direct block items (label
+// chains `L1: L2:`, labels under case/if without braces, switch bodies) get
+// parent block -1: never chain-visible.
+struct GotoScan {
+    std::unordered_map<std::string, int> labelParent;   // label -> block id or -1
+    std::vector<std::pair<std::string, std::vector<int>>> gotos; // label, enclosing blocks
+    std::vector<std::string> labelOrder;                // source order for id assignment
+    int nextBlockId = 0;
+};
+void scanStmtForGotos(const wvmcc::parser::StmtPtr& s, GotoScan& gs,
+                      std::vector<int>& blockStack, bool atItemLevel);
+void scanItemsForGotos(const std::vector<wvmcc::parser::BlockItemPtr>& items, GotoScan& gs,
+                       std::vector<int>& blockStack) {
+    blockStack.push_back(gs.nextBlockId++);
+    for (const auto& bi : items) {
+        if (!bi) continue;
+        if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&bi->item))
+            scanStmtForGotos(*sp, gs, blockStack, /*atItemLevel=*/true);
+    }
+    blockStack.pop_back();
+}
+void scanStmtForGotos(const wvmcc::parser::StmtPtr& s, GotoScan& gs,
+                      std::vector<int>& blockStack, bool atItemLevel) {
+    using K = wvmcc::parser::Stmt::Kind;
+    if (!s) return;
+    switch (s->kind) {
+    case K::Goto:
+        gs.gotos.emplace_back(static_cast<const wvmcc::parser::GotoStmt&>(*s).label, blockStack);
+        return;
+    case K::Label: {
+        const auto& ls = static_cast<const wvmcc::parser::LabelStmt&>(*s);
+        gs.labelParent[ls.name] = atItemLevel ? blockStack.back() : -1;
+        gs.labelOrder.push_back(ls.name);
+        scanStmtForGotos(ls.stmt, gs, blockStack, /*atItemLevel=*/false);
+        return;
+    }
+    case K::Compound:
+        scanItemsForGotos(static_cast<const wvmcc::parser::CompoundStmt&>(*s).items, gs, blockStack);
+        return;
+    case K::If: {
+        const auto& i = static_cast<const wvmcc::parser::IfStmt&>(*s);
+        scanStmtForGotos(i.thenStmt, gs, blockStack, false);
+        if (i.elseStmt) scanStmtForGotos(*i.elseStmt, gs, blockStack, false);
+        return;
+    }
+    case K::While:   scanStmtForGotos(static_cast<const wvmcc::parser::WhileStmt&>(*s).body, gs, blockStack, false); return;
+    case K::DoWhile: scanStmtForGotos(static_cast<const wvmcc::parser::DoWhileStmt&>(*s).body, gs, blockStack, false); return;
+    case K::For:     scanStmtForGotos(static_cast<const wvmcc::parser::ForStmt&>(*s).body, gs, blockStack, false); return;
+    case K::Switch:  scanStmtForGotos(static_cast<const wvmcc::parser::SwitchStmt&>(*s).body, gs, blockStack, false); return;
+    case K::Case:    scanStmtForGotos(static_cast<const wvmcc::parser::CaseStmt&>(*s).stmt, gs, blockStack, false); return;
+    case K::Default: scanStmtForGotos(static_cast<const wvmcc::parser::DefaultStmt&>(*s).stmt, gs, blockStack, false); return;
+    default: return;
+    }
+}
 } // namespace
+
+void FunctionCodegen::analyzeGotoLabels(const std::vector<wvmcc::parser::BlockItemPtr>& body) {
+    labelId_.clear();
+    maxLabelId_ = 0;
+    entryTargets_.clear();
+    functionLabels_.clear();
+    gotoTargetLocal_ = -1;
+
+    GotoScan gs;
+    std::vector<int> blockStack;
+    scanItemsForGotos(body, gs, blockStack);
+
+    for (const auto& name : gs.labelOrder) {
+        functionLabels_.insert(name);
+        idOf(name);                              // ids in source order
+    }
+    for (const auto& [label, enclosing] : gs.gotos) {
+        auto it = gs.labelParent.find(label);
+        if (it == gs.labelParent.end()) continue;       // undeclared: parser errored
+        if (it->second < 0 ||
+            std::find(enclosing.begin(), enclosing.end(), it->second) == enclosing.end()) {
+            entryTargets_.insert(label);
+        }
+    }
+}
+
+int FunctionCodegen::idOf(const std::string& label) {
+    int& id = labelId_[label];
+    if (id == 0) id = ++maxLabelId_;
+    return id;
+}
+
+int FunctionCodegen::ensureGotoTargetLocal() {
+    if (gotoTargetLocal_ < 0) gotoTargetLocal_ = allocRawLocal(WasmVM::ValueType::i32);
+    return gotoTargetLocal_;
+}
+
+std::vector<std::string> FunctionCodegen::entryTargetNamesIn(const wvmcc::parser::StmtPtr& s) {
+    std::vector<std::string> out;
+    if (entryTargets_.empty()) return out;
+    std::unordered_set<std::string> labels;
+    collectLabels(s, labels);
+    for (const auto& name : labels)
+        if (entryTargets_.count(name)) out.push_back(name);
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+void FunctionCodegen::emitPendingTargetInSet(const std::vector<std::string>& names) {
+    int t = ensureGotoTargetLocal();
+    bool first = true;
+    for (const auto& name : names) {
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)t});
+        emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)idOf(name)});
+        emit(WasmVM::Instr::I32_eq{});
+        if (!first) emit(WasmVM::Instr::I32_or{});
+        first = false;
+    }
+}
 
 bool FunctionCodegen::topLevelNeedsGotoDispatch(
         const std::vector<wvmcc::parser::BlockItemPtr>& items) {
@@ -3118,6 +3231,15 @@ bool FunctionCodegen::topLevelNeedsGotoDispatch(
         if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&items[i]->item))
             if (*sp && (*sp)->kind == K::Label)
                 labelIdx[static_cast<const wvmcc::parser::LabelStmt&>(**sp).name] = (int)i;
+    }
+    // A block any of whose items contains an entry-target label may be entered
+    // with a pending goto target that must route into that item — dispatch.
+    if (!entryTargets_.empty()) {
+        for (const auto& item : items) {
+            if (!item) continue;
+            if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&item->item))
+                if (*sp && !entryTargetNamesIn(*sp).empty()) return true;
+        }
     }
     if (labelIdx.empty()) return false;
     std::vector<std::pair<int, int>> fwdRanges; // (goto idx, target label idx)
@@ -3154,27 +3276,44 @@ bool FunctionCodegen::topLevelNeedsGotoDispatch(
 void FunctionCodegen::emitGotoDispatch(const std::vector<wvmcc::parser::BlockItemPtr>& items) {
     using K = wvmcc::parser::Stmt::Kind;
 
-    // Split items into segments at each top-level label (segment 0 = the entry
-    // code before the first label). A label both names a segment and begins it.
+    // Split items into segments at (a) each top-level label (the label both
+    // names and begins its segment) and (b) each item whose subtree contains
+    // an entry-target label (so a pending target can route into that item).
+    // Segment 0 is the entry code before the first boundary.
     std::vector<std::vector<wvmcc::parser::BlockItemPtr>> segments;
     segments.emplace_back();
-    std::unordered_map<std::string, int> labelSeg;
+    std::unordered_map<std::string, int> labelSeg;      // top-level label -> segment
+    std::unordered_map<int, int> idSeg;                 // label id -> segment (routing)
+    std::unordered_set<std::string> subtreeEntry;       // entry-targets under any item
     for (const auto& item : items) {
-        if (item) {
-            if (auto sp = std::get_if<wvmcc::parser::StmtPtr>(&item->item)) {
-                if (*sp && (*sp)->kind == K::Label) {
-                    labelSeg[static_cast<const wvmcc::parser::LabelStmt&>(**sp).name] = (int)segments.size();
-                    segments.emplace_back();
-                }
+        const wvmcc::parser::StmtPtr* sp = item
+            ? std::get_if<wvmcc::parser::StmtPtr>(&item->item) : nullptr;
+        std::vector<std::string> entryHere;
+        if (sp && *sp) entryHere = entryTargetNamesIn(*sp);
+        bool isLabel = sp && *sp && (*sp)->kind == K::Label;
+        if (isLabel || !entryHere.empty()) {
+            if (!segments.back().empty()) segments.emplace_back();
+            int seg = (int)segments.size() - 1;
+            if (isLabel) {
+                const auto& name = static_cast<const wvmcc::parser::LabelStmt&>(**sp).name;
+                labelSeg[name] = seg;
+                idSeg[idOf(name)] = seg;
+            }
+            for (const auto& name : entryHere) {
+                subtreeEntry.insert(name);
+                idSeg.emplace(idOf(name), seg);   // a top-level label wins over its subtree
             }
         }
         segments.back().push_back(item);
     }
     int N = (int)segments.size();
 
-    int stateLocal = allocRawLocal(WasmVM::ValueType::i32);
-    emit(WasmVM::Instr::I32_const{0});                                  // entry = segment 0
-    emit(WasmVM::Instr::Local_set{(WasmVM::index_t)stateLocal});
+    // The dispatch state is the function-wide pending-target local: 0 (its
+    // initial value — Wasm locals are zero-initialized, and a consumed target
+    // is reset to 0) means sequential entry at segment 0; a label id routes to
+    // the segment owning (or containing) that label. Not initialized here: a
+    // pending id set by a goto must survive into this dispatch (descent).
+    int target = ensureGotoTargetLocal();
 
     emit(WasmVM::Instr::Block{std::nullopt});                           // $exit
     int exitDepth = currentBlockDepth_;
@@ -3185,37 +3324,39 @@ void FunctionCodegen::emitGotoDispatch(const std::vector<wvmcc::parser::BlockIte
     // but legal) stays on the stack so gotos can still reach its labels. Note
     // segment-body emission below may push/pop nested contexts, so the stack
     // entry must not be referenced across emitBlockItem — use the locals.
-    gotoDispatchStack_.push_back({stateLocal, loopDepth, exitDepth, labelSeg});
+    gotoDispatchStack_.push_back({loopDepth, exitDepth, labelSeg, subtreeEntry});
 
     // One block per segment; segment N-1 outermost so segment 0 is innermost
     // (mirrors emitSwitchStmt). br to $seg_i lands just after its End, where
     // segment i's code is emitted.
     for (int i = N - 1; i >= 0; --i) emit(WasmVM::Instr::Block{std::nullopt});
 
-    // Dispatch: br_table[state] -> end of the matching segment block.
+    // Dispatch: br_table[label id] -> end of the owning segment's block.
+    // Ids of labels this block does not route (resolved by inner dispatches,
+    // or > table size) take the default; they can never actually be pending
+    // here, so the default is just a structural sink.
     auto segBrIdx = [&](int seg) {
         int depthAtOpen = loopDepth + N - seg;
         return (WasmVM::index_t)(currentBlockDepth_ - depthAtOpen);
     };
-    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)stateLocal});
+    emit(WasmVM::Instr::Local_get{(WasmVM::index_t)target});
     WasmVM::Instr::Br_table bt;
-    for (int seg = 0; seg < N; ++seg) bt.indices.push_back(segBrIdx(seg));
-    bt.indices.push_back((WasmVM::index_t)(currentBlockDepth_ - exitDepth)); // default -> exit
+    bt.indices.push_back(segBrIdx(0));                  // id 0: sequential entry
+    for (int id = 1; id <= maxLabelId_; ++id) {
+        auto it = idSeg.find(id);
+        bt.indices.push_back(it != idSeg.end()
+            ? segBrIdx(it->second)
+            : (WasmVM::index_t)(currentBlockDepth_ - exitDepth));
+    }
+    bt.indices.push_back((WasmVM::index_t)(currentBlockDepth_ - exitDepth)); // default
     emit(bt);
 
-    // Segment bodies in source order. Each segment, after its statements, must
-    // explicitly transition (goto/return already branch away; otherwise fall
-    // through to the next segment via the dispatch, or exit after the last).
+    // Segment bodies in source order. Sequential flow falls through segment
+    // boundaries physically (the pending target is 0 then); gotos re-enter
+    // via `br $dispatch`, and falling off the last body exits the loop.
     for (int i = 0; i < N; ++i) {
         emit(WasmVM::Instr::End{});                 // close segment i's block
         for (const auto& it : segments[i]) emitBlockItem(it);
-        if (i + 1 < N) {
-            emit(WasmVM::Instr::I32_const{i + 1});
-            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)stateLocal});
-            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - loopDepth)});
-        } else {
-            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - exitDepth)});
-        }
     }
 
     emit(WasmVM::Instr::End{});  // close loop $dispatch
@@ -3319,7 +3460,41 @@ void FunctionCodegen::emitConditionI32(const wvmcc::parser::ExprPtr& cond) {
 }
 
 void FunctionCodegen::emitIfStmt(const wvmcc::parser::IfStmt& stmt) {
-    emitConditionI32(stmt.cond);
+    // 6.8.6.1 descent: when a pending goto target lies inside a branch, force
+    // that branch without evaluating the controlling expression (jumping into
+    // a scope must not run the condition or its side effects); the branch's
+    // own dispatch/guards carry the target the rest of the way.
+    auto thenEntries = entryTargetNamesIn(stmt.thenStmt);
+    std::vector<std::string> elseEntries;
+    if (stmt.elseStmt) elseEntries = entryTargetNamesIn(*stmt.elseStmt);
+
+    if (thenEntries.empty() && elseEntries.empty()) {
+        emitConditionI32(stmt.cond);
+    } else {
+        int c = allocRawLocal(WasmVM::ValueType::i32);
+        emit(WasmVM::Instr::Block{std::nullopt});   // $condDone
+        int doneDepth = currentBlockDepth_;
+        if (!thenEntries.empty()) {
+            emitPendingTargetInSet(thenEntries);
+            emit(WasmVM::Instr::If{std::nullopt});
+            emit(WasmVM::Instr::I32_const{1});
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)c});
+            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - doneDepth)});
+            emit(WasmVM::Instr::End{});
+        }
+        if (!elseEntries.empty()) {
+            emitPendingTargetInSet(elseEntries);
+            emit(WasmVM::Instr::If{std::nullopt});
+            emit(WasmVM::Instr::I32_const{0});
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)c});
+            emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - doneDepth)});
+            emit(WasmVM::Instr::End{});
+        }
+        emitConditionI32(stmt.cond);
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)c});
+        emit(WasmVM::Instr::End{});                 // $condDone
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)c});
+    }
     emit(WasmVM::Instr::If{std::nullopt});
     emitStmt(stmt.thenStmt);
     if (stmt.elseStmt) {
@@ -3342,9 +3517,19 @@ void FunctionCodegen::emitWhileStmt(const wvmcc::parser::WhileStmt& stmt) {
     emit(WasmVM::Instr::Loop{std::nullopt});
     int contD = currentBlockDepth_;
     pushLoop(breakD, contD);
+    // 6.8.6.1 descent: a pending goto target inside the body enters it without
+    // testing (or side-effecting) the condition; later iterations, with the
+    // target consumed, test normally.
+    bool hasEntry = !entryTargetNamesIn(stmt.body).empty();
+    if (hasEntry) {
+        emit(WasmVM::Instr::Block{std::nullopt});   // $skipCond
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)ensureGotoTargetLocal()});
+        emit(WasmVM::Instr::Br_if{0});
+    }
     emitConditionI32(stmt.cond);
     emit(WasmVM::Instr::I32_eqz{});
     emit(WasmVM::Instr::Br_if{breakDepth()});
+    if (hasEntry) emit(WasmVM::Instr::End{});       // $skipCond
     emitStmt(stmt.body);
     emit(WasmVM::Instr::Br{continueDepth()});
     popControlFlow();
@@ -3368,17 +3553,34 @@ void FunctionCodegen::emitForStmt(const wvmcc::parser::ForStmt& stmt) {
     // the step (an earlier version branched to the loop top and skipped the
     // step, hanging any counting loop that used `continue`).
     symbolTable_.pushScope();
+    // 6.8.6.1 descent: a pending goto target inside the body enters it without
+    // running the init clause or testing the condition (their side effects
+    // must not happen when jumping into the loop's scope); the step and later
+    // iterations behave normally once the target is consumed.
+    bool hasEntry = !entryTargetNamesIn(stmt.body).empty();
     if (stmt.init) {
+        if (hasEntry) {
+            emit(WasmVM::Instr::Block{std::nullopt});   // $skipInit
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)ensureGotoTargetLocal()});
+            emit(WasmVM::Instr::Br_if{0});
+        }
         emitBlockItem(*stmt.init);
+        if (hasEntry) emit(WasmVM::Instr::End{});       // $skipInit
     }
     emit(WasmVM::Instr::Block{std::nullopt});
     int breakD = currentBlockDepth_;
     emit(WasmVM::Instr::Loop{std::nullopt});
     int loopD = currentBlockDepth_;
     if (stmt.cond) {
+        if (hasEntry) {
+            emit(WasmVM::Instr::Block{std::nullopt});   // $skipCond
+            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)ensureGotoTargetLocal()});
+            emit(WasmVM::Instr::Br_if{0});
+        }
         emitConditionI32(*stmt.cond);
         emit(WasmVM::Instr::I32_eqz{});
         emit(WasmVM::Instr::Br_if{(WasmVM::index_t)(currentBlockDepth_ - breakD)});
+        if (hasEntry) emit(WasmVM::Instr::End{});       // $skipCond
     }
     emit(WasmVM::Instr::Block{std::nullopt});
     int contD = currentBlockDepth_;
@@ -3452,37 +3654,48 @@ void FunctionCodegen::emitContinueStmt(const wvmcc::parser::ContinueStmt& stmt) 
 }
 
 void FunctionCodegen::emitLabelStmt(const wvmcc::parser::LabelStmt& stmt) {
-    // The block wrapping a forward-goto target is emitted in emitCompoundStmt;
-    // here we just emit the inner statement.
+    // Consume a pending goto target arriving at this label: dispatch loops and
+    // the descent guards route on gotoTargetLocal_, and the matching label
+    // resets it to 0 (sequential flow). Sequential arrival has it 0 already; a
+    // pending id for a *deeper* label (descent through a label chain) must be
+    // preserved, hence the equality test. Skipped entirely when no dispatch is
+    // active and the label needs no inward routing (e.g. pure forward lifts).
+    if (!gotoDispatchStack_.empty() || entryTargets_.count(stmt.name)) {
+        int t = ensureGotoTargetLocal();
+        emit(WasmVM::Instr::Local_get{(WasmVM::index_t)t});
+        emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)idOf(stmt.name)});
+        emit(WasmVM::Instr::I32_eq{});
+        emit(WasmVM::Instr::If{std::nullopt});
+        emit(WasmVM::Instr::I32_const{0});
+        emit(WasmVM::Instr::Local_set{(WasmVM::index_t)t});
+        emit(WasmVM::Instr::End{});
+    }
     emitStmt(stmt.stmt);
 }
 
 void FunctionCodegen::emitGotoStmt(const wvmcc::parser::GotoStmt& stmt) {
-    // Inside a dispatch loop (emitGotoDispatch): set the state of the innermost
-    // enclosing dispatch whose block owns the target label to that label's
-    // segment and branch back to its loop to re-dispatch. Works for forward,
-    // backward, and non-local (nested) jumps uniformly — including a goto that
-    // leaves a nested dispatch block for a label of an outer one.
+    // Set the pending target to the label's id and branch back to the
+    // innermost enclosing dispatch loop whose block subtree owns the label.
+    // Its br_table then routes to the label's segment (chaining) or to the
+    // item containing it (descent into a nested scope) — so forward, backward,
+    // non-local, and into-nested-block jumps all lower the same way.
     for (auto ctx = gotoDispatchStack_.rbegin(); ctx != gotoDispatchStack_.rend(); ++ctx) {
-        auto it = ctx->labelSeg.find(stmt.label);
-        if (it != ctx->labelSeg.end()) {
-            emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)it->second});
-            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)ctx->stateLocal});
+        if (ctx->labelSeg.count(stmt.label) || ctx->subtreeEntry.count(stmt.label)) {
+            emit(WasmVM::Instr::I32_const{(WasmVM::i32_t)idOf(stmt.label)});
+            emit(WasmVM::Instr::Local_set{(WasmVM::index_t)ensureGotoTargetLocal()});
             emit(WasmVM::Instr::Br{(WasmVM::index_t)(currentBlockDepth_ - ctx->loopDepth)});
             return;
         }
     }
     // Forward same-level gotos are lifted in emitItemsWithGotoLift and emitted
-    // there as Br. Reaching here otherwise means the label lives in a scope the
-    // goto's block does not enclose — i.e. the jump would have to enter a
-    // nested block partway (6.8.6.1 allows this when no VLA is in scope, but
-    // the dispatch lowering cannot express it yet) — or does not exist at all
-    // (also rejected at parse time).
+    // there as Br; everything else resolves against a dispatch context above
+    // (analyzeGotoLabels forces every routing block to dispatch). Reaching
+    // here means the label does not exist (already rejected at parse time).
     emit(WasmVM::Instr::Unreachable{});
     wvmcc::Diagnostic d;
     d.severity = wvmcc::Diagnostic::Severity::Error;
     d.message = functionLabels_.count(stmt.label)
-        ? "goto into a nested block is not supported (label '" + stmt.label + "')"
+        ? "goto lowering failed for label '" + stmt.label + "'"
         : "use of undeclared label '" + stmt.label + "'";
     d.span = stmt.span;
     diagnostics_.push_back(std::move(d));
@@ -3555,6 +3768,18 @@ static void collectSwitchSegments(const wvmcc::parser::StmtPtr& body,
 
 void FunctionCodegen::emitSwitchStmt(const wvmcc::parser::SwitchStmt& stmt) {
     using namespace wvmcc::parser;
+
+    // 6.8.6.1 descent does not reach into switch bodies: the case-segment
+    // lowering has no inward goto routing (labels mid-segment would need
+    // sub-segment dispatch). Rare in practice (Duff-style jumps); rejected
+    // with a precise diagnostic rather than silently misrouting.
+    auto entries = entryTargetNamesIn(stmt.body);
+    if (!entries.empty()) {
+        emitUnimplemented(
+            "goto into a switch body is not supported (label '" + entries.front() + "')",
+            stmt.span);
+        return;
+    }
 
     std::vector<Segment> segments;
     int defaultSegIdx = -1;
