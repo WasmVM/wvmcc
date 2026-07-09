@@ -123,8 +123,21 @@ private:
 
     // Helpers for pragma parsing
     bool isPragmaOnceDirective(const std::vector<PPToken>& tokens);
+    bool isStdcFpContractDirective(const std::vector<PPToken>& tokens);
     std::string buildPragmaContent(const std::vector<PPToken>& tokens);
     void trimTrailingWhitespace(std::string& content);
+
+    // _Pragma operator (6.10.9): consume `( string-literal )` following an
+    // already-popped `_Pragma` identifier, destringize the literal, and process
+    // the result as a #pragma directive line.
+    void handlePragmaOperator(const PPToken& opTok);
+    // Pull the next significant (non-whitespace/newline) token for the _Pragma
+    // operand: from outBuffer when populated (tokens there are already macro-
+    // expanded), else from the raw stream with macro expansion applied.
+    std::optional<PPToken> pullPragmaOperandToken();
+    // 6.10.9p2: delete the L/u/u8/U prefix and the outer quotes, and undo
+    // \" -> " and \\ -> \ (other escape sequences are left untouched).
+    static std::string destringizePragmaOperand(const std::string& lexeme);
 
     // --- Macro expansion helpers ---------------------------------------------
     std::vector<PPToken> expandMacros(const std::vector<PPToken>& tokens);

@@ -229,7 +229,22 @@ void Preprocessor::ensureBuffer() {
     // and macro-expands following tokens on demand. Buffering ahead while the
     // tail is a string literal collided with macro expansion's front-push and
     // left a macro after a string literal unexpanded (issue #90 gap 1).
-    while (outBuffer.empty()) {
+    while (true) {
+        if (!outBuffer.empty()) {
+            // The _Pragma operator (6.10.9) is executed here, the single point
+            // every token passes through before surfacing — whether read from
+            // a file or produced by macro expansion (expansion results are
+            // pushed into outBuffer, bypassing the raw-token path below).
+            const PPToken& front = outBuffer.front();
+            if (front.kind == PPTokenKind::Identifier && front.lexeme == "_Pragma") {
+                PPToken opTok = front;
+                outBuffer.pop_front();
+                handlePragmaOperator(opTok);
+                continue;   // outBuffer may be empty again; keep producing
+            }
+            return;
+        }
+
         auto opt = readRawToken();
         if (!opt) return;
         auto tok = *opt;
@@ -2080,20 +2095,120 @@ void Preprocessor::pushTokenFrontWithConcat(const PPToken& tok) {
     
 
 bool Preprocessor::handlePragmaDirective(const std::vector<PPToken>& tokens) {
-    bool isPragmaOnce = isPragmaOnceDirective(tokens);
-    
-    if (!isPragmaOnce) {
-        std::string pragmaContent = buildPragmaContent(tokens);
-        trimTrailingWhitespace(pragmaContent);
-        
-        diagnostics.push_back(Diagnostic{
-            .message = std::string("#pragma: ") + (pragmaContent.empty() ? "(empty)" : pragmaContent),
-            .severity = Diagnostic::Severity::Warning,
-            .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
-        });
-    }
-    
+    if (isPragmaOnceDirective(tokens)) return true;
+    if (isStdcFpContractDirective(tokens)) return true;
+
+    std::string pragmaContent = buildPragmaContent(tokens);
+    trimTrailingWhitespace(pragmaContent);
+
+    diagnostics.push_back(Diagnostic{
+        .message = std::string("#pragma: ") + (pragmaContent.empty() ? "(empty)" : pragmaContent),
+        .severity = Diagnostic::Severity::Warning,
+        .span = tokens.empty() ? std::nullopt : std::optional<SourceSpan>(tokens[0].span)
+    });
+
     return true;
+}
+
+// `#pragma STDC FP_CONTRACT ON|OFF|DEFAULT` (6.10.6p2, 6.5p8). Accepted with
+// no effect: wvmcc never contracts floating expressions, so the state is
+// permanently OFF (documented in docs/spec.md) and every setting is honored
+// vacuously (ON merely *permits* contraction). Recognizing it here keeps the
+// standard pragma from tripping the unknown-pragma warning (#113).
+bool Preprocessor::isStdcFpContractDirective(const std::vector<PPToken>& tokens) {
+    size_t idx = 0;
+    auto skipWs = [&]{ while (idx < tokens.size() && tokens[idx].kind == PPTokenKind::Whitespace) idx++; };
+    auto ident = [&](std::initializer_list<const char*> names) -> bool {
+        if (idx >= tokens.size() || tokens[idx].kind != PPTokenKind::Identifier) return false;
+        for (const char* n : names) {
+            if (tokens[idx].lexeme == n) { idx++; return true; }
+        }
+        return false;
+    };
+    skipWs();
+    if (!ident({"STDC"})) return false;
+    skipWs();
+    if (!ident({"FP_CONTRACT"})) return false;
+    skipWs();
+    if (!ident({"ON", "OFF", "DEFAULT"})) return false;
+    skipWs();
+    return idx == tokens.size();
+}
+
+std::optional<PPToken> Preprocessor::pullPragmaOperandToken() {
+    while (true) {
+        if (!outBuffer.empty()) {
+            PPToken t = outBuffer.front();
+            outBuffer.pop_front();
+            if (t.kind == PPTokenKind::Whitespace || t.kind == PPTokenKind::Newline) continue;
+            return t;
+        }
+        auto opt = readRawToken();
+        if (!opt) return std::nullopt;
+        PPToken t = *opt;
+        if (t.kind == PPTokenKind::Whitespace || t.kind == PPTokenKind::Newline) continue;
+        if (t.kind == PPTokenKind::Identifier && macroTable.isDefined(t.lexeme)) {
+            // Expansion results land at the front of outBuffer and are picked
+            // up by the next iteration.
+            if (handleIdentifierExpansionToken(t)) continue;
+        }
+        return t;
+    }
+}
+
+std::string Preprocessor::destringizePragmaOperand(const std::string& lexeme) {
+    // Strip an encoding prefix (L, u, U, u8) and the surrounding quotes.
+    size_t begin = lexeme.find('"');
+    size_t end = lexeme.rfind('"');
+    if (begin == std::string::npos || end <= begin) return {};
+    std::string out;
+    out.reserve(end - begin);
+    for (size_t i = begin + 1; i < end; ++i) {
+        if (lexeme[i] == '\\' && i + 1 < end && (lexeme[i + 1] == '"' || lexeme[i + 1] == '\\')) {
+            ++i;    // 6.10.9p2: only \" and \\ are undone
+        }
+        out.push_back(lexeme[i]);
+    }
+    return out;
+}
+
+void Preprocessor::handlePragmaOperator(const PPToken& opTok) {
+    auto fail = [&](const char* msg) {
+        diagnostics.push_back(Diagnostic{
+            .message = msg,
+            .severity = Diagnostic::Severity::Error,
+            .span = opTok.span});
+    };
+
+    auto lp = pullPragmaOperandToken();
+    if (!lp || lp->kind != PPTokenKind::Punctuator || lp->lexeme != "(") {
+        fail("expected '(' after _Pragma operator");
+        return;
+    }
+    auto str = pullPragmaOperandToken();
+    if (!str || str->kind != PPTokenKind::StringLiteral) {
+        fail("operand of _Pragma must be a parenthesized string literal");
+        return;
+    }
+    auto rp = pullPragmaOperandToken();
+    if (!rp || rp->kind != PPTokenKind::Punctuator || rp->lexeme != ")") {
+        fail("expected ')' after _Pragma operand");
+        return;
+    }
+
+    // 6.10.9p2: destringize the (raw, not escape-decoded) literal and process
+    // the character sequence as the pp-tokens of a #pragma directive.
+    std::string content = destringizePragmaOperand(str->lexeme);
+    std::istringstream iss(content);
+    Tokenizer contentTokenizer(iss);
+    std::vector<PPToken> lineTokens;
+    while (auto t = contentTokenizer.next()) {
+        if (t->kind == PPTokenKind::Newline) break;
+        // Tokens carry the operator's location: the content has no file of its own.
+        t->span = opTok.span;
+        lineTokens.push_back(*t);
+    }
+    handlePragmaDirective(lineTokens);
 }
 
 } // namespace wvmcc
