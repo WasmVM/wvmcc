@@ -56,12 +56,18 @@ struct IntegerInfo {
         UnsignedLongLong,
         None
     } resolved{ResolvedType::None};
+    // 6.4.8p4: the pp-number does not convert to a valid integer constant
+    // (bad digits for the base or an invalid suffix). resolved == None with
+    // malformed == false means "valid spelling, fits no type" (6.4.4.1p6).
+    bool malformed{false};
 };
 
 struct IntegerToken { IntegerInfo info; };
 struct FloatingToken {
     std::string lexeme;
     enum class ResolvedType { Float, Double, LongDouble } resolved{ResolvedType::Double};
+    // 6.4.8p4: the pp-number does not convert to a valid floating constant.
+    bool malformed{false};
 };
 struct EndOfFileToken {};
 // A stray, non-white-space character that cannot form any other token

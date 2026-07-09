@@ -2190,6 +2190,20 @@ ExprPtr Parser::parsePrimary() {
         // truncate "0xff" to 0 (reads "0", stops at 'x'); base 0 lets it
         // auto-detect the radix for the rare path where the variant is absent.
         if (auto* itok = std::get_if<IntegerToken>(&tok.v)) {
+            // 6.4.8p4 / 6.4.4.1p6: a pp-number that is not a valid integer
+            // constant, or whose value fits no integer type, violates a
+            // constraint — diagnose instead of silently folding to a wrong
+            // value (stoull's prefix-parse or the overflow fallback).
+            if (itok->info.malformed) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "invalid integer constant '" + il->raw + "'"; d.span = tok.span;
+                diagnostics.push_back(std::move(d));
+            } else if (itok->info.resolved == IntegerInfo::ResolvedType::None) {
+                wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+                d.message = "integer constant '" + il->raw + "' is too large for any integer type (6.4.4.1p6)";
+                d.span = tok.span;
+                diagnostics.push_back(std::move(d));
+            }
             il->value = (std::int64_t)itok->info.value;
             // Carry the lexer-resolved signedness so the constant-expression
             // evaluator can apply unsigned semantics (6.4.4.1p5). The resolved
@@ -2243,6 +2257,14 @@ ExprPtr Parser::parsePrimary() {
         auto fl = make_ast<FloatLiteral>();
         fl->span = tok.span;
         fl->raw = tok.lexeme();
+        // 6.4.8p4: a pp-number that does not convert to a valid floating
+        // constant (e.g. 0x1.2.3p4q) must be diagnosed, not truncated by
+        // strtod's prefix parse.
+        if (auto* ft = std::get_if<FloatingToken>(&tok.v); ft && ft->malformed) {
+            wvmcc::Diagnostic d; d.severity = wvmcc::Diagnostic::Severity::Error;
+            d.message = "invalid floating constant '" + fl->raw + "'"; d.span = tok.span;
+            diagnostics.push_back(std::move(d));
+        }
         // Detect suffix (f/F/l/L). Strip before parsing.
         bool isFloat = false;
         std::string body = fl->raw;

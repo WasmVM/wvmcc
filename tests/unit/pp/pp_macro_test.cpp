@@ -521,27 +521,57 @@ static int test_macro_complex_replacement() {
     return 0;
 }
 
-// Test 14: Macro redefinition (should succeed - replaces previous definition)
+// Test 14: Macro redefinition (6.10.3p2, #106): identical redefinition is
+// allowed; a non-identical one requires a diagnostic.
 static int test_macro_redefinition() {
     using namespace wvmcc;
-    const std::string srcName = "temp_macro_redef.c";
-    
+
+    // Identical redefinition (white-space separations compare equal): no
+    // diagnostic, macro still expands.
     {
-        std::ofstream ofs(srcName);
-        ofs << "#define MAX 100\n";
-        ofs << "#define MAX 200\n";  // Redefinition
-        ofs << "int x = MAX;\n";
+        const std::string srcName = "temp_macro_redef_ok.c";
+        {
+            std::ofstream ofs(srcName);
+            ofs << "#define MAX 100\n";
+            ofs << "#define MAX   100\n";  // identical modulo ws amount
+            ofs << "int x = MAX;\n";
+        }
+        std::vector<wvmcc::PPToken> tokens;
+        if (!preprocess_collect_tokens(srcName, tokens, "test_macro_redefinition")) return 1;
+        bool found = false;
+        for (const auto& t : tokens) {
+            if (t.lexeme == "100") found = true;
+        }
+        if (!found) {
+            std::cerr << "test_macro_redefinition: expected '100' in output\n";
+            return 2;
+        }
     }
 
-    std::vector<wvmcc::PPToken> tokens;
-    if (!preprocess_collect_tokens(srcName, tokens, "test_macro_redefinition")) return 1;
-    bool foundMax = false;
-    for (const auto& t : tokens) {
-        if (t.lexeme == "200") foundMax = true;
-    }
-    if (!foundMax) {
-        std::cerr << "test_macro_redefinition: expected '200' in output\n";
-        return 2;
+    // Non-identical redefinition: constraint violation, must be diagnosed.
+    {
+        const std::string srcName = "temp_macro_redef_bad.c";
+        {
+            std::ofstream ofs(srcName);
+            ofs << "#define MAX 100\n";
+            ofs << "#define MAX 200\n";  // different replacement list
+        }
+        Preprocessor pp;
+        if (!pp.open(srcName)) {
+            std::cerr << "test_macro_redefinition: failed to open stream\n";
+            std::remove(srcName.c_str());
+            return 3;
+        }
+        while (pp.next()) {}
+        std::remove(srcName.c_str());
+        bool sawError = false;
+        for (const auto& d : pp.getDiagnostics()) {
+            if (d.severity == Diagnostic::Severity::Error) sawError = true;
+        }
+        if (!sawError) {
+            std::cerr << "test_macro_redefinition: non-identical redefinition not diagnosed\n";
+            return 4;
+        }
     }
     return 0;
 }

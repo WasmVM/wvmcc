@@ -890,6 +890,36 @@ void Preprocessor::trimReplacementWhitespace(std::vector<PPToken>& replacement) 
     }
 }
 
+// 6.10.8p2: none of the predefined macro names, nor the identifier `defined`,
+// shall be the subject of a #define or #undef directive. Mirrors the set
+// installed by pushFile() (plus the dynamically maintained __LINE__/__FILE__).
+static bool isProtectedMacroName(const std::string& name) {
+    static const std::unordered_set<std::string> names = {
+        "defined", "__LINE__", "__FILE__", "__DATE__", "__TIME__",
+        "__STDC__", "__STDC_VERSION__", "__STDC_HOSTED__",
+        "__STDC_NO_ATOMICS__", "__STDC_NO_COMPLEX__", "__STDC_NO_THREADS__",
+    };
+    return names.count(name) != 0;
+}
+
+// 6.10.3p1: two replacement lists are identical when the token spellings match
+// and each pair of adjacent tokens is separated by white space in both lists
+// or in neither (all white-space separations are considered identical).
+static bool replacementListsIdentical(const std::vector<PPToken>& a,
+                                      const std::vector<PPToken>& b) {
+    auto normalize = [](const std::vector<PPToken>& list) {
+        std::vector<std::pair<std::string, bool>> out; // (spelling, preceded-by-ws)
+        bool ws = false;
+        for (const auto& t : list) {
+            if (t.kind == PPTokenKind::Whitespace) { ws = true; continue; }
+            out.emplace_back(t.lexeme, ws && !out.empty());
+            ws = false;
+        }
+        return out;
+    };
+    return normalize(a) == normalize(b);
+}
+
 bool Preprocessor::handleDefineDirective(Tokenizer& tokenizer) {
     // Skip whitespace after 'define' keyword
     while (auto w = tokenizer.peek()) {
@@ -908,6 +938,14 @@ bool Preprocessor::handleDefineDirective(Tokenizer& tokenizer) {
     }
 
     std::string name = macroName->lexeme;
+    if (isProtectedMacroName(name)) {
+        diagnostics.push_back(Diagnostic{
+            .message = "'" + name + "' cannot be the subject of #define (6.10.8p2)",
+            .severity = Diagnostic::Severity::Error,
+            .span = macroName->span,
+        });
+        return false;
+    }
     tokenizer.next();
 
     bool isFunction = false;
@@ -925,6 +963,49 @@ bool Preprocessor::handleDefineDirective(Tokenizer& tokenizer) {
 
     std::vector<PPToken> replacement = collectLineTokens(tokenizer);
     trimReplacementWhitespace(replacement);
+
+    // 6.10.3.2p1: in a function-like macro, each '#' in the replacement list
+    // must be followed by a parameter (or __VA_ARGS__ when variadic). This is
+    // a constraint on the *definition*, so diagnose it here — not at expansion
+    // time, which would miss macros that are never expanded.
+    if (isFunction) {
+        for (size_t k = 0; k < replacement.size(); ++k) {
+            const auto& t = replacement[k];
+            if (t.kind != PPTokenKind::Punctuator || t.lexeme != "#") continue;
+            size_t n = k + 1;
+            while (n < replacement.size() && replacement[n].kind == PPTokenKind::Whitespace) ++n;
+            bool followsParam = n < replacement.size()
+                && replacement[n].kind == PPTokenKind::Identifier
+                && (std::find(params.begin(), params.end(), replacement[n].lexeme) != params.end()
+                    || (variadic && replacement[n].lexeme == "__VA_ARGS__"));
+            if (!followsParam) {
+                diagnostics.push_back(Diagnostic{
+                    .message = "'#' is not followed by a macro parameter in the definition of '" + name + "' (6.10.3.2p1)",
+                    .severity = Diagnostic::Severity::Error,
+                    .span = t.span,
+                });
+                return false;
+            }
+        }
+    }
+
+    // 6.10.3p2: a currently defined macro may be redefined only by an
+    // identical definition (same kind, parameters, and replacement list).
+    if (auto prev = macroTable.getMacro(name)) {
+        const Macro* m = *prev;
+        bool identical = m->isFunction == isFunction
+                      && m->variadic == variadic
+                      && m->params == params
+                      && replacementListsIdentical(m->replacement, replacement);
+        if (!identical) {
+            diagnostics.push_back(Diagnostic{
+                .message = "macro '" + name + "' redefined with a different replacement list (6.10.3p2)",
+                .severity = Diagnostic::Severity::Error,
+                .span = macroName->span,
+            });
+            return false;
+        }
+    }
 
     if (isFunction) {
         macroTable.defineFunctionMacro(name, params, replacement, variadic);
@@ -952,6 +1033,14 @@ bool Preprocessor::handleUndefDirective(Tokenizer& tokenizer) {
     }
 
     std::string name = macroName->lexeme;
+    if (isProtectedMacroName(name)) {
+        diagnostics.push_back(Diagnostic{
+            .message = "'" + name + "' cannot be the subject of #undef (6.10.8p2)",
+            .severity = Diagnostic::Severity::Error,
+            .span = macroName->span,
+        });
+        return false;
+    }
     macroTable.undefine(name);
     tokenizer.next(); // consume macro name
 
@@ -1786,6 +1875,14 @@ void Preprocessor::normalizeLiteralToken(PPToken& tok) {
     std::string out;
     out.reserve(inner.size());
 
+    // 6.4.4.4p9: an octal or hexadecimal escape must be representable in the
+    // constant's corresponding type — unsigned char when unprefixed or u8,
+    // char16_t for u, char32_t/wchar_t for U/L (32-bit here, so only hex-digit
+    // overflow can exceed it).
+    const uint32_t escapeLimit = (prefix.empty() || prefix == "u8") ? 0xFFu
+                               : (prefix == "u")                    ? 0xFFFFu
+                                                                    : 0xFFFFFFFFu;
+
     auto push_codepoint_utf8 = [&](uint32_t cp) {
         if (cp <= 0x7F) out.push_back(static_cast<char>(cp));
         else if (cp <= 0x7FF) {
@@ -1834,12 +1931,17 @@ void Preprocessor::normalizeLiteralToken(PPToken& tok) {
             // hex sequence: one or more hex digits
             size_t start = p;
             uint32_t val = 0;
+            bool overflow = false;
             while (p < inner.size() && isxdigit(static_cast<unsigned char>(inner[p]))) {
                 char ch = inner[p++];
+                if (val > (0xFFFFFFFFu >> 4)) overflow = true;
                 val = (val << 4) + (uint32_t)( (ch>='0'&&ch<='9') ? ch - '0' : (ch>='a'&&ch<='f') ? 10 + ch - 'a' : 10 + ch - 'A');
             }
             if (p == start) {
                 diagnostics.push_back(Diagnostic{.message = "\'\\x\' escape with no hex digits", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            }
+            if (overflow || val > escapeLimit) {
+                diagnostics.push_back(Diagnostic{.message = "hexadecimal escape sequence out of range (6.4.4.4p9)", .severity = Diagnostic::Severity::Error, .span = tok.span});
             }
             push_codepoint_utf8(val);
             continue;
@@ -1870,6 +1972,9 @@ void Preprocessor::normalizeLiteralToken(PPToken& tok) {
             while (cnt < 3 && p < inner.size() && inner[p] >= '0' && inner[p] <= '7') {
                 val = (val << 3) + (uint32_t)(inner[p++] - '0');
                 ++cnt;
+            }
+            if (val > escapeLimit) {
+                diagnostics.push_back(Diagnostic{.message = "octal escape sequence out of range (6.4.4.4p9)", .severity = Diagnostic::Severity::Error, .span = tok.span});
             }
             push_codepoint_utf8(val);
             continue;

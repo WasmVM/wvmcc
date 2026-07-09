@@ -1,6 +1,8 @@
 // Lexer implementation moved out of header
 #include <cstdint>
 #include "Lexer.hpp"
+#include <cctype>
+#include <stdexcept>
 #include <unordered_set>
 #include <limits>
 #include <type_traits>
@@ -16,6 +18,80 @@ static const std::unordered_set<std::string> keywords = {
     "unsigned","_Noreturn","else","restrict","void","_Static_assert",
     "enum","return","volatile","_Thread_local"
 };
+
+// 6.4.8p4 (phase-7 conversion): a pp-number must convert to a valid integer
+// or floating constant; one that does not must be diagnosed. These validators
+// check the full 6.4.4.1 / 6.4.4.2 grammar — the value-parsing code below is
+// prefix-tolerant (stoull/strtod stop at the first bad character), so without
+// this check `1abc` would silently convert to 1.
+static bool validIntegerConstant(const std::string& s) {
+    size_t i = 0;
+    const size_t n = s.size();
+    if (n == 0) return false;
+    if (n >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        i = 2;
+        size_t cnt = 0;
+        while (i < n && isxdigit(static_cast<unsigned char>(s[i]))) { ++i; ++cnt; }
+        if (cnt == 0) return false;
+    } else if (s[0] == '0') {
+        i = 1;
+        while (i < n && s[i] >= '0' && s[i] <= '7') ++i;
+    } else if (isdigit(static_cast<unsigned char>(s[0]))) {
+        while (i < n && isdigit(static_cast<unsigned char>(s[i]))) ++i;
+    } else {
+        return false;
+    }
+    // integer-suffix: at most one u/U and one l/L/ll/LL, in either order
+    bool haveU = false, haveL = false;
+    while (i < n) {
+        char c = s[i];
+        if ((c == 'u' || c == 'U') && !haveU) { haveU = true; ++i; continue; }
+        if ((c == 'l' || c == 'L') && !haveL) {
+            haveL = true; ++i;
+            if (i < n && s[i] == c) ++i; // ll / LL must be same-case
+            continue;
+        }
+        return false;
+    }
+    return true;
+}
+
+static bool validFloatingConstant(const std::string& s) {
+    size_t i = 0;
+    const size_t n = s.size();
+    auto digits = [&](bool hex) {
+        size_t cnt = 0;
+        while (i < n && (hex ? isxdigit(static_cast<unsigned char>(s[i]))
+                             : isdigit(static_cast<unsigned char>(s[i])))) { ++i; ++cnt; }
+        return cnt;
+    };
+    if (n >= 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) {
+        i = 2;
+        size_t ip = digits(true), fp = 0;
+        if (i < n && s[i] == '.') { ++i; fp = digits(true); }
+        if (ip + fp == 0) return false;
+        // hexadecimal floating constants require a binary exponent (6.4.4.2p1)
+        if (!(i < n && (s[i] == 'p' || s[i] == 'P'))) return false;
+        ++i;
+        if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
+        if (digits(false) == 0) return false;
+    } else {
+        size_t ip = digits(false), fp = 0;
+        bool hasDot = false;
+        if (i < n && s[i] == '.') { hasDot = true; ++i; fp = digits(false); }
+        if (ip + fp == 0) return false;
+        bool hasExp = false;
+        if (i < n && (s[i] == 'e' || s[i] == 'E')) {
+            hasExp = true; ++i;
+            if (i < n && (s[i] == '+' || s[i] == '-')) ++i;
+            if (digits(false) == 0) return false;
+        }
+        if (!hasDot && !hasExp) return false;
+    }
+    // floating-suffix: one optional f/F/l/L
+    if (i < n && (s[i] == 'f' || s[i] == 'F' || s[i] == 'l' || s[i] == 'L')) ++i;
+    return i == n;
+}
 
 // Classification helper used internally by this translation unit.
 static inline Token classify_local(const wvmcc::PPToken& pp) {
@@ -41,6 +117,7 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
                 // parse optional floating suffix: f/F => float, l/L => long double, otherwise double
                 FloatingToken ftok;
                 ftok.lexeme = s;
+                ftok.malformed = !validFloatingConstant(s);
                 if (!s.empty()) {
                     char last = s.back();
                     if (last == 'f' || last == 'F') ftok.resolved = FloatingToken::ResolvedType::Float;
@@ -72,6 +149,8 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
 
             std::string digits = s.substr(0, j);
             IntegerInfo info;
+            info.malformed = !validIntegerConstant(s);
+            bool overflow = false; // value exceeds even unsigned long long
             try {
                 if (digits.size() >= 2 && (digits[0] == '0') && (digits[1] == 'x' || digits[1] == 'X')) {
                     info.base = IntegerInfo::Base::Hexadecimal;
@@ -85,6 +164,12 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
                     info.base = IntegerInfo::Base::Decimal;
                     info.value = std::stoull(digits, nullptr, 10);
                 }
+            } catch (const std::out_of_range&) {
+                // 6.4.4.1p6: fits in no 64-bit type; resolved is forced to
+                // None below so the parser can diagnose it.
+                overflow = true;
+                info.value = 0;
+                if (!digits.empty() && digits[0] == '0') info.base = IntegerInfo::Base::Octal; else info.base = IntegerInfo::Base::Decimal;
             } catch (...) {
                 // Fallback: zero value on parse error
                 info.value = 0;
@@ -172,6 +257,8 @@ static inline Token classify_local(const wvmcc::PPToken& pp) {
                 if (val <= max_ull) { set(IntegerInfo::ResolvedType::UnsignedLongLong); }
                 else { set(IntegerInfo::ResolvedType::None); }
             }
+
+            if (overflow) set(IntegerInfo::ResolvedType::None);
 
             return Token(IntegerToken{info}, pp.span);
         }
