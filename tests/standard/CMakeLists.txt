@@ -235,6 +235,7 @@ add_standard_compile_fail(lang-6.7.10-sassert-nonconst ${CMAKE_CURRENT_SOURCE_DI
 add_standard_compile_fail(lang-6.8.1-case-outside     ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/case_outside_switch.c)
 add_standard_compile_fail(lang-6.8.4.2-dup-case       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/dup_case_label.c)
 add_standard_compile_fail(lang-6.8.6.1-goto-undef     ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/goto_undefined_label.c)
+add_standard_compile_fail(lang-6.8.6.1-goto-switch    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/goto_into_switch.c)
 add_standard_compile_fail(lang-6.8.6.2-continue       ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/continue_outside_loop.c)
 add_standard_compile_fail(lang-6.8.6.3-break          ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/break_outside.c)
 add_standard_compile_fail(lang-6.8.6.4-return-void    ${CMAKE_CURRENT_SOURCE_DIR}/language/6.8_statements/return_value_in_void.c)
