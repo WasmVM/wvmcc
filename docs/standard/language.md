@@ -312,7 +312,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.4.4.4-01` | 6.4.4.4p1–p11 | Character constants: plain & `L`/`u`/`U`-prefixed; simple/octal/hex escapes; value & type | Positive | supported | unit-xref | `lexer_char_test`, `pp_tokenizer_char_test` |
 | `LANG-6.4.4.4-02` | 6.4.4.4p10 | A plain integer character constant has type `int`; single-char value per execution charset (`'A'==65`) | Positive | supported | static-assert | |
 | `LANG-6.4.4.4-03` | 6.4.4.4p10 | A multi-character constant (`'ab'`) has an implementation-defined value | B-impl | supported | static-assert | `docs/spec.md`/wvmcc: defined packing |
-| `LANG-6.4.4.4-04` | 6.4.4.4p9 | An octal/hex escape value out of range for the type is rejected | Negative | supported | compile-fail | `std-lang-6.4.4.4-04`: limit is unsigned char (unprefixed/`u8`), char16_t (`u`), char32_t (`U`/`L`) (#103) |
+| `LANG-6.4.4.4-04` | 6.4.4.4p9 | An octal/hex escape value out of range for the type is rejected | Negative | supported | compile-fail | `std-lang-6.4.4.4-04` (`'\777'`) + `-04-hex` (`'\x1FF'`): limit is unsigned char (unprefixed/`u8`), char16_t (`u`), char32_t (`U`/`L`) (#103) |
 | `LANG-6.4.4.4-05` | 6.4.4.4p11 | Wide char constants (`L'x'`,`u'x'`,`U'x'`) have `wchar_t`/`char16_t`/`char32_t` | Positive | supported | unit-xref | `pp_tokenizer_char_test` |
 
 ### 6.4.5 String literals
@@ -346,7 +346,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.4.8-01` | 6.4.8p1–p3 | pp-number lexical form (covers all integer/float constant tokens, `1Ex`, `0x1p-2`) | Positive | supported | unit-xref | `pp_tokenizer_ppnumber_test` |
-| `LANG-6.4.8-02` | 6.4.8p4 | A pp-number that is not a valid constant after phase-7 conversion is rejected | Negative | supported | compile-fail | `std-lang-6.4.8-02`: full 6.4.4.1/6.4.4.2 grammar validated at phase-7 conversion (`1abc`, `0x1.2.3p4q`) (#104) |
+| `LANG-6.4.8-02` | 6.4.8p4 | A pp-number that is not a valid constant after phase-7 conversion is rejected | Negative | supported | compile-fail | `std-lang-6.4.8-02` (`1abc`) + `-02-float` (`0x1.2.3p4q`): full 6.4.4.1/6.4.4.2 grammar validated at phase-7 conversion (#104) |
 
 ### 6.4.9 Comments
 
@@ -837,7 +837,7 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |
 | `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | partial | static-assert | reflect deferred/by-design features |
-| `LANG-6.10.8-04` | 6.10.8p2 | Constraint: predefined macros and `__LINE__`/`__FILE__` are not redefinable | Negative | supported | compile-fail | `std-lang-6.10.8-04`: `#define`/`#undef` of a predefined macro or `defined` rejected (#107) |
+| `LANG-6.10.8-04` | 6.10.8p2 | Constraint: predefined macros and `__LINE__`/`__FILE__` are not redefinable | Negative | supported | compile-fail | `std-lang-6.10.8-04` (`#define __LINE__`) + `-04-undef` (`#undef __FILE__`): both directives rejected, incl. `defined` (#107) |
 | `LANG-6.10.9-01` | 6.10.9 | The `_Pragma("...")` operator | Positive | supported | unit-xref | destringize + processed as `#pragma`; works from macro expansion (`pp_pragma_operator_test`, #108) |
 
 ## 6.11 Future language directions
