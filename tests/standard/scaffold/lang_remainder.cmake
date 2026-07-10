@@ -154,3 +154,17 @@ add_standard_run_test(lang-6.10.6-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_p
 add_standard_run_test(lang-6.10.7-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.7_null_directive.c)
 add_standard_run_test(lang-6.10.4-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.4_line_directive.c)
 add_standard_stdout_test(lang-6.4.2.2-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.2.2_func_name.c ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.2.2_func_name.expected)
+
+# Lexical/preprocessor constraint diagnostics added for issues #102-#107
+# (P2 diag batch, 2026-07-09): unrepresentable constants, out-of-range
+# escapes, invalid pp-numbers, '#'-without-parameter, non-identical macro
+# redefinition, and #define/#undef of predefined macros.
+add_standard_compile_fail(lang-6.4.4.1-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.4.1_unrepresentable_int_constant.c supported)
+add_standard_compile_fail(lang-6.4.4.4-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.4.4_escape_out_of_range.c supported)
+add_standard_compile_fail(lang-6.4.4.4-04-hex ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.4.4_hex_escape_out_of_range.c supported)
+add_standard_compile_fail(lang-6.4.8-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.8_invalid_ppnumber.c supported)
+add_standard_compile_fail(lang-6.4.8-02-float ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.8_invalid_float_ppnumber.c supported)
+add_standard_compile_fail(lang-6.10.3-07 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.3.2_hash_without_param.c supported)
+add_standard_compile_fail(lang-6.10.3-09 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.3_nonidentical_redefinition.c supported)
+add_standard_compile_fail(lang-6.10.8-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.8_redefine_predefined.c supported)
+add_standard_compile_fail(lang-6.10.8-04-undef ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.8_undef_predefined.c supported)

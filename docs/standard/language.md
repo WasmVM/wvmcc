@@ -304,7 +304,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 |---|---|---|---|---|---|---|
 | `LANG-6.4.4.1-01` | 6.4.4.1p1–p5 | Decimal/octal/hex integer constants with all suffix forms get the correct value | Positive | supported | unit-xref | `lexer_integer_test`, `pp_tokenizer_ppnumber_test` |
 | `LANG-6.4.4.1-02` | 6.4.4.1p5 | An integer constant's type is the first in its list that holds the value (LP64 ranks) | Positive | supported | static-assert | `lexer_integer_test` |
-| `LANG-6.4.4.1-03` | 6.4.4.1p2,p6 | A constant value representable by no listed type (and no extended type) is rejected | Negative | partial | compile-fail | **unit gap — no test**; no extended integer types |
+| `LANG-6.4.4.1-03` | 6.4.4.1p2,p6 | A constant value representable by no listed type (and no extended type) is rejected | Negative | supported | compile-fail | `std-lang-6.4.4.1-03`: > ULLONG_MAX (or unsuffixed decimal > LLONG_MAX) rejected; no extended integer types (#102) |
 | `LANG-6.4.4.2-01` | 6.4.4.2p1–p4 | Decimal & hex floating constants; `f`/`F`→`float`, `l`/`L`→`long double`, none→`double` | Positive | supported | unit-xref | `lexer_floating_test`, `pp_tokenizer_ppnumber_test` |
 | `LANG-6.4.4.2-02` | 6.4.4.2p3 | A non-exactly-representable floating constant rounds (correctly rounded when `FLT_RADIX` is a power of 2) | B-impl | supported | exit | round-to-nearest |
 | `LANG-6.4.4.2-03` | 6.4.4.2p5 | Floating-constant conversion raises no execution-time exception | Positive | supported | exit | |
@@ -312,7 +312,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.4.4.4-01` | 6.4.4.4p1–p11 | Character constants: plain & `L`/`u`/`U`-prefixed; simple/octal/hex escapes; value & type | Positive | supported | unit-xref | `lexer_char_test`, `pp_tokenizer_char_test` |
 | `LANG-6.4.4.4-02` | 6.4.4.4p10 | A plain integer character constant has type `int`; single-char value per execution charset (`'A'==65`) | Positive | supported | static-assert | |
 | `LANG-6.4.4.4-03` | 6.4.4.4p10 | A multi-character constant (`'ab'`) has an implementation-defined value | B-impl | supported | static-assert | `docs/spec.md`/wvmcc: defined packing |
-| `LANG-6.4.4.4-04` | 6.4.4.4p9 | An octal/hex escape value out of range for the type is rejected | Negative | partial | compile-fail | **unit gap — no test** |
+| `LANG-6.4.4.4-04` | 6.4.4.4p9 | An octal/hex escape value out of range for the type is rejected | Negative | supported | compile-fail | `std-lang-6.4.4.4-04` (`'\777'`) + `-04-hex` (`'\x1FF'`): limit is unsigned char (unprefixed/`u8`), char16_t (`u`), char32_t (`U`/`L`) (#103) |
 | `LANG-6.4.4.4-05` | 6.4.4.4p11 | Wide char constants (`L'x'`,`u'x'`,`U'x'`) have `wchar_t`/`char16_t`/`char32_t` | Positive | supported | unit-xref | `pp_tokenizer_char_test` |
 
 ### 6.4.5 String literals
@@ -346,7 +346,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.4.8-01` | 6.4.8p1–p3 | pp-number lexical form (covers all integer/float constant tokens, `1Ex`, `0x1p-2`) | Positive | supported | unit-xref | `pp_tokenizer_ppnumber_test` |
-| `LANG-6.4.8-02` | 6.4.8p4 | A pp-number that is not a valid constant after phase-7 conversion is rejected | Negative | partial | compile-fail | **unit gap — no test** |
+| `LANG-6.4.8-02` | 6.4.8p4 | A pp-number that is not a valid constant after phase-7 conversion is rejected | Negative | supported | compile-fail | `std-lang-6.4.8-02` (`1abc`) + `-02-float` (`0x1.2.3p4q`): full 6.4.4.1/6.4.4.2 grammar validated at phase-7 conversion (#104) |
 
 ### 6.4.9 Comments
 
@@ -824,9 +824,9 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.3-04` | 6.10.3.3 | `##` token pasting and placemarkers | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.3-05` | 6.10.3.1 | `__VA_ARGS__` variadic macros | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.3-06` | 6.10.3.4 | Rescanning / further replacement with non-recursion (paint) semantics | Positive | supported | unit-xref | `pp_macro_test` |
-| `LANG-6.10.3-07` | 6.10.3.2p1 | Constraint: `#` in a function-like macro must be followed by a parameter | Negative | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.3-07` | 6.10.3.2p1 | Constraint: `#` in a function-like macro must be followed by a parameter | Negative | supported | compile-fail | `std-lang-6.10.3-07`: diagnosed at definition time, even if never expanded (#105) |
 | `LANG-6.10.3-08` | 6.10.3.3p3 | A `##` result that is not a valid preprocessing token is undefined | B-undef | supported | none | documentation |
-| `LANG-6.10.3-09` | 6.10.3p2 | Constraint: a macro redefinition must be identical | Negative | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.3-09` | 6.10.3p2 | Constraint: a macro redefinition must be identical | Negative | supported | compile-fail | `std-lang-6.10.3-09` + `pp_macro_test`: identical redefinition allowed, differing one rejected (#106) |
 | `LANG-6.10.4-01` | 6.10.4 | `#line N` and `#line N "file"` set the line/file for diagnostics | Positive | supported | exit | `std-lang-6.10.4-01`: `#line` drives `__LINE__` (runtime-verified; wvmcc diagnostics carry no line numbers) |
 | `LANG-6.10.5-01` | 6.10.5 | `#error` produces a diagnostic and fails translation | Negative | supported | compile-fail | `std-lang-6.10.5-01`: `#error` rejected with a diagnostic + non-zero exit (verified) |
 | `LANG-6.10.6-01` | 6.10.6 | `#pragma` is recognized; an unknown pragma | Positive | supported | exit | `std-lang-6.10.6-01`: unknown pragma warns and the TU runs |
@@ -837,7 +837,7 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |
 | `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | partial | static-assert | reflect deferred/by-design features |
-| `LANG-6.10.8-04` | 6.10.8p2 | Constraint: predefined macros and `__LINE__`/`__FILE__` are not redefinable | Negative | partial | unit-xref | **unit gap — no test** |
+| `LANG-6.10.8-04` | 6.10.8p2 | Constraint: predefined macros and `__LINE__`/`__FILE__` are not redefinable | Negative | supported | compile-fail | `std-lang-6.10.8-04` (`#define __LINE__`) + `-04-undef` (`#undef __FILE__`): both directives rejected, incl. `defined` (#107) |
 | `LANG-6.10.9-01` | 6.10.9 | The `_Pragma("...")` operator | Positive | supported | unit-xref | destringize + processed as `#pragma`; works from macro expansion (`pp_pragma_operator_test`, #108) |
 
 ## 6.11 Future language directions
