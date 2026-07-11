@@ -233,6 +233,9 @@ private:
     void emitTokenOrLineExpansion(const PPToken& tok);
     // Normalize a literal token: decode escapes and UCNs in character and string literals
     void normalizeLiteralToken(PPToken& tok);
+    // 6.4.2.1p3 / 6.4.3p2: diagnose UCNs in an identifier's spelling that name
+    // a disallowed code point or a character not allowed in identifiers.
+    void checkIdentifierUCNs(const PPToken& tok);
     void skipToEndOfLineTokensFromTokenizer(Tokenizer& tz);
     // Helpers to push tokens into the output buffer while performing Phase 6
     // adjacent string literal concatenation when applicable.
