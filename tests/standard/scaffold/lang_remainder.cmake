@@ -166,5 +166,11 @@ add_standard_compile_fail(lang-6.4.8-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4
 add_standard_compile_fail(lang-6.4.8-02-float ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.8_invalid_float_ppnumber.c supported)
 add_standard_compile_fail(lang-6.10.3-07 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.3.2_hash_without_param.c supported)
 add_standard_compile_fail(lang-6.10.3-09 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.3_nonidentical_redefinition.c supported)
+
+# UCN constraint diagnostics added for issues #100-#101 (2026-07-10): a UCN
+# naming a disallowed code point (6.4.3p2), and a UCN designating a character
+# not allowed in an identifier / as its initial character (6.4.2.1p3).
+add_standard_compile_fail(lang-6.4.2-03 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.2.1_ucn_identifier_disallowed.c supported)
+add_standard_compile_fail(lang-6.4.3-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.4_lexical/6.4.3_ucn_disallowed_codepoint.c supported)
 add_standard_compile_fail(lang-6.10.8-04 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.8_redefine_predefined.c supported)
 add_standard_compile_fail(lang-6.10.8-04-undef ${CMAKE_CURRENT_SOURCE_DIR}/language/6.10_preprocessing/6.10.8_undef_predefined.c supported)

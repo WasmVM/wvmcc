@@ -1840,6 +1840,85 @@ void Preprocessor::trimTrailingWhitespace(std::string& content) {
     }
 }
 
+// 6.4.3p2: a UCN shall not specify a character whose short identifier is less
+// than 00A0 (other than 0024 '$', 0040 '@', 0060 '`'), nor one in the
+// surrogate range D800-DFFF.
+static bool ucnDisallowedCodePoint(uint32_t cp) {
+    if (cp < 0xA0) return cp != 0x24 && cp != 0x40 && cp != 0x60;
+    return cp >= 0xD800 && cp <= 0xDFFF;
+}
+
+// Annex D.1: ranges of characters allowed in identifiers.
+static bool ucnAllowedInIdentifier(uint32_t cp) {
+    static const uint32_t ranges[][2] = {
+        {0x00A8,0x00A8},{0x00AA,0x00AA},{0x00AD,0x00AD},{0x00AF,0x00AF},
+        {0x00B2,0x00B5},{0x00B7,0x00BA},{0x00BC,0x00BE},{0x00C0,0x00D6},
+        {0x00D8,0x00F6},{0x00F8,0x00FF},
+        {0x0100,0x167F},{0x1681,0x180D},{0x180F,0x1FFF},
+        {0x200B,0x200D},{0x202A,0x202E},{0x203F,0x2040},{0x2054,0x2054},
+        {0x2060,0x206F},{0x2070,0x218F},{0x2460,0x24FF},{0x2776,0x2793},
+        {0x2C00,0x2DFF},{0x2E80,0x2FFF},{0x3004,0x3007},{0x3008,0x3020},
+        {0x3021,0x30FF},{0x3031,0xD7FF},{0xF900,0xFD3D},{0xFD40,0xFDCF},
+        {0xFDF0,0xFE44},{0xFE47,0xFFFD},
+        {0x10000,0x1FFFD},{0x20000,0x2FFFD},{0x30000,0x3FFFD},{0x40000,0x4FFFD},
+        {0x50000,0x5FFFD},{0x60000,0x6FFFD},{0x70000,0x7FFFD},{0x80000,0x8FFFD},
+        {0x90000,0x9FFFD},{0xA0000,0xAFFFD},{0xB0000,0xBFFFD},{0xC0000,0xCFFFD},
+        {0xD0000,0xDFFFD},{0xE0000,0xEFFFD},
+    };
+    for (const auto& r : ranges)
+        if (cp >= r[0] && cp <= r[1]) return true;
+    return false;
+}
+
+// Annex D.2: ranges disallowed as the initial character of an identifier.
+static bool ucnDisallowedInitial(uint32_t cp) {
+    return (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x1DC0 && cp <= 0x1DFF)
+        || (cp >= 0x20D0 && cp <= 0x20FF) || (cp >= 0xFE20 && cp <= 0xFE2F);
+}
+
+// 6.4.2.1p3 / 6.4.3p2: validate every UCN spelled in an identifier. The
+// Tokenizer lexes \uXXXX/\UXXXXXXXX into identifier tokens without judging the
+// designated character; this runs once per identifier surfacing to the parser
+// (see the pushToken*WithConcat call sites) since the Tokenizer itself has no
+// diagnostics channel.
+void Preprocessor::checkIdentifierUCNs(const PPToken& tok) {
+    const std::string& s = tok.lexeme;
+    if (s.find('\\') == std::string::npos) return;
+    auto hexVal = [](char c) -> uint32_t {
+        if (c >= '0' && c <= '9') return (uint32_t)(c - '0');
+        if (c >= 'a' && c <= 'f') return 10u + (uint32_t)(c - 'a');
+        return 10u + (uint32_t)(c - 'A');
+    };
+    for (size_t i = 0; i < s.size();) {
+        if (s[i] != '\\' || i + 1 >= s.size() || (s[i+1] != 'u' && s[i+1] != 'U')) { ++i; continue; }
+        const size_t need = (s[i+1] == 'u') ? 4 : 8;
+        if (i + 2 + need > s.size()) break;
+        uint32_t cp = 0;
+        bool valid = true;
+        for (size_t k = 0; k < need; ++k) {
+            char c = s[i + 2 + k];
+            if (!isxdigit(static_cast<unsigned char>(c))) { valid = false; break; }
+            cp = (cp << 4) + hexVal(c);
+        }
+        if (!valid) { ++i; continue; }
+        const std::string spelled = s.substr(i, 2 + need);
+        if (ucnDisallowedCodePoint(cp)) {
+            diagnostics.push_back(Diagnostic{
+                .message = "universal character name '" + spelled + "' names a disallowed code point (6.4.3p2)",
+                .severity = Diagnostic::Severity::Error, .span = tok.span});
+        } else if (!ucnAllowedInIdentifier(cp)) {
+            diagnostics.push_back(Diagnostic{
+                .message = "universal character name '" + spelled + "' designates a character not allowed in an identifier (6.4.2.1p3)",
+                .severity = Diagnostic::Severity::Error, .span = tok.span});
+        } else if (i == 0 && ucnDisallowedInitial(cp)) {
+            diagnostics.push_back(Diagnostic{
+                .message = "universal character name '" + spelled + "' designates a character not allowed as the initial character of an identifier (6.4.2.1p3)",
+                .severity = Diagnostic::Severity::Error, .span = tok.span});
+        }
+        i += 2 + need;
+    }
+}
+
 // Normalize a literal token: decode escape sequences and UCNs inside string literal tokens.
 // Keeps prefix and surrounding quotes, but replaces inner content with decoded bytes
 // encoded as UTF-8 for execution character set. Emits diagnostics on malformed escapes.
@@ -1957,6 +2036,10 @@ void Preprocessor::normalizeLiteralToken(PPToken& tok) {
             }
             if (consumed != need) {
                 diagnostics.push_back(Diagnostic{.message = "truncated Unicode escape", .severity = Diagnostic::Severity::Error, .span = tok.span});
+            } else if (ucnDisallowedCodePoint(val)) {
+                // 6.4.3p2 applies to UCNs in literals too: a UCN naming
+                // 0041 is a constraint violation, not a spelling of 'A'.
+                diagnostics.push_back(Diagnostic{.message = "universal character name names a disallowed code point (6.4.3p2)", .severity = Diagnostic::Severity::Error, .span = tok.span});
             }
             // replace surrogates and out-of-range
             if (val >= 0xD800 && val <= 0xDFFF) val = 0xFFFD;
@@ -2036,6 +2119,7 @@ static bool extractLiteralInnerAndQuote(const std::string &lex, std::string &out
 void Preprocessor::pushTokenBackWithConcat(const PPToken& tok) {
     // Fast path: non-string literals just append
     if (tok.kind != PPTokenKind::StringLiteral) {
+        if (tok.kind == PPTokenKind::Identifier) checkIdentifierUCNs(tok);
         outBuffer.push_back(tok);
         return;
     }
@@ -2094,7 +2178,11 @@ void Preprocessor::pushTokenBackWithConcat(const PPToken& tok) {
 
 void Preprocessor::pushTokenFrontWithConcat(const PPToken& tok) {
     // Only attempt special Phase-6 behavior for string literals; otherwise push normally.
-    if (tok.kind != PPTokenKind::StringLiteral) { outBuffer.push_front(tok); return; }
+    if (tok.kind != PPTokenKind::StringLiteral) {
+        if (tok.kind == PPTokenKind::Identifier) checkIdentifierUCNs(tok);
+        outBuffer.push_front(tok);
+        return;
+    }
 
     // If there's an existing front literal (skipping whitespace), try to merge with it first.
     size_t j = 0;

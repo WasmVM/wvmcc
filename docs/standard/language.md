@@ -284,7 +284,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 |---|---|---|---|---|---|---|
 | `LANG-6.4.2-01` | 6.4.2.1p1,p2 | Identifier formation (nondigit + digits, leading `_`, case-sensitive) | Positive | supported | unit-xref | `lexer_identifier_test`, `pp_tokenizer_identifier_test` |
 | `LANG-6.4.2-02` | 6.4.2.1p3 | UCNs (`\u`,`\U`) in identifiers within the D.1 allowed ranges | Positive | supported | unit-xref | `pp_tokenizer_identifier_test` |
-| `LANG-6.4.2-03` | 6.4.2.1p3 | A UCN designating a disallowed (D.2 / initial) character is rejected | Negative | partial | compile-fail | **unit gap — no test** |
+| `LANG-6.4.2-03` | 6.4.2.1p3 | A UCN designating a disallowed (D.2 / initial) character is rejected | Negative | supported | compile-fail | `std-lang-6.4.2-03`: \u0040 (not in D.1) and initial \u0300 (D.2) rejected (#100) |
 | `LANG-6.4.2-04` | 6.4.2.1p4 | A pp-token convertible to keyword-or-identifier becomes the keyword | Positive | supported | unit-xref | `lexer_keyword_test` |
 | `LANG-6.4.2-05` | 6.4.2.1p5,p6 | Number of significant initial characters is implementation-defined | B-impl | supported | none | `docs/spec.md`/wvmcc: no limit (all significant) |
 | `LANG-6.4.2-06` | 6.4.2.1p6 | Identifiers differing only in non-significant characters is undefined | B-undef | by-design | none | all characters significant → N/A |
@@ -296,7 +296,7 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | ID | Spec § | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|
 | `LANG-6.4.3-01` | 6.4.3p1,p4 | `\u` (4 hex) and `\U` (8 hex) name characters by short identifier | Positive | supported | unit-xref | `pp_tokenizer_identifier_test`, `pp_normalize_test` |
-| `LANG-6.4.3-02` | 6.4.3p2 | A UCN naming a disallowed character (`< 00A0` except `$ @ \``, or `D800–DFFF`) is rejected | Negative | partial | compile-fail | **unit gap — no test** |
+| `LANG-6.4.3-02` | 6.4.3p2 | A UCN naming a disallowed character (`< 00A0` except `$ @ \``, or `D800–DFFF`) is rejected | Negative | supported | compile-fail | `std-lang-6.4.3-02`: \u0041 and \uD800 rejected, in identifiers and literals (#101) |
 
 ### 6.4.4 Constants
 
