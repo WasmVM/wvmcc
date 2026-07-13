@@ -55,8 +55,12 @@ struct PPToken {
 class SourceBuffer {
 public:
     explicit SourceBuffer(std::istream& in);
-    bool next_char(char& outCh);
-    const SourcePos& position() const { return pos; }
+    bool next_char(char& outCh, SourcePos& outPos);
+    // Physical source position of the next unconsumed character. Output
+    // characters carry the raw position they were produced from, so positions
+    // stay correct across collapsed constructs (block comments, line splices,
+    // trigraphs) that emit fewer characters than they consume.
+    SourcePos position() const { return ring.empty() ? pos : ring.front().second; }
     void reset();
     
     // Ring-buffer based lookahead API
@@ -78,15 +82,17 @@ private:
     bool esc{false};
     std::size_t rawIdx{0};
     bool lastOutputWasWhitespace{false};
-    std::string charBuf;
-    std::deque<char> ring;
+    std::deque<std::pair<char, SourcePos>> charBuf;
+    std::deque<std::pair<char, SourcePos>> ring;
     bool pendingSpace{false};
-    SourcePos pos{0,1,1,0};
+    SourcePos pos{0,1,1,0};    // position just past the last consumed character
+    SourcePos rawPos{0,1,1,0}; // physical position of inputAccum[rawIdx]
 
     char trigraph_at(std::size_t idx) const;
     void fill_buffer();
     void ensure_input(std::size_t upto);
-    void account_consumed(char ch);
+    void account_consumed(char ch, const SourcePos& at);
+    void advance_raw(std::size_t n);
     
     // Helper methods for fill_buffer complexity reduction
     bool handlePendingSpace();

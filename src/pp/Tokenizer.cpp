@@ -24,9 +24,7 @@ static size_t match_punct(const std::string& s, size_t i) {
     return 0;
 }
 
-SourceBuffer::SourceBuffer(std::istream& in) : inStream(in) {
-    charBuf.reserve(64);
-}
+SourceBuffer::SourceBuffer(std::istream& in) : inStream(in) {}
 
 char SourceBuffer::trigraph_at(std::size_t idx) const {
     if (idx + 2 < inputAccum.size() && inputAccum[idx] == '?' && inputAccum[idx+1] == '?') {
@@ -49,7 +47,7 @@ bool SourceBuffer::handlePendingSpace() {
     if (!pendingSpace) return false;
     pendingSpace = false;
     if (!lastOutputWasWhitespace) {
-        charBuf.push_back(' ');
+        charBuf.push_back({' ', rawPos});
         lastOutputWasWhitespace = true;
         // Pushed a real char — caller may break and return it.
         return true;
@@ -63,13 +61,14 @@ bool SourceBuffer::handlePendingSpace() {
 bool SourceBuffer::handleCarriageReturn() {
     char c = inputAccum[rawIdx];
     if (c != '\r') return false;
-    
+
+    SourcePos at = rawPos;
     if (rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '\n') {
-        rawIdx += 2;
+        advance_raw(2);
     } else {
-        ++rawIdx;
+        advance_raw(1);
     }
-    charBuf.push_back('\n');
+    charBuf.push_back({'\n', at});
     lastOutputWasWhitespace = true;
     return true;
 }
@@ -80,12 +79,12 @@ bool SourceBuffer::tryProcessComment(char c) {
     char n = inputAccum[rawIdx+1];
     if (n == '*') {
         st = State::InBlockComment;
-        rawIdx += 2;
+        advance_raw(2);
         return true;
     }
     if (n == '/') {
         st = State::InLineComment;
-        rawIdx += 2;
+        advance_raw(2);
         return true;
     }
     return false;
@@ -95,14 +94,14 @@ bool SourceBuffer::tryProcessLineSplicing(char c) {
     if (c != '\\' || rawIdx + 1 >= inputAccum.size()) return false;
     
     if (inputAccum[rawIdx+1] == '\n') {
-        rawIdx += 2;
+        advance_raw(2);
         return true;
     }
     if (inputAccum[rawIdx+1] == '\r') {
         if (rawIdx + 2 < inputAccum.size() && inputAccum[rawIdx+2] == '\n') {
-            rawIdx += 3;
+            advance_raw(3);
         } else {
-            rawIdx += 2;
+            advance_raw(2);
         }
         return true;
     }
@@ -113,47 +112,48 @@ bool SourceBuffer::processNormalState(char c) {
     // trigraphs
     char tr = trigraph_at(rawIdx);
     if (tr) {
-        rawIdx += 3;
-        charBuf.push_back(tr);
+        SourcePos at = rawPos;
+        advance_raw(3);
+        charBuf.push_back({tr, at});
         return true;
     }
-    
+
     // enter string/char literals
     if (c == '"') {
-        charBuf.push_back(c);
+        charBuf.push_back({c, rawPos});
         lastOutputWasWhitespace = false;
-        ++rawIdx;
+        advance_raw(1);
         st = State::InString;
         esc = false;
         return true;
     }
     if (c == '\'') {
-        charBuf.push_back(c);
+        charBuf.push_back({c, rawPos});
         lastOutputWasWhitespace = false;
-        ++rawIdx;
+        advance_raw(1);
         st = State::InChar;
         esc = false;
         return true;
     }
-    
+
     // comments
     if (tryProcessComment(c)) return false;
-    
+
     // line splicing
     if (tryProcessLineSplicing(c)) return false;
-    
+
     // normal emission
-    charBuf.push_back(c);
+    charBuf.push_back({c, rawPos});
     lastOutputWasWhitespace = (c == ' ' || c == '\t' || c == '\v' || c == '\f');
-    ++rawIdx;
+    advance_raw(1);
     return true;
 }
 
 bool SourceBuffer::processStringState(char c) {
-    charBuf.push_back(c);
+    charBuf.push_back({c, rawPos});
     lastOutputWasWhitespace = false;
-    ++rawIdx;
-    
+    advance_raw(1);
+
     if (!esc) {
         if (c == '\\') {
             esc = true;
@@ -167,10 +167,10 @@ bool SourceBuffer::processStringState(char c) {
 }
 
 bool SourceBuffer::processCharState(char c) {
-    charBuf.push_back(c);
+    charBuf.push_back({c, rawPos});
     lastOutputWasWhitespace = false;
-    ++rawIdx;
-    
+    advance_raw(1);
+
     if (!esc) {
         if (c == '\\') {
             esc = true;
@@ -185,7 +185,7 @@ bool SourceBuffer::processCharState(char c) {
 
 bool SourceBuffer::processBlockCommentState(char c) {
     if (c == '*' && rawIdx + 1 < inputAccum.size() && inputAccum[rawIdx+1] == '/') {
-        rawIdx += 2;
+        advance_raw(2);
         st = State::Normal;
         pendingSpace = true;
         // Do NOT break here: returning true would leave fill_buffer with an
@@ -198,19 +198,20 @@ bool SourceBuffer::processBlockCommentState(char c) {
         // fill_buffer call, leaving charBuf non-empty.
         return false;
     }
-    ++rawIdx;
+    advance_raw(1);
     return false; // continue outer loop
 }
 
 bool SourceBuffer::processLineCommentState(char c) {
     if (c == '\n') {
-        ++rawIdx;
-        charBuf.push_back('\n');
+        SourcePos at = rawPos;
+        advance_raw(1);
+        charBuf.push_back({'\n', at});
         lastOutputWasWhitespace = true;
         st = State::Normal;
         return true;
     }
-    ++rawIdx;
+    advance_raw(1);
     return false; // continue outer loop
 }
 
@@ -241,11 +242,12 @@ void SourceBuffer::fill_buffer() {
     }
 }
 
-bool SourceBuffer::next_char(char& outCh) {
+bool SourceBuffer::next_char(char& outCh, SourcePos& outPos) {
     if (charBuf.empty()) fill_buffer();
     if (charBuf.empty()) return false;
-    outCh = charBuf.front();
-    charBuf.erase(charBuf.begin());
+    outCh = charBuf.front().first;
+    outPos = charBuf.front().second;
+    charBuf.pop_front();
     return true;
 }
 
@@ -272,20 +274,22 @@ void SourceBuffer::reset() {
     ring.clear();
     pendingSpace = false;
     pos = SourcePos{0, 1, 1, 0};
+    rawPos = SourcePos{0, 1, 1, 0};
 }
 
 // Ring buffer lookahead API implementations
 void SourceBuffer::ensure(std::size_t k) {
     while (ring.size() < k) {
         char ch;
-        if (!next_char(ch)) break;
-        ring.push_back(ch);
+        SourcePos p;
+        if (!next_char(ch, p)) break;
+        ring.push_back({ch, p});
     }
 }
 
 std::optional<char> SourceBuffer::peek(std::size_t i) {
     ensure(i + 1);
-    if (i < ring.size()) return ring[i];
+    if (i < ring.size()) return ring[i].first;
     return std::nullopt;
 }
 
@@ -293,9 +297,9 @@ bool SourceBuffer::consume(std::size_t n) {
     ensure(n);
     if (ring.size() < n) return false;
     for (std::size_t i = 0; i < n; ++i) {
-        char ch = ring.front();
+        auto [ch, at] = ring.front();
         ring.pop_front();
-        account_consumed(ch);
+        account_consumed(ch, at);
     }
     return true;
 }
@@ -303,16 +307,32 @@ bool SourceBuffer::consume(std::size_t n) {
 std::optional<char> SourceBuffer::get() {
     ensure(1);
     if (ring.empty()) return std::nullopt;
-    char c = ring.front();
+    auto [c, at] = ring.front();
     ring.pop_front();
-    account_consumed(c);
+    account_consumed(c, at);
     return c;
 }
 
-void SourceBuffer::account_consumed(char ch) {
+void SourceBuffer::account_consumed(char ch, const SourcePos& at) {
+    pos = at;
     if (ch == '\n') { ++pos.line; pos.column = 1; }
     else { ++pos.column; }
     ++pos.offset;
+}
+
+// Advance rawIdx by n input characters, tracking the physical line/column so
+// every emitted character can be stamped with its true source position even
+// when the construct it came from (comment, splice, trigraph, CRLF) is
+// collapsed or dropped from the output stream.
+void SourceBuffer::advance_raw(std::size_t n) {
+    for (std::size_t i = 0; i < n && rawIdx < inputAccum.size(); ++i, ++rawIdx) {
+        char ch = inputAccum[rawIdx];
+        bool loneCR = ch == '\r' &&
+                      (rawIdx + 1 >= inputAccum.size() || inputAccum[rawIdx + 1] != '\n');
+        if (ch == '\n' || loneCR) { ++rawPos.line; rawPos.column = 1; }
+        else { ++rawPos.column; }
+        ++rawPos.offset;
+    }
 }
 
 bool Tokenizer::is_digit(char c) {
