@@ -33,10 +33,13 @@ bool Preprocessor::open(const std::string& inputPath) {
 std::optional<PPToken> Preprocessor::peek() {
     ensureBuffer();
     if (outBuffer.empty()) return std::nullopt;
-    // Return a normalized copy so callers always see decoded literals
-    PPToken copy = outBuffer.front();
-    normalizeLiteralToken(copy);
-    return copy;
+    // Normalize the buffered token in place so callers always see decoded
+    // literals. Normalization is idempotent (guarded by the decoded metadata),
+    // so a later peek() or next() on the same token does not decode it again —
+    // decoding twice would corrupt escaped lexemes and re-emit any range
+    // diagnostics a malformed literal produced.
+    normalizeLiteralToken(outBuffer.front());
+    return outBuffer.front();
 }
 
 std::optional<PPToken> Preprocessor::next() {
@@ -1930,6 +1933,11 @@ void Preprocessor::normalizeLiteralToken(PPToken& tok) {
     // their escaped representation and must not be decoded.
     if (!(tok.kind == PPTokenKind::StringLiteral || tok.kind == PPTokenKind::CharConst)) return;
     if (tok.kind == PPTokenKind::StringLiteral && tok.isPainted("__STRINGIFIED__")) return;
+    // Already normalized: the decoded metadata is only ever set by a completed
+    // normalization (or by paths that produce pre-decoded tokens, e.g. phase-6
+    // concatenation and stringification). Re-running would decode the already
+    // decoded lexeme a second time and duplicate escape-range diagnostics.
+    if (tok.decodedString.has_value() || tok.decodedCharValue.has_value()) return;
     const std::string &orig = tok.lexeme;
     if (orig.empty()) return;
 

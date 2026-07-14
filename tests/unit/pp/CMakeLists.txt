@@ -43,6 +43,9 @@ add_test(NAME pp-include COMMAND wvmcc-pp-include-test)
 add_executable(wvmcc-pp-normalize-test pp_normalize_test.cpp ${PP_SRCS})
 add_test(NAME pp-normalize COMMAND wvmcc-pp-normalize-test)
 
+add_executable(wvmcc-pp-comment-span-test pp_comment_span_test.cpp ${PP_SRCS})
+add_test(NAME pp-comment-span COMMAND wvmcc-pp-comment-span-test)
+
 add_executable(wvmcc-pp-concat-test pp_concat_tests.cpp ${PP_SRCS})
 add_test(NAME pp-concat COMMAND wvmcc-pp-concat-test)
 
