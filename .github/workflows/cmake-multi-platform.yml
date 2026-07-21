@@ -2,100 +2,93 @@ name: CMake on multiple platforms
 
 on:
   push:
+    branches: [ "master" ]
   pull_request:
     branches: [ "master" ]
+
+# Cancel an in-progress run when a newer commit is pushed to the same ref,
+# so superseded runs don't pile up.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ${{ matrix.os }}
     name: Build & Test
-    concurrency:
-      group: cmake-build-${{ github.ref }}-${{ matrix.os }}-${{ matrix.build_type }}
-      cancel-in-progress: true
+    timeout-minutes: 30
+
     strategy:
       fail-fast: false
-
       matrix:
-        os: [ubuntu-latest, macos-14]
-        build_type: [Release]
-        c_compiler: [gcc, clang]
         include:
           - os: ubuntu-latest
             c_compiler: gcc
             cpp_compiler: g++
-            parallel: 6
+            build_type: Release
           - os: ubuntu-latest
             c_compiler: clang
             cpp_compiler: clang++
-            parallel: 6
-          - os: macos-14
+            build_type: Release
+          - os: macos-latest
             c_compiler: clang
             cpp_compiler: clang++
-            parallel: 4
-        exclude:
-          - os: macos-14
-            c_compiler: gcc
+            build_type: Release
 
     steps:
     - uses: actions/checkout@v4
-      with:
-        fetch-depth: 0
 
-    - name: Cache ccache
-      uses: actions/cache@v4
-      with:
-        path: |
-          ~/.ccache
-        key: ${{ runner.os }}-ccache-${{ matrix.cpp_compiler }}-${{ matrix.c_compiler }}-${{ hashFiles('**/CMakeLists.txt') }}
-
-    - name: Cache CMake build dir
-      uses: actions/cache@v4
-      with:
-        path: ${{ github.workspace }}/build
-        key: ${{ runner.os }}-cmake-build-${{ matrix.build_type }}-${{ hashFiles('**/CMakeLists.txt') }}
-
-    - name: Install minimal build tools
+    - name: Install build tools
       run: |
         if [[ "${{ runner.os }}" == "Linux" ]]; then
           sudo apt-get update
-          sudo apt-get install -y ccache cmake ninja-build build-essential
+          sudo apt-get install -y cmake ninja-build build-essential
         elif [[ "${{ runner.os }}" == "macOS" ]]; then
-          brew update
-          brew install ccache cmake ninja || true
+          brew install ninja || true
         fi
 
     - name: Set reusable strings
       id: strings
       shell: bash
-      run: |
-        echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
+      run: echo "build-output-dir=${{ github.workspace }}/build" >> "$GITHUB_OUTPUT"
 
     - name: Install WasmVM
       uses: WasmVM/install-action@main
       with:
-        token: ${{secrets.GITHUB_TOKEN}}
+        token: ${{ secrets.GITHUB_TOKEN }}
         dev: true
 
     - name: Configure CMake
       run: >
         cmake -B ${{ steps.strings.outputs.build-output-dir }}
+        -G Ninja
         -DCMAKE_CXX_COMPILER=${{ matrix.cpp_compiler }}
         -DCMAKE_C_COMPILER=${{ matrix.c_compiler }}
         -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
-        -DCMAKE_C_COMPILER_LAUNCHER=ccache
-        -DCMAKE_CXX_COMPILER_LAUNCHER=ccache
         -S ${{ github.workspace }}
 
     - name: Build
-      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} -j ${{matrix.parallel}}
+      run: cmake --build ${{ steps.strings.outputs.build-output-dir }} --config ${{ matrix.build_type }} --parallel
 
-    - name: Test
+    # Gating policy mirrors .gitlab-ci.yml: host/unit tests gate the build;
+    # the C17 conformance scaffold (label `standard`) gates only on its
+    # `status-supported` rows. Deferred/partial rows are intentionally
+    # incomplete features and are exercised as informational on GitLab
+    # (`test-standard-partial`, allow_failure) — they do not gate here either.
+    - name: Test (host/unit)
       working-directory: ${{ steps.strings.outputs.build-output-dir }}
-      run: ctest --build-config ${{ matrix.build_type }} --output-on-failure
+      run: ctest --build-config ${{ matrix.build_type }} --label-exclude standard --output-on-failure --timeout 60
+
+    - name: Test (C17 conformance, supported rows)
+      working-directory: ${{ steps.strings.outputs.build-output-dir }}
+      run: ctest --build-config ${{ matrix.build_type }} -L status-supported --output-on-failure --timeout 60
 
     - name: Upload build/test artifacts on failure
       if: failure()
       uses: actions/upload-artifact@v4
       with:
-        name: build-artifacts-${{ matrix.os }}-${{ matrix.build_type }}
-        path: ${{ steps.strings.outputs.build-output-dir }}
+        name: build-artifacts-${{ matrix.os }}-${{ matrix.c_compiler }}-${{ matrix.build_type }}
+        path: |
+          ${{ steps.strings.outputs.build-output-dir }}/Testing
+          ${{ steps.strings.outputs.build-output-dir }}/**/*.log
+        if-no-files-found: ignore

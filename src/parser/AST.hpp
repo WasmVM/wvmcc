@@ -202,6 +202,18 @@ struct TypeNode : Node {
     // For function type, returnType is represented by nesting: function -> pointee? use element/pointee as appropriate
 };
 
+// Defined before Declarator: Declarator::FunctionInfo holds
+// std::vector<Parameter> by value, and Declarator's implicitly-defined
+// (virtual, via Node) destructor is required at the end of the class
+// definition — Parameter must be complete there (clang rejects the
+// forward-declared form; see the GitHub CI clang builds).
+struct Parameter {
+    DeclarationSpecifiers specifiers;          // full type specifiers for this param
+    std::optional<std::string> typeSpec;       // legacy string hint (may be empty)
+    DeclaratorPtr declarator;
+    std::optional<ExprPtr> defaultValue;
+};
+
 // Declarators (identifier, pointer, array, function)
 struct Declarator : Node {
     struct Id { std::string name; } id;
@@ -228,13 +240,6 @@ struct Declarator : Node {
         bool isVariadic{false};        // trailing `...` present
         std::vector<std::string> identifierList; // identifier-list (old K&R style)
     } function;
-};
-
-struct Parameter {
-    DeclarationSpecifiers specifiers;          // full type specifiers for this param
-    std::optional<std::string> typeSpec;       // legacy string hint (may be empty)
-    DeclaratorPtr declarator;
-    std::optional<ExprPtr> defaultValue;
 };
 
 // GCC-style attribute specifier: __attribute__((name, name(args...), ...))
