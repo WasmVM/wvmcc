@@ -79,12 +79,43 @@ A self-contained pipeline, with no third-party assembler/linker:
   A minimal freestanding C library (`runtime/`) built by wvmcc itself and bundled into `libc.a`,
   installed under a sysroot.
 
+管線總覽（含架構圖）見 [`docs/lowering-pipeline.md`](docs/lowering-pipeline.md)，
 資料模型與 ABI 見 [`docs/spec.md`](docs/spec.md)，降階設計見
 [`docs/lowering-plan.md`](docs/lowering-plan.md)，程式碼產生實作見 [`docs/codegen.md`](docs/codegen.md)。
 
-See [`docs/spec.md`](docs/spec.md) for the data model and ABI,
+See [`docs/lowering-pipeline.md`](docs/lowering-pipeline.md) for a pipeline overview with an
+architecture diagram, [`docs/spec.md`](docs/spec.md) for the data model and ABI,
 [`docs/lowering-plan.md`](docs/lowering-plan.md) for the lowering design, and
 [`docs/codegen.md`](docs/codegen.md) for the code-generation implementation.
+
+---
+
+## 支援範圍與限制 Supported subset & limitations
+
+C17 子集依里程碑分階段實作 The C17 subset is implemented in milestone phases:
+
+| 階段 Phase | 內容 Scope |
+|---|---|
+| **M0** | 核心運算式與陳述式、純量型別、指標、陣列、函式、struct/union/enum、限定詞、一般算術轉換、控制流程、函式原型。/ Core expressions & statements, scalar types, pointers, arrays, functions, struct/union/enum, qualifiers, usual arithmetic conversions, control flow, prototypes. |
+| **M1** | 宣告與初始化器（純量／聚合）、複合字面值、指定子、彈性陣列成員、位元欄位。/ Declarations & initializers (scalar/aggregate), compound literals, designators, flexible array members, bitfields. |
+| **M2** | 可變參數、`_Static_assert`、`_Alignof`、`_Noreturn`、`_Generic`、最小化 libc（`libc.a`）。/ Variadics, `_Static_assert`, `_Alignof`, `_Noreturn`, `_Generic`, minimal libc (`libc.a`). |
+| **Phase 5** | 未實作路徑的完整診斷、BSS 零初始化、整合測試。/ Diagnostics on unimplemented paths, BSS zero-init, integration testing. |
+
+### 已知限制 Known limitations
+
+- **暫不支援 Not yet supported：** VLA（可變長度陣列 variable-length arrays）、`_Complex` /
+  `<complex.h>`（回報 `__STDC_NO_COMPLEX__`）、原子操作 atomics（`_Atomic`、`<stdatomic.h>`）、
+  執行緒 threads（`<threads.h>`）、`setjmp`/`longjmp`。
+- **`long double` 別名為 `double` `long double` aliases `double`**（binary64）；不提供擴充精度
+  no extended precision.
+- **`char` 預設有號 signed by default**；`-funsigned-char` 尚未實作 not yet implemented.
+- **未定義行為不設陷阱 UB does not trap**（有號溢位、除以零、無效位移／signed overflow, divide-by-zero,
+  invalid shifts）——依 C17 為未定義，預設不產生陷阱。
+- **libc 為最小化子集 libc is a minimal subset**；並非完整的 hosted 標準函式庫 not a complete
+  hosted standard library.
+
+詳盡的 C17 一致性狀態記錄於 [`docs/standard/`](docs/standard/README.md)。
+Detailed C17 conformance status is tracked in [`docs/standard/`](docs/standard/README.md).
 
 ---
 
