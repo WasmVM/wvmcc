@@ -1,7 +1,7 @@
 # Generated — clause 6.5 (Expressions). Tests assert ISO C17; partial/unsupported
 # rows EXPECTED TO FAIL (conformance signal). Regenerated; do not hand-edit.
 
-add_standard_compile_fail(lang-6.5.1.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.1.1_generic_two_default.c deferred)
+add_standard_compile_fail(lang-6.5.1.1-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.1.1_generic_two_default.c supported)
 add_standard_compile_fail(lang-6.5.10-02 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.10_and_non_integer.c supported)
 add_standard_run_test(lang-6.5.10-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.10_bitwise_and.c supported)
 add_standard_run_test(lang-6.5.11-01 ${CMAKE_CURRENT_SOURCE_DIR}/language/6.5_expressions/6.5.11_bitwise_exclusive_or.c supported)

@@ -1,37 +1,40 @@
 # Triage — failing `status-supported` standard tests
 
-Snapshot **2026-06-15**, after merging the #81 ICE fixes. Every test under
-`tests/standard/` asserts ISO C17; a failing `status-supported` test is a genuine
-wvmcc conformance gap (not a test bug). This file maps the failure **classes** to
-the issues that track them; the issues are the live to-do list.
+Snapshot **2026-07-21**. Every test under `tests/standard/` asserts ISO C17; a
+failing `status-supported` test is a genuine wvmcc conformance gap (not a test
+bug). The 2026-06-15 backlog below is **cleared** — every failure class was
+resolved and its tracking issue closed; the suite's supported rows are 100%
+green. This file now serves as the historical map of that backlog and the
+dashboard-regeneration recipe.
 
 ## Current dashboard (`ctest -R '^std-'`)
 
 | Label | Pass / Total | Notes |
 |---|---|---|
-| `status-supported` | **218 / 367** | "should pass today" — the 149 failures are the backlog below |
-| `status-partial` | 28 / 121 | known-limited areas |
-| `status-deferred` | 2 / 11 | not yet implemented |
-| **Total** | **248 / 499 (50%)** | true C17 conformance level |
+| `status-supported` | **520 / 520** | "should pass today" — all green |
+| `status-partial` | 1 / 1 | `goto` into nested scopes (switch-body entry still rejected) |
+| `status-deferred` | 0 / 2 | expected to fail — `_Thread_local` constraints (6.7.1p3), static/thread VLA constraints (6.7.6.2p2) |
+| `status-by-design` | 3 / 3 | assert wvmcc's documented divergence |
+| **Total** | **524 / 526** | the 2 failures are the deferred-feature conformance signal |
 
-Regenerate counts with: `cd build-Debug && ctest -R '^std-' -L status-supported`.
+Regenerate counts with: `cd build-Debug && ctest -L standard`.
 
-## Failure classes → tracking issues
+## Failure classes → tracking issues (2026-06-15 backlog, all resolved)
 
 | Class | Root cause | Issue | State |
 |---|---|---|---|
-| A | `_Static_assert` rejects a valid integer-constant-expression | **#81** | merged (symbol-free forms done; `sizeof` of a variable/member and complete-struct sizes remain) |
-| B | constraint violation accepted (no diagnostic) | **#83** | partial — second batch still accepted |
-| C | compiles & runs but returns the WRONG value (conversions, pointer arithmetic) | **#86** | open — largest bucket (~48) |
-| D | codegen emits a module WasmVM rejects (value-type-width) | **#87** | open (~11) |
-| E | parser rejects valid C17 syntax (nested compound statements; `sizeof`/cast of pointer type-names) | **#88** | open (~28) |
-| F | libc function undeclared / unimplemented | — | reconciled to `status-partial` (M2-Libc) |
-| G | freestanding header missing (`float.h`, `inttypes.h`, `iso646.h`, `locale.h`, `signal.h`) | *unfiled* | ~8 static-assert tests blocked on `include file not found` |
-| H | backward / non-local `goto` unsupported | #93/#109 | resolved — dispatch-loop lowering + entry-state descent; only jump into a *switch body* remains rejected |
-| I | static-storage initializer constant-folding too strict | *unfiled* | 2 |
-| J | codegen feature unimplemented (unary/binop/conversion) | *unfiled* | 3 |
-| K | tentative definitions rejected as "multiple external definitions" (6.9.2); cross-TU decl-merge | **#89** / #84 | open |
-| L | const-expr in enum / errno-macro form | — | mostly resolved by #81 |
+| A | `_Static_assert` rejects a valid integer-constant-expression | **#81** | closed |
+| B | constraint violation accepted (no diagnostic) | **#83** | closed |
+| C | compiles & runs but returns the WRONG value (conversions, pointer arithmetic) | **#86** | closed |
+| D | codegen emits a module WasmVM rejects (value-type-width) | **#87** | closed |
+| E | parser rejects valid C17 syntax (nested compound statements; `sizeof`/cast of pointer type-names) | **#88** | closed |
+| F | libc function undeclared / unimplemented | — | resolved by the M2-Libc batches |
+| G | freestanding header missing (`float.h`, `inttypes.h`, `iso646.h`, `locale.h`, `signal.h`) | — | headers landed in `runtime/include` |
+| H | backward / non-local `goto` unsupported | #93/#109 | closed — dispatch-loop lowering + entry-state descent; only jump into a *switch body* remains rejected (`status-partial`) |
+| I | static-storage initializer constant-folding too strict | — | resolved |
+| J | codegen feature unimplemented (unary/binop/conversion) | — | resolved |
+| K | tentative definitions rejected as "multiple external definitions" (6.9.2); cross-TU decl-merge | **#89** / #84 | closed |
+| L | const-expr in enum / errno-macro form | — | resolved by #81 |
 
 ## Method
 

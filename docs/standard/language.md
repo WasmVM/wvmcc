@@ -51,10 +51,10 @@ and `#error`/`_Static_assert` errors), so `compile-fail` rows are runnable.
 | `LANG-5.1.2.1-01` | 5.1.2.1p1 | Freestanding startup function name/type is implementation-defined | B-impl | supported | exit | `docs/spec.md`: entry configurable; crt0 start-wrapper calls `main`; WasmVM invokes the module start function |
 | `LANG-5.1.2.1-02` | 5.1.2.1p2 | Effect of program termination in a freestanding env is implementation-defined | B-impl | supported | exit | `docs/spec.md`: returns to WasmVM; `sys_proc.exit` sets the exit code |
 | `LANG-5.1.2.2.1-01` | 5.1.2.2.1p1 | `int main(void)` form is accepted and run | Positive | supported | exit | |
-| `LANG-5.1.2.2.1-02` | 5.1.2.2.1p1 | `int main(int argc, char *argv[])` form is accepted | Positive | supported | exit | argv via WasmVM `sys_proc.argc/argv`; ABI partial |
-| `LANG-5.1.2.2.1-03` | 5.1.2.2.1p2 | `argc` nonnegative, `argv[argc]` null, argv strings modifiable | Positive | deferred | exit | hosted arg-passing not fully wired |
+| `LANG-5.1.2.2.1-02` | 5.1.2.2.1p1 | `int main(int argc, char *argv[])` form is accepted | Positive | supported | exit | argv via WasmVM `sys_proc.argc/argv`, routed through mem[1] (#98) |
+| `LANG-5.1.2.2.1-03` | 5.1.2.2.1p2 | `argc` nonnegative, `argv[argc]` null, argv strings modifiable | Positive | supported | exit | arg-passing wired via mem[1] (#98); `argv[argc]` null-terminated by crt0 |
 | `LANG-5.1.2.2.1-04` | 5.1.2.2.1p1 | Other (implementation-defined) startup forms | B-impl | by-design | none | `docs/spec.md`: only `main`/`_start` entry |
-| `LANG-5.1.2.2.1-05` | 5.1.2.2.1p2 | Values of `argv[0..argc-1]` (program name) are implementation-defined | B-impl | deferred | none | WasmVM `argv[0]` = module path |
+| `LANG-5.1.2.2.1-05` | 5.1.2.2.1p2 | Values of `argv[0..argc-1]` (program name) are implementation-defined | B-impl | supported | none | WasmVM `argv[0]` = module path (observed) |
 | `LANG-5.1.2.2.3-01` | 5.1.2.2.3p1 | `return n;` from `main` is equivalent to `exit(n)` — exit code is `n` | Positive | supported | exit | crt0 wraps `main`→`exit`; observed via WasmVM exit code |
 | `LANG-5.1.2.2.3-02` | 5.1.2.2.3p1 | Reaching the closing `}` of `main` returns 0 | Positive | supported | exit | crt0 default 0 |
 | `LANG-5.1.2.2.3-03` | 5.1.2.2.3p1 | `main` whose return type is not compatible with `int` → termination status unspecified | B-unspec | by-design | none | wvmcc requires `int main` |
@@ -378,8 +378,8 @@ cite the covering `tests/unit/` test, and gaps where no unit test exists are fla
 | `LANG-6.5.1-02` | 6.5.1p3,p4 | A constant / string literal is a primary expression | Positive | supported | exit | |
 | `LANG-6.5.1-03` | 6.5.1p5 | A parenthesized expression preserves type/value/lvalue-ness | Positive | supported | exit | |
 | `LANG-6.5.1-04` | 6.5.1p2 | An undeclared identifier is rejected | Negative | supported | compile-fail | |
-| `LANG-6.5.1.1-01` | 6.5.1.1p3 | `_Generic` selects the association compatible with the controlling expression's type | Positive | deferred | none | `_Generic` not implemented — **unit gap — no test** |
-| `LANG-6.5.1.1-02` | 6.5.1.1p2 | `_Generic` constraints (>1 `default`, ambiguous/duplicate types, no match without `default`) | Negative | deferred | compile-fail | `_Generic` not implemented |
+| `LANG-6.5.1.1-01` | 6.5.1.1p3 | `_Generic` selects the association compatible with the controlling expression's type | Positive | partial | none | `_Generic` implemented (M2; exercised by supported rows, e.g. `LANG-6.5.6-*` ptrdiff check); known defect: the controlling expression is ICE-evaluated in `_Static_assert` context, so `_Generic(ptr->member, …)` is wrongly rejected there — **unit gap — no test** |
+| `LANG-6.5.1.1-02` | 6.5.1.1p2 | `_Generic` constraints (>1 `default`, ambiguous/duplicate types, no match without `default`) | Negative | supported | compile-fail | the >1-`default` sub-case is materialized and rejected; the other constraint sub-cases are untested |
 | `LANG-6.5.1.1-03` | 6.5.1.1p3 | The controlling expression of `_Generic` is not evaluated | Positive | deferred | none | |
 
 ### 6.5.2 Postfix operators
@@ -714,7 +714,7 @@ Layout): `ptrdiff_t`/`size_t`/pointers are 64-bit (`i64`), `int` is 32-bit (`i32
 |---|---|---|---|---|---|---|
 | `LANG-6.7.8-01` | 6.7.8p3 | A `typedef` introduces a synonym (not a new type), usable in declarations | Positive | supported | exit | unit-xref `sema_typedef_declarator_test` |
 | `LANG-6.7.8-02` | 6.7.8p3 | A typedef name shares the ordinary-identifier name space (can be shadowed) | Positive | supported | exit | |
-| `LANG-6.7.8-03` | 6.7.8p2 | A typedef of a variably modified type must have block scope | Negative | deferred | compile-fail | VLAs deferred |
+| `LANG-6.7.8-03` | 6.7.8p2 | A typedef of a variably modified type must have block scope | Negative | supported | compile-fail | rejected today because non-ICE array sizes are rejected wholesale (VLAs deferred) — conformant for this Negative row |
 | `LANG-6.7.8-04` | 6.7.8p3 | A typedef-name object is sized by the underlying type (`typedef long X; X v;` → 8 bytes) | Positive | supported | static-assert | typedef-name sized by its underlying type (e.g. `typedef long X` → 8 bytes, i64); verified |
 
 ### 6.7.9 Initialization
@@ -836,7 +836,7 @@ suite, with confirmed gaps flagged.
 | `LANG-6.10.7-01` | 6.10.7 | A null directive (`#` alone) has no effect | Positive | supported | exit | `std-lang-6.10.7-01`: `#` alone compiles and runs |
 | `LANG-6.10.8-01` | 6.10.8 | Predefined macros `__FILE__ __LINE__ __DATE__ __TIME__ __STDC__ __STDC_VERSION__` | Positive | supported | unit-xref | `pp_macro_test` |
 | `LANG-6.10.8-02` | 6.10.8.1 | `__STDC__ == 1` and `__STDC_VERSION__ == 201710L` (C17) | Positive | supported | static-assert | |
-| `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | partial | static-assert | reflect deferred/by-design features |
+| `LANG-6.10.8-03` | 6.10.8.3 | Conditional-feature macros (`__STDC_NO_ATOMICS__`, `__STDC_NO_COMPLEX__`, `__STDC_NO_THREADS__`, `__STDC_NO_VLA__`) | Positive | supported | static-assert | all four defined `== 1`, matching the deferred features; conformant either way once a feature lands (the macro is then dropped) |
 | `LANG-6.10.8-04` | 6.10.8p2 | Constraint: predefined macros and `__LINE__`/`__FILE__` are not redefinable | Negative | supported | compile-fail | `std-lang-6.10.8-04` (`#define __LINE__`) + `-04-undef` (`#undef __FILE__`): both directives rejected, incl. `defined` (#107) |
 | `LANG-6.10.9-01` | 6.10.9 | The `_Pragma("...")` operator | Positive | supported | unit-xref | destringize + processed as `#pragma`; works from macro expansion (`pp_pragma_operator_test`, #108) |
 
