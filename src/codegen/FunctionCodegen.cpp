@@ -2143,12 +2143,30 @@ void FunctionCodegen::emitMemberAccessExpr(const wvmcc::parser::MemberExpr& expr
     }
 
     if (!needLValue) {
-        if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
-        else emit(typeMap_.makeLoad(fieldType, k.memidx));
-        // Bit-field read: extract the field's bits from the loaded storage unit.
-        if (bitInfo.isBitfield)
-            emitBitfieldExtract(this, bitInfo,
-                                typeMap_.toWasmType(fieldType) == WasmVM::ValueType::i64);
+        // A member of aggregate type does not load in value context: an array
+        // member decays to a pointer to its first element (6.3.2.1p3), and a
+        // nested struct/union yields its own address. Loading here would push
+        // the member's first bytes where its address belongs -- `s.buf` would
+        // evaluate to the first 8 bytes *of* the buffer instead of to it.
+        // Same rule as an array element of aggregate type; see
+        // emitArrayIndexExpr.
+        const bool fieldIsAggregate = fieldType
+            && (fieldType->kind == wvmcc::parser::TypeNode::Kind::Array
+                || fieldType->kind == wvmcc::parser::TypeNode::Kind::Struct
+                || fieldType->kind == wvmcc::parser::TypeNode::Kind::Union);
+        if (fieldIsAggregate) {
+            // Tag the address with the base's memidx so an opaque-pointer
+            // deref dispatches to the right memory. A Dynamic base was reached
+            // through a pointer value that already carries its own tag.
+            if (k != AddrKind::Dynamic) emitApplyTag(k);
+        } else {
+            if (k == AddrKind::Dynamic) emitTaggedLoad(fieldType);
+            else emit(typeMap_.makeLoad(fieldType, k.memidx));
+            // Bit-field read: extract the field's bits from the loaded storage unit.
+            if (bitInfo.isBitfield)
+                emitBitfieldExtract(this, bitInfo,
+                                    typeMap_.toWasmType(fieldType) == WasmVM::ValueType::i64);
+        }
     }
 }
 
