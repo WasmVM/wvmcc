@@ -44,3 +44,15 @@ set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
 set(CPACK_PRODUCTBUILD_IDENTIFIER org.WasmVM.wvmcc)
 
 include(CPack)
+
+# Install rules are assigned to named components (like WasmVM's). This is
+# REQUIRED for productbuild: the componentless path stages files at the root
+# while pkgbuild packs per-component directories, yielding an empty (~1.3 KB)
+# .pkg payload. DEB/TGZ are unaffected — component install is off for them, so
+# those packages stay monolithic.
+cpack_add_component(programs DISPLAY_NAME "Compiler driver"
+  DESCRIPTION "The wvmcc compiler executable"
+)
+cpack_add_component(sysroot DISPLAY_NAME "Sysroot"
+  DESCRIPTION "Freestanding libc headers and libc.a installed under share/wvmcc"
+)

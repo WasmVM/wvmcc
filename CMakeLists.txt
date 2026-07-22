@@ -41,7 +41,7 @@ target_compile_definitions(wvmcc PRIVATE WVMCC_VERSION="${PROJECT_VERSION}")
 # RPATH after install stripping.
 set_target_properties(wvmcc PROPERTIES INSTALL_RPATH "${WASMVM_LIBRARY_DIR}")
 
-install(TARGETS wvmcc RUNTIME DESTINATION bin)
+install(TARGETS wvmcc RUNTIME DESTINATION bin COMPONENT programs)
 
 # ============================================
 # Runtime (libc) — M2-18
