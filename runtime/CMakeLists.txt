@@ -73,5 +73,5 @@ add_custom_command(
 add_custom_target(runtime ALL DEPENDS ${RUNTIME_LIB_DIR}/libc.a)
 
 # Install rules — flat layout under share/wvmcc/.
-install(DIRECTORY include/ DESTINATION share/wvmcc/include)
-install(FILES ${RUNTIME_LIB_DIR}/libc.a DESTINATION share/wvmcc/lib)
+install(DIRECTORY include/ DESTINATION share/wvmcc/include COMPONENT sysroot)
+install(FILES ${RUNTIME_LIB_DIR}/libc.a DESTINATION share/wvmcc/lib COMPONENT sysroot)
