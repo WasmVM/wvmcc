@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(wvmcc VERSION 0.0.1)
+project(wvmcc VERSION 1.0.0)
 set(PROJECT_ROOT ${CMAKE_CURRENT_LIST_DIR})
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED 11)
@@ -35,6 +35,7 @@ add_executable(wvmcc ${WVMCC_SOURCES})
 target_include_directories(wvmcc PRIVATE ${WASMVM_INCLUDE_DIR})
 target_link_directories(wvmcc PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc PRIVATE ${WASMVM_LIBRARY})
+target_compile_definitions(wvmcc PRIVATE WVMCC_VERSION="${PROJECT_VERSION}")
 
 install(TARGETS wvmcc RUNTIME DESTINATION bin)
 
@@ -136,3 +137,7 @@ add_custom_target(check-partial
     USES_TERMINAL
     VERBATIM
     COMMENT "status-partial tests (informational; never fails — a PASS here is a promotion candidate)...")
+# ============================================
+# Packaging (CPack) — see RELEASING.md
+# ============================================
+include(${CMAKE_CURRENT_LIST_DIR}/cmake/pack.cmake)

@@ -1,6 +1,7 @@
 .vscode/
 build-*/
 build/
+packages/
 install/
 .devcontainer
 .DS_Store

@@ -1,0 +1,155 @@
+name: Package release
+
+# Release process (see RELEASING.md): tagging is ad hoc and decided by the
+# maintainer. Fast-forwarding the `release` branch to the tagged commit
+# triggers this workflow, which packages, smoke-tests the packaged artifact,
+# and publishes a GitHub Release whose body is RELEASE.md (first line = tag).
+# A workflow_dispatch from any other branch is a dry run: it builds and
+# smoke-tests the packages but the publish job is skipped.
+on:
+  push:
+    branches: [ "release" ]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install build tools
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y cmake ninja-build build-essential
+
+    - name: Install WasmVM
+      uses: WasmVM/install-action@main
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        dev: true
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ github.workspace }}/build
+        -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX=/usr/local
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ github.workspace }}/build --config Release --parallel
+
+    - name: Pack
+      run: |
+        cd ${{ github.workspace }}/build
+        cpack -G DEB -C Release
+        cpack -G TGZ -C Release
+
+    - name: Store packages as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: linux
+        path: |
+          ${{ github.workspace }}/packages/*.deb
+          ${{ github.workspace }}/packages/*.tar.gz
+
+  package-macos:
+    runs-on: macos-latest
+    timeout-minutes: 45
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install build tools
+      run: brew install ninja || true
+
+    - name: Install WasmVM
+      uses: WasmVM/install-action@main
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        dev: true
+
+    - name: Configure CMake
+      run: >
+        cmake -B ${{ github.workspace }}/build
+        -G Ninja
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX=/usr/local
+        -S ${{ github.workspace }}
+
+    - name: Build
+      run: cmake --build ${{ github.workspace }}/build --config Release --parallel
+
+    - name: Pack
+      run: |
+        cd ${{ github.workspace }}/build
+        cpack -G productbuild -C Release
+        cpack -G TGZ -C Release
+
+    - name: Store packages as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: macos
+        path: |
+          ${{ github.workspace }}/packages/*.pkg
+          ${{ github.workspace }}/packages/*.tar.gz
+
+  # End-to-end gate on the PACKAGED artifact (not the build tree): install the
+  # freshly built .deb alongside the released wasmvm .deb, then compile and run
+  # the README hello-world. This is the issue #33 acceptance criterion enforced
+  # per release.
+  smoke-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [package-linux]
+    steps:
+    - name: Download wvmcc package
+      uses: actions/download-artifact@v4
+      with:
+        name: linux
+
+    - name: Download latest released WasmVM .deb
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: gh release download --repo WasmVM/WasmVM --pattern 'wasmvm_*.deb'
+
+    - name: Install packages
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ./wasmvm_*.deb
+        sudo apt-get install -y ./wvmcc_*.deb
+
+    - name: Compile and run hello world
+      run: |
+        printf '#include <stdio.h>\nint main(void){ printf("hello, world\\n"); return 0; }\n' > hello.c
+        wvmcc hello.c -o hello.wasm
+        out=$(wasmvm hello.wasm)
+        echo "output: $out"
+        test "$out" = "hello, world"
+
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [package-linux, package-macos, smoke-linux]
+    # Publish only from the release branch — a workflow_dispatch elsewhere is a
+    # packaging dry run.
+    if: github.ref == 'refs/heads/release'
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+      - uses: WasmVM/release-action@master
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          assets: |-
+            *.deb
+            *.pkg
+            *.tar.gz
