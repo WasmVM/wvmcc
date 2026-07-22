@@ -21,6 +21,11 @@
 #include "../link/ArchiveReader.hpp"
 #include "Sysroot.hpp"
 
+// Injected by CMake from project(wvmcc VERSION …); fallback for non-CMake builds.
+#ifndef WVMCC_VERSION
+#define WVMCC_VERSION "unknown"
+#endif
+
 static bool write_module_to_file(const WasmVM::WasmModule& module,
                                  const std::string& path,
                                  const wvmcc::codegen::ModuleCodegen* cg = nullptr) {
@@ -76,6 +81,7 @@ void showHelp() {
                  "                  Resolved in order: --sysroot > WVMCC_SYSROOT >\n"
                  "                  dirname(argv[0])/../share/wvmcc\n"
                  "  --ast           Dump a simple AST (XML) to stdout\n"
+                 "  --version       Print the wvmcc version and exit\n"
                  "  -h, --help      Show this help\n"
               << std::endl;
 }
@@ -116,6 +122,10 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
         std::string arg = argv[i];
         if (arg == "--help" || arg == "-h") {
             showHelp();
+            return 0;
+        }
+        if (arg == "--version") {
+            std::cout << "wvmcc " << WVMCC_VERSION << std::endl;
             return 0;
         }
         if (arg == "--ast") {
