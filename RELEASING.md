@@ -64,6 +64,15 @@ git push github origin/master:refs/heads/release  # triggers .github/workflows/p
 publishes the GitHub Release with `RELEASE.md` as its body. A `workflow_dispatch` from any other
 branch is a dry run (package + smoke only, no publish).
 
+> **Windows。** `cmake/pack.cmake` 已含 NSIS 設定，可在 Windows 上以本機 `cpack` 打包；但
+> wvmcc 尚無 Windows CI（從未在 MSVC 驗證過），因此發佈管線不產出 Windows 安裝檔。待
+> Windows 組建於 CI 驗證後，再於 `pack.yml` 加入 NSIS 工作。
+>
+> **Windows.** `cmake/pack.cmake` carries the NSIS settings, so a local `cpack` on Windows can
+> build an installer; but wvmcc has no Windows CI (never verified under MSVC), so the release
+> pipeline publishes no Windows installer. Add an NSIS job to `pack.yml` only after a Windows
+> build is CI-verified.
+
 ### 5. 驗證 Verify
 
 - [ ] `gh release view vX.Y.Z --repo WasmVM/wvmcc` 列出 `.deb` / `.pkg` / `.tar.gz` 資產。
