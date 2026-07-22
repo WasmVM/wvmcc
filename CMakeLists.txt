@@ -36,6 +36,10 @@ target_include_directories(wvmcc PRIVATE ${WASMVM_INCLUDE_DIR})
 target_link_directories(wvmcc PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc PRIVATE ${WASMVM_LIBRARY})
 target_compile_definitions(wvmcc PRIVATE WVMCC_VERSION="${PROJECT_VERSION}")
+# The installed binary must still find the WasmVM shared library (its
+# install_name is @rpath/libWasmVM.dylib on macOS) — keep the lib dir as an
+# RPATH after install stripping.
+set_target_properties(wvmcc PROPERTIES INSTALL_RPATH "${WASMVM_LIBRARY_DIR}")
 
 install(TARGETS wvmcc RUNTIME DESTINATION bin)
 

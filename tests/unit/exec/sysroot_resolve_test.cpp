@@ -72,6 +72,20 @@ int main() {
                "tier 3: install-relative path resolves to share/wvmcc");
     }
 
+    // Tier 3: a bare argv[0] (PATH-invoked) must NOT resolve against the CWD —
+    // it is resolved to the real executable path (self-exe or PATH search), so
+    // the result is an absolute install-relative path ending in share/wvmcc.
+    {
+        SysrootEnv env;
+        env.argv0 = "wvmcc";
+        auto got = resolveSysroot(env);
+        EXPECT(got.has_value(), "tier 3 (bare argv0): produces a path");
+        EXPECT(got && fs::path(*got).is_absolute(),
+               "tier 3 (bare argv0): path is absolute, not CWD-relative");
+        EXPECT(got && got->find("share/wvmcc") != std::string::npos,
+               "tier 3 (bare argv0): path ends in share/wvmcc");
+    }
+
     // Tier 4: no inputs → no sysroot.
     {
         SysrootEnv env;

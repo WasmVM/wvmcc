@@ -17,7 +17,10 @@ struct SysrootEnv {
 // 4-tier resolution, first hit wins:
 //   1. `--sysroot=<path>` CLI flag
 //   2. `WVMCC_SYSROOT` environment variable
-//   3. `dirname(realpath(argv[0]))/../share/wvmcc` (install-relative)
+//   3. `dirname(realpath(argv[0]))/../share/wvmcc` (install-relative). A bare
+//      argv[0] (no directory component — a PATH-invoked `wvmcc`) is first
+//      resolved to the real executable path via the OS (/proc/self/exe or
+//      _NSGetExecutablePath), falling back to a PATH search.
 //   4. Unset
 //
 // Returns std::nullopt only on tier 4. Tiers 1–3 return the raw path even if
