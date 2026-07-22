@@ -35,14 +35,13 @@ endfunction()
 # --- §7.10 <limits.h> / §7.20 <stdint.h> / §7.18 <stdbool.h> ---
 # These cover the integer-constant-MACRO rows (values, #if-usability).
 #
-# Scope limits of this first batch:
+# Scope notes (both former blockers are resolved):
 #  - Type-WIDTH / signedness / alignment rows (sizeof/_Alignof/casts in an ICE)
-#    are blocked on #81 (wvmcc's _Static_assert evaluator rejects them). That
-#    excludes all of <stddef.h>'s static-assert rows for now, plus the width
-#    checks in <stdint.h>/<stdbool.h> — they land once #81 is fixed.
+#    were blocked on #81 (fixed) — the width checks in <stddef.h>/<stdint.h>/
+#    <stdbool.h> are live in the generated scaffold.
 #  - §7.7 <float.h>, §7.9 <iso646.h>, §7.15 <stdalign.h>, §7.23 <stdnoreturn.h>
-#    are freestanding-required (4p6) but not yet present in runtime/include;
-#    their rows stay `partial` until the headers exist.
+#    (freestanding-required, 4p6) are now in runtime/include; their rows are
+#    `supported` and materialized in scaffold/libc.cmake.
 add_standard_static_assert(libc-limits  ${CMAKE_CURRENT_SOURCE_DIR}/libc/limits.c)
 add_standard_static_assert(libc-stdint  ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdint.c)
 add_standard_static_assert(libc-stdbool ${CMAKE_CURRENT_SOURCE_DIR}/libc/stdbool.c)
@@ -120,7 +119,7 @@ function(add_standard_run_test2 name src1 src2)
 endfunction()
 
 # §7.4 <ctype.h> — static-inline classification/mapping; no libc TU, so robust
-# on WasmVM. (isblank is absent from runtime/include/ctype.h → deferred.)
+# on WasmVM. (isblank is registered by the generated scaffold.)
 foreach(fn isdigit isalpha isalnum isupper islower isxdigit isspace
            iscntrl isprint isgraph ispunct tolower toupper)
     add_standard_run_test(libc-ctype-${fn} ${CMAKE_CURRENT_SOURCE_DIR}/libc/ctype/${fn}.c)

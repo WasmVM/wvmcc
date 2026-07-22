@@ -11,9 +11,10 @@ Schema: **ID · Spec § · Entity · Kind · Test case · Category · Status · 
 > (roughly) freestanding-first order so the compile-time-verifiable surface comes first.
 
 > **Reality checks (from materializing the suite — `tests/standard/`).**
-> - **`<float.h>`, `<iso646.h>`, `<stdalign.h>`, `<stdnoreturn.h>` are not yet present in
->   `runtime/include`** (freestanding-required per 4p6) — their rows are `deferred` until the headers
->   land, flagged per section.
+> - **`<float.h>`, `<iso646.h>`, `<stdalign.h>`, `<stdnoreturn.h>` are now present in
+>   `runtime/include`** (freestanding-required per 4p6) and exercised by
+>   `tests/standard/language/4_conformance/4_freestanding_headers.c` plus per-header rows —
+>   their rows are `supported`.
 > - **`sizeof`/`_Alignof`/casts in `_Static_assert` now evaluate** (the wvmcc ICE-evaluator gap,
 >   **#81**, was fixed) — so type-width/alignment/signedness `static-assert` rows are live and
 >   verified, including the `<stddef.h>` size rows.
@@ -35,8 +36,8 @@ Characteristics of floating types. All macros are `obj-macro` constant expressio
 ones are `#if`-usable. Values follow IEEE-754 binary32/binary64 with `long double` aliased to
 `double` (`docs/spec.md`). See also 5.2.4.2.2.
 
-> ⚠ **Not yet provided by `runtime/include`** (freestanding-required, 4p6). Every row below is
-> effectively **`deferred`** until `<float.h>` lands; the listed Status is the intended end state.
+> `<float.h>` is provided by `runtime/include` (freestanding-required, 4p6); the rows below are
+> live and materialized under `tests/standard/libc/float/`.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
@@ -60,7 +61,7 @@ Alternative spellings — eleven object-like macros for operator tokens.
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-iso646-and-01` | 7.9p1 | and / and_eq / bitand / bitor / compl / not / not_eq / or / or_eq / xor / xor_eq | obj-macro | Each expands to its operator (`and`→`&&`, `bitand`→`&`, `compl`→`~`, …) | Positive | deferred | static-assert | **not yet in `runtime/include`** (freestanding-required, 4p6) |
+| `LIBC-iso646-and-01` | 7.9p1 | and / and_eq / bitand / bitor / compl / not / not_eq / or / or_eq / xor / xor_eq | obj-macro | Each expands to its operator (`and`→`&&`, `bitand`→`&`, `compl`→`~`, …) | Positive | supported | static-assert | header in `runtime/include`; all eleven spellings asserted |
 
 ## `<limits.h>` (7.10)
 
@@ -81,14 +82,14 @@ Sizes of integer types — all `obj-macro` ICEs. Values follow wvmcc's LP64 mode
 
 ## `<stdalign.h>` (7.15)
 
-> ⚠ **Not yet provided by `runtime/include`** (freestanding-required, 4p6); rows below are `deferred`
-> until the header lands. (`_Alignas`/`_Alignof` keywords work; `_Alignof` in an ICE now evaluates too — #81 is fixed.)
+> `<stdalign.h>` is provided by `runtime/include` (freestanding-required, 4p6); rows below are live.
+> (`_Alignas`/`_Alignof` keywords work; `_Alignof` in an ICE evaluates too — #81 is fixed.)
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdalign-alignas-01` | 7.15p2 | alignas | obj-macro | Expands to `_Alignas` | Positive | deferred | static-assert | header absent; runtime over-alignment partial |
-| `LIBC-stdalign-alignof-01` | 7.15p2 | alignof | obj-macro | Expands to `_Alignof` | Positive | deferred | static-assert | header absent (the `_Alignof`-in-ICE side, #81, is fixed) |
-| `LIBC-stdalign-defined-01` | 7.15p3 | __alignas_is_defined / __alignof_is_defined | obj-macro | Each defined as `1` | Positive | deferred | static-assert | header absent |
+| `LIBC-stdalign-alignas-01` | 7.15p2 | alignas | obj-macro | Expands to `_Alignas` | Positive | supported | static-assert | header in `runtime/include`; runtime over-alignment still partial |
+| `LIBC-stdalign-alignof-01` | 7.15p2 | alignof | obj-macro | Expands to `_Alignof` | Positive | supported | static-assert | header in `runtime/include` (the `_Alignof`-in-ICE side, #81, is fixed) |
+| `LIBC-stdalign-defined-01` | 7.15p3 | __alignas_is_defined / __alignof_is_defined | obj-macro | Each defined as `1` | Positive | supported | static-assert | header in `runtime/include` |
 
 ## `<stdarg.h>` (7.16)
 
@@ -141,7 +142,7 @@ LP64 (`docs/spec.md`).
 
 | ID | Spec § | Entity | Kind | Test case | Category | Status | Verify | Notes |
 |---|---|---|---|---|---|---|---|---|
-| `LIBC-stdnoreturn-noreturn-01` | 7.23p1 | noreturn | obj-macro | Expands to `_Noreturn`; a `noreturn` function does not return | Positive | deferred | exit | **`<stdnoreturn.h>` not yet in `runtime/include`** (the `_Noreturn` keyword itself works, emitting trailing `unreachable`); freestanding-required (4p6) |
+| `LIBC-stdnoreturn-noreturn-01` | 7.23p1 | noreturn | obj-macro | Expands to `_Noreturn`; a `noreturn` function does not return | Positive | supported | exit | header in `runtime/include` (freestanding-required, 4p6); `_Noreturn` emits trailing `unreachable` |
 
 ## `<assert.h>` (7.2)
 
@@ -260,12 +261,12 @@ Classification/mapping functions over the "C" locale; the argument must be repre
 | `LIBC-stdio-vprintf-01` | 7.21.6.8–7.21.6.14 | vprintf / vfprintf / vsprintf / vsnprintf | fn | `va_list` formatted-output variants | Positive | supported | stdout | |
 | `LIBC-stdio-scanf-01` | 7.21.6.2,7.21.6.4,7.21.6.7 | scanf / fscanf / sscanf | fn | Formatted input | Positive | deferred | none | scanf family not implemented |
 | `LIBC-stdio-fopen-01` | 7.21.5.3 | fopen | fn | Opens a file in a given mode | Positive | supported | exit | via `sys_fs.open` |
-| `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-fclose-01` | 7.21.5.1 | fclose | fn | Flushes and closes a stream | Positive | supported | exit | implemented in `runtime/src/stdio_core.c` |
 | `LIBC-stdio-freopen-01` | 7.21.5.4 | freopen | fn | Reassociates a stream with a new file | Positive | supported | exit | |
 | `LIBC-stdio-fflush-01` | 7.21.5.2 | fflush | fn | Flushes buffered output | Positive | supported | stdout | |
 | `LIBC-stdio-setvbuf-01` | 7.21.5.5,7.21.5.6 | setvbuf / setbuf | fn | Sets stream buffering mode | Positive | supported | stdout | |
-| `LIBC-stdio-fread-01` | 7.21.8.1 | fread | fn | Reads up to `nmemb` elements | Positive | supported | exit | entity undeclared — not yet implemented |
-| `LIBC-stdio-fwrite-01` | 7.21.8.2 | fwrite | fn | Writes `nmemb` elements | Positive | supported | exit | entity undeclared — not yet implemented |
+| `LIBC-stdio-fread-01` | 7.21.8.1 | fread | fn | Reads up to `nmemb` elements | Positive | supported | exit | implemented in `runtime/src/stdio_core.c` |
+| `LIBC-stdio-fwrite-01` | 7.21.8.2 | fwrite | fn | Writes `nmemb` elements | Positive | supported | exit | implemented in `runtime/src/stdio_core.c` |
 | `LIBC-stdio-fgetc-01` | 7.21.7 | fgetc / getc / getchar / ungetc | fn | Character input | Positive | supported | exit | |
 | `LIBC-stdio-fputc-01` | 7.21.7 | fputc / putc / putchar | fn | Character output | Positive | supported | stdout | |
 | `LIBC-stdio-fgets-01` | 7.21.7.2 | fgets | fn | Reads a line (bounded) | Positive | supported | exit | |
