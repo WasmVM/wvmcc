@@ -2,7 +2,9 @@
 #
 # Generators used by .github/workflows/pack.yml:
 #   Linux:  DEB + TGZ        macOS:  productbuild + TGZ
-# wvmcc is not built on Windows, so there is no NSIS branch.
+# Windows (NSIS) is configured below for LOCAL `cpack` use only — wvmcc has no
+# Windows CI yet, so no packaging job publishes a Windows installer until a
+# Windows build is verified (see the discussion in RELEASING.md).
 #
 # Packages carry bin/wvmcc plus the share/wvmcc sysroot (headers + libc.a).
 # wvmcc links the WasmVM *shared* library, and running its output needs the
@@ -16,10 +18,21 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY
 set(CPACK_PACKAGE_HOMEPAGE_URL "https://github.com/WasmVM/wvmcc")
 set(CPACK_VERBATIM_VARIABLES True)
 set(CPACK_OUTPUT_FILE_PREFIX ${PROJECT_ROOT}/packages)
-# Unix-only: install into CMAKE_INSTALL_PREFIX (e.g. /usr/local) rather than a
-# staged per-package prefix, matching WasmVM's packages.
-set(CPACK_SET_DESTDIR ON)
 set(CPACK_THREADS 0)
+
+if(WIN32 AND NOT UNIX)
+    # NSIS installer: staged install dir, uninstall-first, PATH entry so
+    # `wvmcc` resolves its sysroot via dirname(argv[0])/../share/wvmcc.
+    set(CPACK_SET_DESTDIR OFF)
+    set(CPACK_NSIS_PACKAGE_NAME wvmcc)
+    set(CPACK_NSIS_MODIFY_PATH ON)
+    set(CPACK_NSIS_ENABLE_UNINSTALL_BEFORE_INSTALL ON)
+    set(CPACK_PACKAGE_INSTALL_DIRECTORY wvmcc)
+else()
+    # Unix: install into CMAKE_INSTALL_PREFIX (e.g. /usr/local) rather than a
+    # staged per-package prefix, matching WasmVM's packages.
+    set(CPACK_SET_DESTDIR ON)
+endif()
 
 # Debian
 set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Luis Hsu")
