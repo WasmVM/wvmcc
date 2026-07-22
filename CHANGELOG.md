@@ -3,7 +3,7 @@
 版本紀錄依 `RELEASING.md` 的流程維護；日期於發佈 MR 時標上。
 Maintained per `RELEASING.md`; dates are stamped in the release MR.
 
-## v1.0.0 — (unreleased)
+## v1.0.0 — 2026-07-22
 
 首個正式發佈：完整的 C17 → WasmVM 工具鏈。
 First release: the complete C17 → WasmVM toolchain.
