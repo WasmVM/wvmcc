@@ -2330,10 +2330,13 @@ void FunctionCodegen::emitListInitializer(int baseAddrLocal,
             } else { // struct / union
                 for (const auto& member : t->su->members) {
                     for (const auto& sd : member.declarators) {
-                        if (!sd.declarator || sd.declarator->id.name.empty()) continue;
+                        // declaratorName, not `id.name`: an array or pointer
+                        // member keeps its identifier in an inner declarator.
+                        const std::string mname = declaratorName(sd.declarator);
+                        if (mname.empty()) continue;
                         if (ci >= init->clauses.size() || stop(init->clauses[ci])) return;
-                        size_t foff = typeMap_.getFieldOffset(t, sd.declarator->id.name);
-                        auto ft = typeMap_.getFieldType(t, sd.declarator->id.name);
+                        size_t foff = typeMap_.getFieldOffset(t, mname);
+                        auto ft = typeMap_.getFieldType(t, mname);
                         fillLeaves(ft, off + foff, ci);
                         if (t->kind == TypeNode::Kind::Union) return; // one member only
                     }
@@ -2342,12 +2345,17 @@ void FunctionCodegen::emitListInitializer(int baseAddrLocal,
         };
 
     if ((type->kind == TypeNode::Kind::Struct || type->kind == TypeNode::Kind::Union) && type->su) {
-        // Field names in declaration order.
+        // Field names in declaration order. `declaratorName` walks to the
+        // identifier: reading `sd.declarator->id.name` finds only *Identifier*
+        // declarators, so every array and pointer member would be missing from
+        // this list, and the cursor below would run off the end of `fields` and
+        // silently drop its initializer.
         std::vector<std::string> fields;
         for (const auto& member : type->su->members)
             for (const auto& sd : member.declarators) {
-                if (!sd.declarator || sd.declarator->id.name.empty()) continue;
-                fields.push_back(sd.declarator->id.name);
+                const std::string mname = declaratorName(sd.declarator);
+                if (mname.empty()) continue;
+                fields.push_back(mname);
             }
 
         // Clause-driven forward pass with a field cursor (6.7.9p17-p19): a
@@ -2900,36 +2908,20 @@ void FunctionCodegen::emitStructCopyToHiddenPtr(const wvmcc::parser::ExprPtr& sr
     int srcAddrLocal = allocRawLocal(WasmVM::ValueType::i64);
     emit(WasmVM::Instr::Local_set{(WasmVM::index_t)srcAddrLocal});
 
-    // Field-by-field copy from the source struct to the hidden sret buffer.
-    // The caller always allocates that buffer in its own shadow stack and
-    // passes an untagged mem[1] frame offset (see the call-site sret setup), so
-    // both the load and the store target mem[1]. (Storing to mem[0] wrote the
-    // struct to the wrong memory — LANG-6.7.9-08.)
-    for (const auto& member : returnTypeNode_->su->members) {
-        for (const auto& sd : member.declarators) {
-            if (!sd.declarator || sd.declarator->id.name.empty()) continue;
-            const std::string& fieldName = sd.declarator->id.name;
-            auto fieldType = typeMap_.getFieldType(returnTypeNode_, fieldName);
-            if (!fieldType) continue;
-            size_t fieldOff = typeMap_.getFieldOffset(returnTypeNode_, fieldName);
-
-            // dst = hidden_ptr + fieldOff
-            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)hiddenRetPtrLocal_});
-            if (fieldOff > 0) {
-                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
-                emit(WasmVM::Instr::I64_add{});
-            }
-            // value = load field from src (shadow stack, mem[1])
-            emit(WasmVM::Instr::Local_get{(WasmVM::index_t)srcAddrLocal});
-            if (fieldOff > 0) {
-                emit(WasmVM::Instr::I64_const{(WasmVM::i64_t)fieldOff});
-                emit(WasmVM::Instr::I64_add{});
-            }
-            emit(typeMap_.makeLoad(fieldType, 1));
-            // store to hidden sret buffer (mem[1] shadow stack)
-            emit(typeMap_.makeStore(fieldType, 1));
-        }
-    }
+    // Copy the source struct into the hidden sret buffer. The caller always
+    // allocates that buffer in its own shadow stack and passes an untagged
+    // mem[1] frame offset (see the call-site sret setup), so both sides are
+    // mem[1]. (Storing to mem[0] wrote the struct to the wrong memory —
+    // LANG-6.7.9-08.)
+    //
+    // Bytewise, not field-by-field: a field-by-field copy has to pick a
+    // load/store width per member, which only exists for *scalar* members. An
+    // array or nested-struct member has no scalar width, so it copied just its
+    // leading chunk and dropped the rest. Copying the object's bytes is both
+    // correct for every member type and simpler, and padding coming along is
+    // harmless.
+    emitBytewiseCopy(hiddenRetPtrLocal_, /*dstMemidx=*/1, srcAddrLocal, /*srcMemidx=*/1,
+                     typeMap_.byteSize(returnTypeNode_));
 }
 
 void FunctionCodegen::emitBytewiseCopy(int dstAddrLocal, uint8_t dstMemidx,

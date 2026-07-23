@@ -327,7 +327,7 @@ BitFieldInfo TypeMap::getFieldBitInfo(const wvmcc::parser::TypeNodePtr& type, co
 // Walk a declarator chain to its Identifier node, returning the declared
 // name (empty if none). The parser builds the chain outer→inner as
 //   [trailing-suffix(Array/Function)] → Identifier → [leading `*`s]
-static std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl) {
+std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl) {
     for (auto cur = decl; cur; cur = (cur->inner.has_value() ? *cur->inner : nullptr)) {
         if (cur->kind == wvmcc::parser::Declarator::Kind::Identifier
             || (!cur->id.name.empty()))

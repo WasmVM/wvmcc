@@ -9,6 +9,17 @@ namespace wvmcc::parser { class Semantic; }
 
 namespace wvmcc::codegen {
 
+// The declared name of a struct/union member, or "" if it has none (an
+// anonymous member, or an abstract declarator).
+//
+// Not interchangeable with `decl->id.name`: only an *Identifier* declarator
+// carries the name at its top level. `int arr[2]` and `int *p` are Array and
+// Pointer declarators wrapping the identifier, so their top-level `id.name` is
+// empty and the name must be found by walking `inner`. Reading `id.name`
+// directly therefore silently skips exactly the members whose type is
+// interesting -- see the note on the struct-member loops in FunctionCodegen.
+std::string declaratorName(const wvmcc::parser::DeclaratorPtr& decl);
+
 class TypeMap {
 public:
     // Optional semantic context used to resolve typedef-name member types
