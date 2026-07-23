@@ -86,5 +86,25 @@ int main(void) {
     if (r.len != 1) return 15;
     if (r.arr[0] != 7 || r.arr[1] != 8 || r.arr[2] != 9) return 16;
 
+    /* The address of a LOCAL inside a brace list. Each target local below has
+     * its address taken only here, on purpose: the address-taken pre-pass once
+     * skipped list initializers entirely, so such a local never reached the
+     * frame and the emitted address-of failed module validation. Any other
+     * `&same_local` in the function would mask that. */
+    int la = 5;
+    struct WithPointer wp = {1, &la};             /* positional     */
+    if (wp.len != 1 || *wp.p != 5) return 17;
+
+    int lb = 6;
+    struct WithPointer wd = {.p = &lb};           /* designated     */
+    if (*wd.p != 6) return 18;
+
+    int lc = 7, ld = 8;
+    int *pa[2] = {&lc, &ld};                      /* array of ptrs  */
+    if (*pa[0] != 7 || *pa[1] != 8) return 19;
+
+    la = 50;                                      /* through the stored ptr */
+    if (*wp.p != 50) return 20;
+
     return 0;
 }

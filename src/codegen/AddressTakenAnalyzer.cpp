@@ -31,12 +31,13 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::BlockItemPtr& item, std::un
     std::visit([&](const auto& variantItem) {
         using T = std::decay_t<decltype(variantItem)>;
         if constexpr (std::is_same_v<T, wvmcc::parser::DeclarationPtr>) {
-            // Walk the initializer expression so that &var inside it is detected
+            // Walk the initializer so that &var inside it is detected. Both
+            // kinds: `int *p = &v;` is an Expr initializer, but &v appears in
+            // List initializers just as legally -- `struct S s = { &v, 7 };`,
+            // `int *a[2] = { &v };` -- and skipping those left v out of the
+            // frame, so the emitted address-of failed module validation.
             if (variantItem && variantItem->initializer) {
-                const auto& init = *variantItem->initializer;
-                if (init && init->kind == wvmcc::parser::Initializer::Kind::Expr && init->expr) {
-                    walk(init->expr, addressTakenNames);
-                }
+                walkInitializer(*variantItem->initializer, addressTakenNames);
             }
         } else if constexpr (std::is_same_v<T, wvmcc::parser::StmtPtr>) {
             walk(variantItem, addressTakenNames);
@@ -166,7 +167,41 @@ void AddressTakenAnalyzer::walk(const wvmcc::parser::ExprPtr& expr, std::unorder
         walk(castExpr.expr, addressTakenNames);
     }
     else if (expr->kind == wvmcc::parser::Expr::Kind::CompoundLiteral) {
-        // compound literals don't introduce new address-taken variables
+        // The literal's initializer list is evaluated like any other, so
+        // `(struct S){ &v }` takes v's address.
+        const auto& cl = static_cast<const wvmcc::parser::CompoundLiteral&>(*expr);
+        walkInitializer(cl.init, addressTakenNames);
+    }
+    // Handle conditional expressions: both arms (and the condition) evaluate
+    // in address contexts -- `p = c ? &v : &w;` takes both addresses.
+    else if (expr->kind == wvmcc::parser::Expr::Kind::Ternary) {
+        const auto& ternary = static_cast<const wvmcc::parser::TernaryExpr&>(*expr);
+        walk(ternary.cond, addressTakenNames);
+        walk(ternary.thenExpr, addressTakenNames);
+        walk(ternary.elseExpr, addressTakenNames);
+    }
+}
+
+void AddressTakenAnalyzer::walkInitializer(const wvmcc::parser::InitializerPtr& init, std::unordered_set<std::string>& addressTakenNames) {
+    if (!init) {
+        return;
+    }
+    if (init->kind == wvmcc::parser::Initializer::Kind::Expr) {
+        if (init->expr) {
+            walk(init->expr, addressTakenNames);
+        }
+        return;
+    }
+    // List: visit every clause, recursing into nested lists. Designator index
+    // expressions are constant expressions today, but walking them costs
+    // nothing and stays correct if that ever loosens.
+    for (const auto& clause : init->clauses) {
+        for (const auto& designator : clause.designators) {
+            if (designator.index) {
+                walk(*designator.index, addressTakenNames);
+            }
+        }
+        walkInitializer(clause.init, addressTakenNames);
     }
 }
 

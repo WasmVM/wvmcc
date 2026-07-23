@@ -41,5 +41,16 @@ int main(void)
         if (*(int *)(0 ? (void *)p : (void *)q) != 9) return 8;
     }
 
+    /* & applied directly in the operands, to locals whose address is taken
+     * nowhere else: the address-taken pre-pass once had no Ternary case, so
+     * these locals never reached the frame. The variables above
+     * don't cover this -- their addresses were taken in scalar initializers,
+     * which the pre-pass always understood. */
+    {
+        int m = 11, n = 22, c = 1;
+        if (*(c ? &m : &n) != 11) return 20;
+        if (*(!c ? &m : &n) != 22) return 21;
+    }
+
     return 0;
 }

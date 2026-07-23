@@ -18,6 +18,10 @@ private:
     void walk(const wvmcc::parser::BlockItemPtr& item, std::unordered_set<std::string>& addressTakenNames);
     void walk(const wvmcc::parser::StmtPtr& stmt, std::unordered_set<std::string>& addressTakenNames);
     void walk(const wvmcc::parser::ExprPtr& expr, std::unordered_set<std::string>& addressTakenNames);
+    // Walk an initializer of either kind: an Expr initializer's expression, or
+    // every clause of a List initializer, recursively. This is what lets
+    // `struct S s = { &v, 7 };` mark v as address-taken.
+    void walkInitializer(const wvmcc::parser::InitializerPtr& init, std::unordered_set<std::string>& addressTakenNames);
 };
 
 } // namespace wvmcc::codegen

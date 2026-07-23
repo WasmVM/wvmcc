@@ -23,5 +23,18 @@ int main(void)
     /* Member access on the unnamed object. */
     if ((struct point){ .x = 5, .y = 6 }.y != 6) return 5;
 
+    /* &local inside the literal's initializer list, the local's address taken
+     * nowhere else: the address-taken pre-pass once treated compound literals
+     * as introducing nothing, so the local never reached the frame
+     *. */
+    {
+        int v = 31;
+        struct wrap { int *p; };
+        struct wrap w = (struct wrap){ &v };
+        if (*w.p != 31) return 30;
+        v = 32;
+        if (*w.p != 32) return 31;
+    }
+
     return 0;
 }
