@@ -138,28 +138,26 @@ std::optional<WasmVM::index_t> findExportedFunc(const WasmVM::WasmModule& m,
 void synthesize(LinkContext& ctx) {
     auto& m = ctx.output;
 
-    if (ctx.opts.no_stdlib) {
-        // -nostdlib: skip crt0. The user is responsible for providing
-        // runtime state and a start function. Just leave the module as-is.
-        return;
-    }
-
-    auto mainInfo = findMain(m);
-    if (!mainInfo) {
-        ctx.error("link: no exported 'main' function found "
-                  "(use -nostdlib if you don't need crt0)");
-        return;
-    }
-
-    // #79: prefer terminating through libc `exit`, so returning from main runs
-    // atexit handlers (including stdio's self-registered flush) exactly like an
-    // explicit exit() call. The lazy-pull phase seeds `exit` for executables, so
-    // it is present whenever libc is linked. Fall back to the direct
-    // `__stdio_exit` flush when there is no libc exit (e.g. -nostdlib images).
-    // Both are captured pre-shift (like main) so the +kSysProcCount adjustment
-    // applies after the sys_proc imports renumber the function index space.
-    auto exitInfo  = findExportedFunc(m, "exit");
-    auto flushInfo = exitInfo ? std::nullopt : findExportedFunc(m, "__stdio_exit");
+    // This function does two separable jobs, and `-nostdlib` opts out of only
+    // the second one:
+    //
+    //   1-2. Materialise runtime state: drop the `env.__*` mem/global imports
+    //        and define them locally. **Every linkable module needs this**, and
+    //        no program can do it for itself -- there is no way to define
+    //        `mem[0]` from C. `env.__*` is this compiler's internal declaration
+    //        mechanism (docs/codegen.md), consumed by the link step, never an
+    //        interface an embedder is meant to satisfy.
+    //   3-4. The process ABI: the `sys_proc` imports and a start wrapper that
+    //        calls `main` and forwards to `sys_proc.exit`. **This is what
+    //        `-nostdlib` means** -- no libc, no `main`, the host provides the
+    //        environment.
+    //
+    // The opt-out used to sit at the top of this function and skipped all four,
+    // so a `-nostdlib` module came out with no memories at all and four
+    // unresolvable `env.__*` imports. Nothing provides those: they are not a
+    // host module, and adding one would be worse than the bug, since
+    // `__stack_pointer` is a *mutable global* and sharing it would give two
+    // unrelated modules one stack pointer.
 
     // ----- 1. Drop env.__* imports of mem/global kind. They'll be
     //          replaced by local definitions at the same index positions.
@@ -268,6 +266,38 @@ void synthesize(LinkContext& ctx) {
                 m.mems[0].min = (decltype(m.mems[0].min))pages;
         }
     }
+
+    // ===== The `-nostdlib` boundary =====
+    //
+    // Everything above materialises runtime state; everything below is the
+    // process ABI. The cut is **here** rather than at the "step 3" comment
+    // because the `main`-export removal just below is not part of step 2: it
+    // exists only so the start wrapper's own export does not collide, and
+    // running it without the wrapper would strip a `-nostdlib` module's `main`
+    // export and give nothing back.
+    if (ctx.opts.no_stdlib) {
+        return;
+    }
+
+    auto mainInfo = findMain(m);
+    if (!mainInfo) {
+        ctx.error("link: no exported 'main' function found "
+                  "(use -nostdlib if you don't need crt0)");
+        return;
+    }
+
+    // #79: prefer terminating through libc `exit`, so returning from main runs
+    // atexit handlers (including stdio's self-registered flush) exactly like an
+    // explicit exit() call. The lazy-pull phase seeds `exit` for executables, so
+    // it is present whenever libc is linked. Fall back to the direct
+    // `__stdio_exit` flush when there is no libc exit.
+    //
+    // Captured **after** steps 1-2 and still pre-shift: those steps touch
+    // memories, globals and imports of mem/global kind, none of which move a
+    // function index. The `+kSysProcCount` adjustment below is what accounts
+    // for the shift, and it must be the only one.
+    auto exitInfo  = findExportedFunc(m, "exit");
+    auto flushInfo = exitInfo ? std::nullopt : findExportedFunc(m, "__stdio_exit");
 
     // The codegen-side "main" export served as our hint to find main —
     // remove it now so the start wrapper's own "main" export doesn't
