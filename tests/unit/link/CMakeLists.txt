@@ -45,3 +45,10 @@ target_include_directories(wvmcc-crt0-nostdlib-test PRIVATE
 target_link_directories(wvmcc-crt0-nostdlib-test PRIVATE ${WASMVM_LIBRARY_DIR})
 target_link_libraries(wvmcc-crt0-nostdlib-test PRIVATE ${WASMVM_LIBRARY})
 add_test(NAME crt0-nostdlib COMMAND wvmcc-crt0-nostdlib-test)
+
+add_executable(wvmcc-import-module-test import_module_test.cpp ${LINK_SRCS})
+target_include_directories(wvmcc-import-module-test PRIVATE
+    ${SRC_ROOT} ${WASMVM_INCLUDE_DIR})
+target_link_directories(wvmcc-import-module-test PRIVATE ${WASMVM_LIBRARY_DIR})
+target_link_libraries(wvmcc-import-module-test PRIVATE ${WASMVM_LIBRARY})
+add_test(NAME import-module COMMAND wvmcc-import-module-test)

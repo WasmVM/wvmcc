@@ -11,8 +11,21 @@ namespace wvmcc::link::resolve {
 namespace {
 
 // Host runtime imports we always leave alone — they're satisfied at
-// instantiation time by wasmvm's host glue, not by any linked TU.
+// instantiation time by the host glue, not by any linked TU. The built-in
+// pair is wasmvm's own sysenv; an embedder adds its own via --import-module
+// which arrives in LinkOptions::import_modules.
 const std::unordered_set<std::string> kHostModules = {"sys_proc", "sys_fs"};
+
+// A module is host-provided if it is one of the built-ins or the embedder
+// declared it for this link. Both call sites that used to test kHostModules
+// directly go through here so the flag reaches every one of them.
+bool isHostModule(const std::string& module, const LinkOptions& opts) {
+    if (kHostModules.count(module) > 0) return true;
+    for (const std::string& m : opts.import_modules) {
+        if (m == module) return true;
+    }
+    return false;
+}
 
 void rewriteConstInstr(WasmVM::ConstInstr& c,
                        const std::vector<WasmVM::index_t>& funcRemap) {
@@ -56,7 +69,7 @@ void resolveGlobalImports(LinkContext& ctx) {
     for (const auto& imp : m.imports) {
         if (std::holds_alternative<WasmVM::GlobalType>(imp.desc)) {
             auto it = globalExport.find(imp.name);
-            const bool isHost = kHostModules.count(imp.module) > 0;
+            const bool isHost = isHostModule(imp.module, ctx.opts);
             const bool resolve = !isHost && it != globalExport.end();
             if (resolve) {
                 isResolved.push_back(true);
@@ -127,8 +140,8 @@ const std::unordered_set<std::string> kEnvRuntimeState = {
     "__heap_base", "__indirect_function_table",
 };
 
-bool isRuntimeImport(const WasmVM::WasmImport& imp) {
-    if (kHostModules.count(imp.module) > 0) return true;
+bool isRuntimeImport(const WasmVM::WasmImport& imp, const LinkOptions& opts) {
+    if (isHostModule(imp.module, opts)) return true;
     if (imp.module == "env" && kEnvRuntimeState.count(imp.name) > 0) return true;
     return false;
 }
@@ -177,7 +190,7 @@ void pruneUnreferencedFunctionImports(LinkContext& ctx) {
     for (const auto& imp : m.imports) {
         if (std::holds_alternative<WasmVM::index_t>(imp.desc)) {
             WasmVM::index_t thisIdx = funcImportIdx++;
-            const bool keep = isRuntimeImport(imp) || referenced.count(thisIdx) > 0;
+            const bool keep = isRuntimeImport(imp, ctx.opts) || referenced.count(thisIdx) > 0;
             if (keep) {
                 funcRemap.push_back(newFuncImportIdx++);
                 kept.push_back(imp);
@@ -258,7 +271,7 @@ void pruneUnreferencedGlobalImports(LinkContext& ctx) {
     for (const auto& imp : m.imports) {
         if (std::holds_alternative<WasmVM::GlobalType>(imp.desc)) {
             WasmVM::index_t thisIdx = globalImportIdx++;
-            const bool keep = isRuntimeImport(imp) || referenced.count(thisIdx) > 0;
+            const bool keep = isRuntimeImport(imp, ctx.opts) || referenced.count(thisIdx) > 0;
             if (keep) {
                 globalRemap.push_back(newGlobalImportIdx++);
                 kept.push_back(imp);
@@ -340,7 +353,7 @@ void resolveImports(LinkContext& ctx) {
     for (const auto& imp : m.imports) {
         if (std::holds_alternative<WasmVM::index_t>(imp.desc)) {
             auto it = exportByName.find(imp.name);
-            const bool isHost = kHostModules.count(imp.module) > 0;
+            const bool isHost = isHostModule(imp.module, ctx.opts);
             const bool resolve = !isHost && it != exportByName.end() &&
                                  it->second.desc == WasmVM::WasmExport::DescType::func;
             if (resolve) {

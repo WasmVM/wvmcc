@@ -8,8 +8,18 @@ namespace wvmcc::link::diag {
 namespace {
 
 // Modules whose imports we always accept as unresolved — they're
-// satisfied at instantiation time by the wasmvm host runtime.
+// satisfied at instantiation time by the host runtime. The built-in pair
+// is wasmvm's own sysenv; an embedder adds its own via --import-module
+// carried in LinkOptions::import_modules.
 const std::unordered_set<std::string> kHostModules = {"sys_proc", "sys_fs"};
+
+bool isHostModule(const std::string& module, const LinkOptions& opts) {
+    if (kHostModules.count(module) > 0) return true;
+    for (const std::string& m : opts.import_modules) {
+        if (m == module) return true;
+    }
+    return false;
+}
 
 // Names under `env` that are part of the crt0 contract. In normal link
 // mode crt0 has already replaced these with local definitions; they only
@@ -25,7 +35,7 @@ const std::unordered_set<std::string> kEnvRuntimeState = {
 void emitUnresolvedDiagnostics(LinkContext& ctx) {
     const auto& imports = ctx.output.imports;
     for (const auto& imp : imports) {
-        if (kHostModules.count(imp.module) > 0) continue;
+        if (isHostModule(imp.module, ctx.opts)) continue;
         if (imp.module == "env" && kEnvRuntimeState.count(imp.name) > 0) continue;
 
         // Reach here only for imports M2-L3 didn't resolve — they really are

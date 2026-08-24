@@ -62,6 +62,12 @@ struct LinkOptions {
     // Sysroot is resolved by the driver (M2-J) and passed in for archive
     // lookups. Unused in M2-L1 but stored for forward compatibility.
     std::string sysroot;
+    // --import-module: extra host-import modules this link accepts as
+    // satisfied-at-instantiation, on top of the built-in sys_proc/sys_fs.
+    // An embedder other than wasmvm's own sysenv -- one that ships its own
+    // host modules -- names them here so a multi-TU program that imports from
+    // them links instead of failing on an undefined reference.
+    std::vector<std::string> import_modules;
 };
 
 struct LinkResult {

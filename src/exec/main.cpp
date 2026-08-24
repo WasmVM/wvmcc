@@ -54,6 +54,7 @@ struct CommandLineArgs {
     std::vector<std::string> linkLibraries;      // -l<name>
     std::optional<std::string> sysrootFlag;      // --sysroot=<path>
     std::string mapPath;                         // --map=<path>
+    std::vector<std::string> importModules;      // --import-module=<a,b>
     bool dumpAst = false;
     bool preprocessOnly = false; // -E
     bool compileOnly = false;    // -c
@@ -77,6 +78,9 @@ void showHelp() {
                  "  -ffreestanding  Emit a self-contained module (no linker step)\n"
                  "  -v              Verbose mode (link phase boundaries to stderr)\n"
                  "  --map=<path>    Write a linker map file describing the linked binary\n"
+                 "  --import-module=<a,b>  Accept imports from these host modules as\n"
+                 "                  satisfied at instantiation (repeatable, comma-separated;\n"
+                 "                  in addition to the built-in sys_proc, sys_fs)\n"
                  "  --sysroot=<dir> Override sysroot path (also: --sysroot <dir>)\n"
                  "                  Resolved in order: --sysroot > WVMCC_SYSROOT >\n"
                  "                  dirname(argv[0])/../share/wvmcc\n"
@@ -155,6 +159,40 @@ int parseCommandLine(int argc, char** argv, CommandLineArgs& args) {
         if (arg.rfind("--map=", 0) == 0) {
             args.mapPath = arg.substr(std::string("--map=").size());
             continue;
+        }
+        // --import-module=<a,b,...> or --import-module <a,b,...>: extend the
+        // host-import allow-list. Repeatable; each occurrence may carry
+        // a comma-separated list, so `--import-module=a,b` and
+        // `--import-module=a --import-module=b` are equivalent.
+        {
+            std::string list;
+            bool matched = false;
+            if (arg.rfind("--import-module=", 0) == 0) {
+                list = arg.substr(std::string("--import-module=").size());
+                matched = true;
+            } else if (arg == "--import-module") {
+                if (i + 1 < argc) {
+                    list = argv[++i];
+                    matched = true;
+                } else {
+                    std::cerr << "error: --import-module requires a module name\n";
+                    return 2;
+                }
+            }
+            if (matched) {
+                std::size_t start = 0;
+                while (start <= list.size()) {
+                    std::size_t comma = list.find(',', start);
+                    std::string name = list.substr(
+                        start, comma == std::string::npos ? std::string::npos : comma - start);
+                    if (!name.empty()) {
+                        args.importModules.push_back(name);
+                    }
+                    if (comma == std::string::npos) break;
+                    start = comma + 1;
+                }
+                continue;
+            }
         }
         if (arg == "-o") {
             if (!parseOutputPath(i, argc, argv, args.outPath)) {
@@ -665,6 +703,7 @@ int main(int argc, char** argv) {
     linkOpts.verbose = args.verbose;
     linkOpts.no_stdlib = args.noStdLib;
     linkOpts.map_path = args.mapPath;
+    linkOpts.import_modules = args.importModules;
     if (sysroot) linkOpts.sysroot = *sysroot;
 
     std::vector<wvmcc::link::LinkInput> linkInputs;
