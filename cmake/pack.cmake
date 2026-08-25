@@ -4,7 +4,7 @@
 #   Linux:  DEB + TGZ        macOS:  productbuild + TGZ
 # Windows (NSIS) is configured below for LOCAL `cpack` use only — wvmcc has no
 # Windows CI yet, so no packaging job publishes a Windows installer until a
-# Windows build is verified (see the discussion in RELEASING.md).
+# Windows build is verified (see the release runbook in the project wiki).
 #
 # Packages carry bin/wvmcc plus the share/wvmcc sysroot (headers + libc.a).
 # wvmcc links the WasmVM *shared* library, and running its output needs the

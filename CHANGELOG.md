@@ -1,7 +1,7 @@
 # Changelog
 
-版本紀錄依 `RELEASING.md` 的流程維護；日期於發佈 MR 時標上。
-Maintained per `RELEASING.md`; dates are stamped in the release MR.
+版本紀錄依專案 wiki 的發佈流程維護；日期於發佈 MR 時標上。
+Maintained per the release runbook in the project wiki; dates are stamped in the release MR.
 
 ## v1.0.0 — 2026-07-22
 

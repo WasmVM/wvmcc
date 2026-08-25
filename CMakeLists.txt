@@ -142,6 +142,6 @@ add_custom_target(check-partial
     VERBATIM
     COMMENT "status-partial tests (informational; never fails — a PASS here is a promotion candidate)...")
 # ============================================
-# Packaging (CPack) — see RELEASING.md
+# Packaging (CPack) — see the release runbook in the project wiki
 # ============================================
 include(${CMAKE_CURRENT_LIST_DIR}/cmake/pack.cmake)

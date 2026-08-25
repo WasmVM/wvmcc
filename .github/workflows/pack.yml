@@ -1,6 +1,6 @@
 name: Package release
 
-# Release process (see RELEASING.md): tagging is ad hoc and decided by the
+# Release process (see the release runbook in the project wiki): tagging is ad hoc and decided by the
 # maintainer. Fast-forwarding the `release` branch to the tagged commit
 # triggers this workflow, which packages, smoke-tests the packaged artifact,
 # and publishes a GitHub Release whose body is RELEASE.md (first line = tag).
