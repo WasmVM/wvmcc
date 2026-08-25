@@ -190,7 +190,7 @@ if (auto err = WasmVM::module_validate(module)) {
 ${SRC_ROOT}/codegen/*.cpp
 ```
 
-WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (pointing to `/Users/luishsu/Desktop/WasmVM/src/include/`).
+WasmVM headers are already on the include path via `WASMVM_INCLUDE_DIR` (the WasmVM checkout's `src/include/`).
 
 ---
 
