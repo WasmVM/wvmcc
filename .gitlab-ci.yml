@@ -67,7 +67,7 @@ default:
         echo "WasmVM not cached — building '$WASMVM_REF' from source"
         rm -rf /tmp/wasmvm-src
         git clone --depth=1 --branch "$WASMVM_REF" \
-          "https://gitlab-ci-token:${CI_JOB_TOKEN}@git.luishsu.me/wasmvm/wasmvm.git" \
+          "https://gitlab-ci-token:${CI_JOB_TOKEN}@${CI_SERVER_HOST}/wasmvm/wasmvm.git" \
           /tmp/wasmvm-src
         cmake -S /tmp/wasmvm-src -B /tmp/wasmvm-src/build -G Ninja \
           -DCMAKE_BUILD_TYPE=Release -DDEV_BUILD=ON \
